@@ -1,0 +1,78 @@
+{
+  "entries": [
+    {
+      "id": "start",
+      "title": "Start in camp",
+      "body": "Sign in with Google to create one gladiator. Choose a name, a look, a class, and starting attributes. You can move the camp camera and open a gladiator’s profile by selecting their character or name. Visitors can explore the camp without signing in."
+    },
+    {
+      "id": "schedule",
+      "title": "Your daily schedule",
+      "body": "Open Schedule, choose one activity for morning, afternoon, and evening, and save the whole day. Each slot lasts 80 minutes in real time, so a game day takes four hours. Your schedule repeats while you’re away. Edits apply to slots that haven’t started. Dungeons run in the afternoon and Arena bouts run in the evening."
+    },
+    {
+      "id": "stamina",
+      "title": "Stamina and Rest",
+      "body": "Activities use stamina. Rest restores it, and Schedule shows the expected recovery. If your gladiator cannot afford an activity, that slot becomes Rest. Heavy gear can raise stamina costs and make your gladiator less effective in combat. Check your load and capacity before planning a busy day."
+    },
+    {
+      "id": "training",
+      "title": "Training and leveling",
+      "body": "Training earns attribute points up to your current level’s Training limit. You can complete two Training sessions per game day. A third becomes Rest. Expeditions and dungeons award XP, which raises your level and unlocks harder content and more gear. Spend earned points in My gladiator → Plan a build."
+    },
+    {
+      "id": "attributes",
+      "title": "Classes and attributes",
+      "body": "Berserkers favor Strength, Guardians favor Vitality and Endurance, and Duelists favor Agility and Precision. Any class can use any weapon it meets the requirements for.\n\nStrength increases damage. Agility shortens the time between attacks and makes you harder to hit. Vitality raises maximum health. Endurance increases maximum stamina and gear capacity. Precision increases your chances to hit and to land a critical hit. Your class and the points in an active build are fixed."
+    },
+    {
+      "id": "combat",
+      "title": "Combat, dodge, and critical hits",
+      "body": "Fights play automatically using your build. Offensive stance deals more damage and takes more damage. Defensive stance deals less and takes less. Balanced has no stance adjustment.\n\nAttack speed is shown as the time between attacks. A shorter interval is faster. Your weapon sets the base interval, Agility shortens it, and overload slows it. Accuracy depends on your Precision and the defender’s Agility, so the chance of a dodge depends on the matchup. Critical is the chance per landed hit. A critical hit deals extra damage. Hover, focus, or tap a stat or attribute on a profile to see its help."
+    },
+    {
+      "id": "gear",
+      "title": "Gear and builds",
+      "body": "Equip a weapon, off-hand item, headgear, body armor, and footwear. A two-handed weapon uses both hands. Use Wear in Inventory and shops to change gear, or plan gear, stance, and points together in My gladiator. The pending build shows when the changes take effect. Armor reduces damage from landed hits. Raise Endurance or wear lighter gear if you’re over capacity."
+    },
+    {
+      "id": "expeditions",
+      "title": "Expeditions and rewards",
+      "body": "Pick an Expedition in Schedule. A successful Woodland Path run (level 1) pays 30 XP and 4 gold. Ruined Outpost (level 5) pays 75 XP and 10 gold. Mountain Pass (level 10) pays 150 XP and 18 gold. A successful run can also bring back salvage and gear. A defeat ends the trip without expedition rewards. Use the camp button to watch a trip live or replay it from the start."
+    },
+    {
+      "id": "dungeons",
+      "title": "Party dungeons",
+      "body": "Choose Dungeon in the afternoon. Wolf Den opens at level 3, Raider Stronghold at level 7, and Troll Hall at level 12. Entry costs 40 base stamina. The game automatically groups up to three players going to the same dungeon. Eligible Ludus Nimbus bots fill open seats after players, and hired fighters fill the rest.\n\nEach run has three rooms and a boss. Health carries across fights. You keep the rewards for fights you took part in and your party won, even if the boss wins. Defeat the boss to open a chest. Higher-level gladiators can earn reduced rewards in easier dungeons. Watch the run live or replay it from Results."
+    },
+    {
+      "id": "arena",
+      "title": "Arena and renown",
+      "body": "Choose Arena for the evening to fight automatically in your league. Rated bouts against other players can raise or lower your rating. Renown is a separate currency earned through competition. Bouts against NPCs and Ludus Nimbus bots are unranked. Check Arena for recent opponents and Results → My bouts for your own record."
+    },
+    {
+      "id": "tournaments",
+      "title": "Tournaments and seasons",
+      "body": "Tournaments run on Wednesdays and Saturdays at 18:40 UTC. Set your evening slot to Arena and enable automatic entry before the cutoff. A single-elimination bracket needs at least two entrants in your league. A formed bracket costs no stamina. If no bracket forms, the regular Arena costs still apply. Seasons last four weeks. Check the Tournaments and standings panels for prizes and timing."
+    },
+    {
+      "id": "economy",
+      "title": "Shops and Marketplace",
+      "body": "Spend gold on standard gear and Marketplace purchases. Spend renown at the renown shop on Arena rewards. Sell salvage to a merchant for 4 gold each. The Marketplace lists eligible player gear at fixed prices. Equipped, reserved, and bound items can’t be listed."
+    },
+    {
+      "id": "titles",
+      "title": "Titles and profiles",
+      "body": "My gladiator shows earned titles and progress toward locked titles. You can wear one title at a time or remove it for free. New titles can also appear in Notifications or with a result. Other players see your worn title with your name in camp, profiles, and fights."
+    },
+    {
+      "id": "results",
+      "title": "Results, replays, and messages",
+      "body": "Open Results to review expeditions, dungeon runs, and fights. My bouts shows your Arena and tournament replays and lets you filter by wins or losses. You can pause or speed up a replay, choose when to reveal its result, and advance to the next bout. Notifications report your rewards and link to kept replays. Messages carries patch notes, and Patch history lists earlier updates."
+    }
+  ],
+  "videos": [
+    null,
+    null
+  ]
+}

@@ -1,0 +1,74 @@
+{
+  "entries": [
+    {
+      "id": "parties",
+      "title": "Choose your dungeon party",
+      "body": "Invite the teammates you want for a specific dungeon run. Eligible players who accept can enter together. Automatic grouping will still be available."
+    },
+    {
+      "id": "friends",
+      "title": "Friends and friend requests",
+      "body": "Send and respond to friend requests, and keep a friends list. This is planned as a standalone social update."
+    },
+    {
+      "id": "items",
+      "title": "Pixel-art inventory and equipment",
+      "body": "Browse a square grid of recognizable swords, spears, shields, armor, and other items. See worn gear in equipment slots. Preview an item’s attributes, bonuses, and weight before switching it with hover, keyboard focus, or tap."
+    },
+    {
+      "id": "menus",
+      "title": "More room in menus",
+      "body": "Give menus more space on desktop and add small previous and next arrows to move between sections. Keep the controls usable on phones."
+    },
+    {
+      "id": "progression-cap",
+      "title": "Level and attribute caps",
+      "body": "The planned maximum is level 20 and 100 total base points across the five attributes. Gear and class bonuses are applied separately. Each existing character will get one optional free respec with the cap update."
+    },
+    {
+      "id": "forge",
+      "title": "Weapon upgrades",
+      "body": "Use salvage and materials such as copper, iron, and gold to upgrade weapons at a forge. Recipes and material sources are still in design."
+    },
+    {
+      "id": "gear-balance",
+      "title": "Gear bonuses and combat balance",
+      "body": "Give two-handed weapons a clear advantage that can compete with a one-handed weapon and shield. Explore gear weight, stat bonuses, and matching-set effects. Show critical chance, critical damage, and matchup dodge odds more clearly. Compare complete builds in PvP before changing Arena balance."
+    },
+    {
+      "id": "pve-roles",
+      "title": "PvE builds and party roles",
+      "body": "Explore elemental damage and defense for PvE and dungeons, distinct jobs for party members, and role levels that let players progress in a role."
+    },
+    {
+      "id": "expedition-xp",
+      "title": "XP progress and tougher expeditions",
+      "body": "Show an XP progress bar and the XP paid by each expedition in the game. Explore harder high-level expeditions and party challenges, plus The Deep, a planned solo delve."
+    },
+    {
+      "id": "rotations",
+      "title": "Plan several game days ahead",
+      "body": "Build repeating rotations across multiple game days so you can decide when to train, fight, explore, and rest. Unlock requirements are still in design."
+    },
+    {
+      "id": "camp-life",
+      "title": "More life in camp",
+      "body": "Meet more NPCs and select them to open a card with their details. A small rotating crowd is planned behind the Arena spectators every evening. We also plan to add pettable cats, dogs, rabbits, and birds."
+    },
+    {
+      "id": "seasonal",
+      "title": "Events and seasonal camp themes",
+      "body": "Look for timed events and changes to camp for holidays such as Halloween and Christmas."
+    },
+    {
+      "id": "audio",
+      "title": "Music and sound effects",
+      "body": "Adjust music and sound effects separately, with volume and mute controls for each. Settings will be remembered on each device."
+    },
+    {
+      "id": "cosmetics",
+      "title": "Cosmetic companions and gear looks",
+      "body": "The first paid cosmetics planned are a Supporter Banner and an optional pet follower. Later options include weapon and armor dyes and skins. These are appearance items with no combat or progression bonuses."
+    }
+  ]
+}

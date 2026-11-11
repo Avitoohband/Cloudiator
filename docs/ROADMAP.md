@@ -18,7 +18,7 @@ Updated 2026-11-11. Production is **1.8.1**. The later items are grouped by area
 | 1.7.1 | Live | Hand-given Game Master and High Ground titles, visible in the picker for holders. |
 | 1.8 | Live | Party dungeons, hired fighters and the Ludus Nimbus bot team, live viewing, dungeon replays, and four dungeon titles. |
 | 1.8.1 | Live | Clearer attack speed label and help for gladiator stats and attributes. |
-| 1.9 | Release checks | Game Info in camp with a Wiki and public Future Updates. |
+| 1.9 | Release on hold for scope and content review | Game Info in camp with a Wiki and public Future Updates. |
 
 Release details and dates are in the [changelog](CHANGELOG.md).
 
@@ -45,7 +45,7 @@ Release details and dates are in the [changelog](CHANGELOG.md).
 - Cap character level at **20** and the total base attribute budget across all five stats at **100**. Add gear and class bonuses above that budget. Give each existing character one free optional attribute respec with the cap patch. Plan an in-game message with class and attribute guidance and a companion video. The current v2 Training formula would allow 90 at level 20, so the path to the cap and treatment of existing characters need design.
 - Add weapons, armor, attribute requirements, stat bonuses, and set effects. Compare item weights, load and overload, and the relative power of bonuses across complete builds. Give two-handed weapons a useful advantage over one-handed weapon plus shield builds.
 - Upgrade weapons at a forge with salvage and materials such as copper, bronze, iron, gold, and platinum from expeditions and other agreed sources. Design ranks, recipes, and trading.
-- The **Wiki** tab explains all game systems, including stats, class bonuses, stamina, Rest, Training, and combat. Show hit, dodge, critical chance, and critical damage from the active combat rules. It will link to two planned YouTube videos once they are produced. Avi edits pages inside the game, and Codex can edit the same pages through MCP. The editing and publishing workflow still needs design.
+- The **Wiki** tab explains all game systems, including stats, class bonuses, stamina, Rest, Training, and combat. Show hit, dodge, critical chance, and critical damage from the active combat rules. It will link to two planned YouTube videos once they are produced. The in-game editor and draft-only MCP workflow are built for 1.9. The player-facing content is in review.
 - The **Future Updates** tab shows players the plan for future patches. Include patch numbers when decided and give unassigned ideas a place if needed.
 - Add elemental damage and resistance for PvE. Compare PvE sets and role builds with PvP matchups before deciding which bonuses apply in the Arena.
 - Explore difficult quests that improve class bonuses, and future classes including a summoner with spirits or animal spirits.
@@ -63,7 +63,7 @@ Release details and dates are in the [changelog](CHANGELOG.md).
 ### Camp, social, and events
 
 - **Friends — Standalone after 1.6, number open.** Friends list and friend requests.
-- **Dungeon parties — After 1.8 (M32).** Invite chosen teammates for a specific dungeon run and see planned dungeon choices
+- **Dungeon parties — Future, number open.** Invite chosen teammates for a specific dungeon run and see planned dungeon choices
   within the party. Eligible players who accept stay together for that run. Players without a party still group automatically.
   Saving a lineup for reuse is open.
 - Expand the camp after 1.8. Reserve plots for future facilities, add housing, decorations and achievements, and add more NPCs and guards. Include the Champ, a former Arena champion, and clickable or tappable NPC detail cards.

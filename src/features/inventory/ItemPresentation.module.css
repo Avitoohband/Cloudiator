@@ -1,0 +1,36 @@
+.sprite, .fallback {
+  display: inline-grid;
+  flex: none;
+  place-items: center;
+  vertical-align: middle;
+}
+
+.sprite {
+  background-repeat: no-repeat;
+  image-rendering: pixelated;
+}
+
+.fallback {
+  color: var(--muted);
+  font-size: 1.25rem;
+}
+
+.stats {
+  display: grid;
+  gap: 0;
+  margin: 0;
+  font-size: .85rem;
+}
+
+.stats > div {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 8px;
+  padding: 4px 0;
+  border-top: 1px solid var(--line);
+}
+
+.stats dt { color: var(--muted); }
+.stats dd { margin: 0; font-weight: 700; text-align: end; overflow-wrap: anywhere; }
+.stats .weight dt, .stats .weight dd { color: var(--gold); }

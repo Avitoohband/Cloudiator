@@ -152,6 +152,12 @@
       "patch": "1.10"
     },
     {
+      "id": "arena-evenings",
+      "title": "Three Arena bouts an evening",
+      "body": "Each Arena entry will get three bouts in an evening, never against the same opponent twice. You will meet fresh faces first, and NPC or bot fighters fill in when there are not enough players. Rewards are shared across the three bouts, so a full evening pays more than one bout does today.",
+      "patch": "1.10"
+    },
+    {
       "id": "more-content",
       "title": "Higher levels and more content",
       "body": "New expeditions at levels 15, 20, 25, and 30, dungeons at levels 17, 22, and 27, gear for levels 15 to 30, and much more.",

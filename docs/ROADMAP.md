@@ -19,7 +19,7 @@ Updated 2026-11-11. Production is **1.8.1**. Patches 1.9 to 1.11 follow Avi's 20
 | 1.8 | Live | Party dungeons, hired fighters and the Ludus Nimbus bot team, live viewing, dungeon replays, and four dungeon titles. |
 | 1.8.1 | Live | Clearer attack speed label and help for gladiator stats and attributes. |
 | 1.9 | In progress, not released (client only) | Game Info with Wiki and Future Updates, a square pixel-art inventory, shops as an icon grid, search and sort, stacked duplicates with Sell quantity, equip from My gladiator, a gold laurel renown icon, XP bar, stat help, Mark as read, menu pin, name and title toggles, and talking NPCs. |
-| 1.10 | Planned (economy and balance, server) | Salvage, buy back, daily login reward, stamina and health potions, much harder dungeon bosses, and the forge. |
+| 1.10 | Planned (economy and balance, server) | Salvage, buy back, daily login reward, stamina and health potions, much harder dungeon bosses, three Arena bouts an evening with varied opponents, and the forge. |
 | 1.11 | Planned (content) | Expeditions at levels 15, 20, 25 and 30, dungeons at 17, 22 and 27, gear tiers 15-30, and much more content. |
 
 Release details and dates are in the [changelog](CHANGELOG.md).
@@ -58,6 +58,7 @@ Avi's decisions of 2026-11-11. Needs its own spec, migration and mockups.
 - **Daily login reward.** A 7-day streak. Days 1 to 6 pay 10, 10, 15, 15, 20 and 20 gold. Day 7 pays 1 salvage and 2 renown, then it repeats. A missed day restarts at day 1. A Claim button on a Daily reward card works once per game day.
 - **Potions.** Stamina potions give +30 stamina, at most 2 per game day. Health potions get a setting: the gladiator drinks them automatically in fights, or you drink them manually. Avi's wording was unclear, so confirm this in the 1.10 spec.
 - **Harder dungeon bosses.** Tune boss health and damage by offline simulation until a matched full party at the dungeon's level wins about 1 time in 4. Rooms stay unchanged.
+- **Arena evenings.** Each entry gets 3 bouts in an evening, never the same opponent twice in an evening; NPC or bot fill-ins when there are not enough players. Opponents: variety first, preferring opponents you have not fought in the last 3 days while strength stays within today's 2x limit, then nearest strength. Rewards are split so a full evening pays about 1.5x what one bout pays today, with a smaller rating change per bout. Today: one bout per entry, nearest-strength pairing, then fewest pairings in the last 18 slots (`supabase/functions/_shared/domain/arena.ts`).
 - **The forge.** Upgrade weapons with salvage (see the forge line under Combat, gear, and progression).
 
 ## Patch 1.11 details (planned; content)

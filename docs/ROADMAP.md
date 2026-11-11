@@ -18,7 +18,7 @@ Updated 2026-11-11. Production is **1.8.1**. The later items are grouped by area
 | 1.7.1 | Live | Hand-given Game Master and High Ground titles, visible in the picker for holders. |
 | 1.8 | Live | Party dungeons, hired fighters and the Ludus Nimbus bot team, live viewing, dungeon replays, and four dungeon titles. |
 | 1.8.1 | Live | Clearer attack speed label and help for gladiator stats and attributes. |
-| 1.9 | Inventory mockup review, production on hold | Game Info with Wiki and Future Updates, plus a square pixel-art inventory and gear stats and weight in My gladiator. |
+| 1.9 | In development, production on hold | Game Info with Wiki and Future Updates, plus a square pixel-art inventory and gear stats and weight in My gladiator. |
 
 Release details and dates are in the [changelog](CHANGELOG.md).
 
@@ -33,7 +33,7 @@ Release details and dates are in the [changelog](CHANGELOG.md).
 
 ### Inventory, equipment, and menus
 
-- **1.9, in mockup review.** Square inventory grid with recognizable pixel-art items. My gladiator shows stats and weight for worn and replacement gear on hover, focus, or tap.
+- **1.9, in development.** Square inventory grid with recognizable pixel-art items. My gladiator shows stats and weight for worn and replacement gear on hover, focus, or tap.
 - Reuse item icons in shops as a future follow-up.
 - Wider menus with adjustable desktop widths and small previous/next arrows between named sections. Keep the controls usable on phones. Let players pin the menu and choose its screen edge, saved per device.
 - Split character creation into Look, Class, and Attributes steps with Back and Next.

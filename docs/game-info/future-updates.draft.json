@@ -11,11 +11,6 @@
       "body": "Send and respond to friend requests, and keep a friends list. This is planned as a standalone social update."
     },
     {
-      "id": "items",
-      "title": "Pixel-art inventory and equipment",
-      "body": "Browse a square grid of recognizable swords, spears, shields, armor, and other items. See worn gear in equipment slots. Preview an item’s attributes, bonuses, and weight before switching it with hover, keyboard focus, or tap."
-    },
-    {
       "id": "menus",
       "title": "More room in menus",
       "body": "Give menus more space on desktop and add small previous and next arrows to move between sections. Keep the controls usable on phones."

@@ -26,12 +26,14 @@ Project folders under `D:\Avi\Projects\Animation\Cloudiator\`.
 
 **Last video's patch: 1.6.** The 5 Nov film covers all ten 1.6 bullets. Patches 1.7, 1.7.1 and 1.8 are new since.
 
-## 1.9 — Game Info (in progress, not yet released)
+## 1.9 — Game Info and pixel-art inventory (in progress, not yet released)
 
 ### Built
 
 - Open Game Info from camp to read the Wiki, with guides to combat, attributes, stamina, Training, the Arena and dungeons.
 - The Future Updates tab shows the public plans for upcoming patches.
+- Browse a square grid of pixel-art items in Inventory and shops. Select a tile to check its details, wear it, or manage it.
+- In My gladiator, hover, focus, or tap worn gear and replacements to see stats, attribute bonuses, and weight.
 
 ## 1.8.1 — Clearer gladiator stats (2026-11-11)
 

@@ -33,7 +33,7 @@
     {
       "id": "gear",
       "title": "Gear and builds",
-      "body": "Equip a weapon, off-hand item, headgear, body armor, and footwear. A two-handed weapon uses both hands. Use Wear in Inventory and shops to change gear, or plan gear, stance, and points together in My gladiator. The pending build shows when the changes take effect. Armor reduces damage from landed hits. Raise Endurance or wear lighter gear if you’re over capacity."
+      "body": "Equip a weapon, off-hand item, headgear, body armor, and footwear. A two-handed weapon uses both hands. Open Inventory and shops and select an item tile to check its details or use Wear. In My gladiator, hover, focus, or tap equipment to check its stats and weight, or use Plan a build to inspect replacement gear. The pending build shows when changes take effect. Raise Endurance or wear lighter gear if you are over capacity."
     },
     {
       "id": "expeditions",

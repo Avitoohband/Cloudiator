@@ -55,8 +55,8 @@ function useSlotCountdown(clock: DisplayClock, on: boolean) {
  * The thin XP line along the foot of the chip, with no label (Patch 1.9 Task 10; the My gladiator panel says what it is): the XP into the level,
  * and the next expedition's XP as the same hatched ghost segment (gold where it can finish the level). Decorative; the panel's bar is the readout.
  */
-function XpLine({ owner, rules, nowMs }: { owner: OwnerState; rules: Rules; nowMs: number }) {
-  const view = xpView(owner, rules, nowMs);
+function XpLine({ owner, rules, nowMs, location }: { owner: OwnerState; rules: Rules; nowMs: number; location: string | null }) {
+  const view = xpView(owner, rules, nowMs, location);
   return <span className={styles.chipXp} aria-hidden="true" data-testid="chip-xp">
     <i className={styles.chipXpFill} data-testid="chip-xp-fill" style={{ width: `${view.fill * 100}%` }} />
     {view.ghost > 0 && <i className={`${styles.chipXpGhost} ${view.crosses ? styles.chipXpUp : ''}`} data-testid="chip-xp-ghost" data-crosses={view.crosses || undefined} style={{ width: `${view.ghost * 100}%` }} />}
@@ -71,7 +71,7 @@ function Countdown({ seconds, testId = 'chip-countdown' }: { seconds: number; te
   </span>;
 }
 
-export function CornerChip({ viewer, session, owner, fixture, previewAs, clock, messaging, messagesRequest, latestPatch = null, onChangeLook, onOpenMenu, onCreate, titles, rules = RULES_V2 }: {
+export function CornerChip({ viewer, session, owner, fixture, previewAs, clock, messaging, messagesRequest, latestPatch = null, onChangeLook, onOpenMenu, onCreate, titles, rules = RULES_V2, location = null }: {
   viewer: Viewer;
   session: SessionState;
   owner: OwnerState | null;
@@ -92,6 +92,8 @@ export function CornerChip({ viewer, session, owner, fixture, previewAs, clock, 
   titles?: NoticeTitles;
   /** The active rules, for the XP line's next expedition (the shell's `rules`). */
   rules?: Rules;
+  /** The owner's world actor's location, which names a running expedition (null while the world is not loaded). */
+  location?: string | null;
 }) {
   // One popover at a time under the corner controls.
   const [popover, setPopover] = useState<'account' | 'messages' | 'game-info' | null>(null);
@@ -204,7 +206,7 @@ export function CornerChip({ viewer, session, owner, fixture, previewAs, clock, 
             <span className={styles.wide} data-testid="chip-renown" title="Renown"><CurrencyIcon currency="renown" size={14} /> <span className={styles.sr}>Renown </span>{owner.wallets.renown}</span>
             <span className={styles.chipSep} aria-hidden="true">|</span>
             <Countdown seconds={seconds} />
-            <XpLine owner={owner} rules={rules} nowMs={clock.now()} />
+            <XpLine owner={owner} rules={rules} nowMs={clock.now()} location={location} />
           </> : <span>Signed in</span>}
         </button>
         {infoToggle}

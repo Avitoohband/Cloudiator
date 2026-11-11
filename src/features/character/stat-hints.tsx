@@ -65,7 +65,8 @@ export function useStatHints({ buttonClass, tipClass, aboveClass, scrollport = s
       setHint(null);
     };
     const dismissOutside = (event: globalThis.PointerEvent) => {
-      if (event.target instanceof Element && !event.target.closest('[data-profile-stat-help]')) setHint(null);
+      // Only a press inside one of this hook's own rows keeps its tooltip: another hook's row (the panel's, the card's) closes it.
+      if (event.target instanceof Element && event.target.closest('[data-profile-stat-help]')?.getAttribute('data-profile-stat-help') !== hintId) setHint(null);
     };
     document.addEventListener('keydown', dismissOnEscape, true);
     document.addEventListener('pointerdown', dismissOutside, true);
@@ -77,7 +78,7 @@ export function useStatHints({ buttonClass, tipClass, aboveClass, scrollport = s
 
   /** The props of the (positioned) row that holds a label's button and tooltip: hovering it opens the hint. */
   const hintRow = (label: string) => ({
-    'data-profile-stat-help': '',
+    'data-profile-stat-help': hintId,
     onPointerEnter: (event: PointerEvent<HTMLElement>) => {
       if (event.pointerType === 'mouse' && window.matchMedia('(any-hover: hover)').matches) {
         setHint(current => current && (current.label === label || current.source !== 'hover') ? current : { label, source: 'hover' });

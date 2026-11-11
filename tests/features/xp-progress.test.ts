@@ -61,15 +61,54 @@ describe('xpView', () => {
     expect(view.hint).toBe('Next Woodland Path expedition: up to +30 XP · 70 more to Level 2');
   });
 
-  it('a running expedition is "your current expedition", with the reward of its phase', () => {
-    const current = { id: 'a', kind: 'expedition' as const, status: 'active' as const, startsAtMs: 373_248 * SLOT_MS, endsAtMs: 373_249 * SLOT_MS, label: 'Expedition' };
-    const levels = xpView(owner({ level: 5, xp: 440, schedule: { morning: expedition('outpost'), afternoon: expedition('woodland') }, current }), RULES_V2, NOW);
+  const running = { id: 'a', kind: 'expedition' as const, status: 'active' as const, startsAtMs: 373_248 * SLOT_MS, endsAtMs: 373_249 * SLOT_MS, label: 'Expedition' };
+
+  it('a running expedition is "your current expedition", with the reward of where its gladiator is', () => {
+    const levels = xpView(owner({ level: 5, xp: 440, current: running }), RULES_V2, NOW, 'expedition:outpost');
     expect(levels.hint).toBe('Your current expedition (up to +75 XP) can level you up to Level 6');
-    const short = xpView(owner({ level: 5, xp: 0, schedule: { morning: expedition('outpost') }, current }), RULES_V2, NOW);
+    const short = xpView(owner({ level: 5, xp: 0, current: running }), RULES_V2, NOW, 'expedition:outpost');
     expect(short.hint).toBe('Current expedition: up to +75 XP · 425 more to Level 6');
     // A finished one is no longer current: the schedule decides.
-    const done = { ...current, status: 'completed' as const };
-    expect(xpView(owner({ level: 5, xp: 0, schedule: { morning: expedition('outpost') }, current: done }), RULES_V2, NOW + SLOT_MS).hint).toBe('Next expedition: up to +75 XP · 425 more to Level 6');
+    const done = { ...running, status: 'completed' as const };
+    expect(xpView(owner({ level: 5, xp: 0, schedule: { morning: expedition('outpost') }, current: done }), RULES_V2, NOW + SLOT_MS, 'camp').hint).toBe('Next expedition: up to +75 XP · 425 more to Level 6');
+  });
+
+  it('a running phase edited since it began does not change the reward: the world location names the destination', () => {
+    for (const edited of [expedition('woodland'), { kind: 'rest' as const }, { kind: 'training' as const }, { kind: 'arena' as const }]) {
+      const view = xpView(owner({ level: 5, xp: 440, schedule: { morning: edited }, current: running }), RULES_V2, NOW, 'expedition:outpost');
+      expect(view.hint).toBe('Your current expedition (up to +75 XP) can level you up to Level 6');
+    }
+  });
+
+  it('a running expedition whose place is not known yet says so, with no number and no ghost', () => {
+    for (const where of [undefined, null, 'camp', 'expedition:nowhere']) {
+      const view = xpView(owner({ level: 5, xp: 440, schedule: { morning: expedition('outpost') }, current: running }), RULES_V2, NOW, where);
+      expect(view.hint).toBe('Current expedition');
+      expect(view.ghost).toBe(0);
+      expect(view.crosses).toBe(false);
+    }
+  });
+
+  it('an activity that has not started yet is not the current expedition', () => {
+    const queued = { ...running, status: 'queued' as const, startsAtMs: NOW + 60_000, endsAtMs: NOW + SLOT_MS };
+    const view = xpView(owner({ level: 5, xp: 0, schedule: { evening: expedition('outpost') }, current: queued }), RULES_V2, NOW, 'camp');
+    expect(view.hint).toBe('Next expedition: up to +75 XP · 425 more to Level 6');
+  });
+
+  it('the next expedition is the next to run: the phases after the current slot, then the next day', () => {
+    const afternoon = 373_249 * SLOT_MS + 1000; // the day's second part: next to run are the evening, then tomorrow's morning
+    const view = xpView(owner({ level: 10, xp: 0, schedule: { morning: expedition('mountain'), evening: expedition('woodland') } }), RULES_V2, afternoon);
+    expect(view.hint).toBe('Next expedition: up to +30 XP · 970 more to Level 11');
+    // From the evening, tomorrow's morning comes first.
+    const evening = 373_250 * SLOT_MS + 1000;
+    expect(xpView(owner({ level: 10, xp: 0, schedule: { morning: expedition('mountain'), evening: expedition('woodland') } }), RULES_V2, evening).hint)
+      .toBe('Next expedition: up to +150 XP · 850 more to Level 11');
+  });
+
+  it('gives the XP still needed and the level it opens as parts', () => {
+    const view = xpView(owner({ level: 5, xp: 230 }), RULES_V2, NOW);
+    expect(view.leftText).toBe('270 XP');
+    expect(view.nextLevelText).toBe('Level 6');
   });
 
   it('words the active rules\' reward: v1 pays the catalog\'s', () => {

@@ -12,12 +12,14 @@ const production = process.env.PLAYWRIGHT_STATIC === 'true';
 const SLOT_MS = 4_800_000;
 const shotDir = process.env.XP_SHOT_DIR;
 
-async function openLive(page: Page, change: (owner: OwnerState) => void) {
+async function openLive(page: Page, change: (owner: OwnerState) => void, where?: string) {
   const context = page.context();
   await seedSession(context);
   const owner = structuredClone(ownerFixture);
   change(owner);
-  await routeLiveReads(context, { world: { ...worldFixture, revision: 'live-1' }, owner, rulesVersion: 'v2' });
+  // `where` is the owner's world actor's location (`expedition:<id>` while away): it names a running expedition.
+  const world = { ...worldFixture, revision: 'live-1', actors: worldFixture.actors.map(actor => (where ? { ...actor, location: where as typeof actor.location } : actor)) };
+  await routeLiveReads(context, { world, owner, rulesVersion: 'v2' });
   await page.goto('/game/');
   await expectOwnerShown(page, 'Aster');
   return openMenu(page, 'My gladiator');
@@ -83,7 +85,7 @@ test.describe('the XP bar (live)', () => {
     await expect(cornerChip(page).getByTestId('chip-xp-ghost')).not.toHaveAttribute('data-crosses', /.*/);
   });
 
-  test('with nothing scheduled it names the highest expedition the level allows; one running is "your current expedition"', async ({ page }) => {
+  test('with nothing scheduled it names the highest expedition the level allows', async ({ page }) => {
     const menu = await openLive(page, state => { level(state, 5, 440); rest(state); });
     await expect(menu.getByTestId('xp-hint')).toHaveText('Your next Ruined Outpost expedition (up to +75 XP) can level you up to Level 6');
   });
@@ -91,10 +93,19 @@ test.describe('the XP bar (live)', () => {
   test('an expedition running now is "your current expedition"', async ({ page }) => {
     const menu = await openLive(page, state => {
       level(state, 5, 100); rest(state);
-      state.schedule.morning = { kind: 'expedition', expeditionId: 'outpost' };
+      // The running part was edited to Rest after it began: the destination is where the gladiator is, not the schedule.
       state.currentActivity = { id: '9fce3cd5-e831-4a66-8ca1-16b4576b1499', kind: 'expedition', status: 'active', startsAtMs: 373_248 * SLOT_MS, endsAtMs: 373_249 * SLOT_MS, label: 'Expedition' };
-    });
+    }, 'expedition:outpost');
     await expect(menu.getByTestId('xp-hint')).toHaveText('Current expedition: up to +75 XP · 325 more to Level 6');
+  });
+
+  test('a running expedition the world has not placed yet is named with no number and no ghost', async ({ page }) => {
+    const unknown = await openLive(page, state => {
+      level(state, 5, 100); rest(state);
+      state.currentActivity = { id: '9fce3cd5-e831-4a66-8ca1-16b4576b1499', kind: 'expedition', status: 'active', startsAtMs: 373_248 * SLOT_MS, endsAtMs: 373_249 * SLOT_MS, label: 'Expedition' };
+    }, 'camp');
+    await expect(unknown.getByTestId('xp-hint')).toHaveText('Current expedition');
+    await expect(unknown.getByTestId('xp-ghost')).toHaveCount(0);
   });
 
   test('at the maximum level the bar says so and offers no hint', async ({ page }) => {

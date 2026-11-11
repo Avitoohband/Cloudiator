@@ -18,6 +18,9 @@ export type XpView = {
   valueText: string;
   /** "270 XP to Level 6"; empty at the cap. */
   toNextText: string;
+  /** The same in parts: the XP still needed ("270 XP") and the level it opens ("Level 6"); empty at the cap. */
+  leftText: string;
+  nextLevelText: string;
   /** "Each level costs 100 × your level". */
   ruleText: string;
   /** What the next expedition can add, or null (the cap, or nothing to say). */
@@ -35,36 +38,49 @@ const count = (value: number) => value.toLocaleString('en-US');
 const PHASES = RULES_V1.clock.phases;
 const EXPEDITIONS = Object.values(CATALOG_V1.expeditions);
 
-/** The expedition the hint speaks of: the one running now, else the first in the saved schedule, else the highest the level allows. */
-function nextExpedition(owner: Pick<OwnerState, 'progression' | 'schedule' | 'currentActivity'>, nowMs: number):
-  { id: ExpeditionId; kind: 'current' | 'scheduled' | 'highest' } {
-  const scheduled = PHASES.map(phase => owner.schedule[phase]).filter((choice): choice is Extract<ActivityChoice, { kind: 'expedition' }> => choice.kind === 'expedition');
+/** The catalog id of an expedition location ("expedition:outpost"), or null for any other place or an unknown id. */
+function expeditionAt(location: string | null | undefined): ExpeditionId | null {
+  const id = location?.startsWith('expedition:') ? location.slice('expedition:'.length) : null;
+  return id !== null && Object.hasOwn(CATALOG_V1.expeditions, id) ? id as ExpeditionId : null;
+}
+
+/**
+ * The expedition the hint speaks of: the one running now (its destination is the owner's world location, never the schedule, which can be
+ * edited mid-slot; unknown while the world is not loaded), else the next one to run (the phases after the current slot, today's rest and then
+ * tomorrow's, in the order they run), else the highest the level allows.
+ */
+function nextExpedition(owner: Pick<OwnerState, 'progression' | 'schedule' | 'currentActivity'>, nowMs: number, location: string | null | undefined):
+  { id: ExpeditionId | null; kind: 'current' | 'scheduled' | 'highest' } {
   const activity = owner.currentActivity;
-  if (activity?.kind === 'expedition' && activity.status !== 'completed' && nowMs < activity.endsAtMs) {
-    const choice = owner.schedule[PHASES[Math.floor(activity.startsAtMs / RULES_V1.clock.slotMs) % PHASES.length]];
-    // Its own phase names it; a schedule edited since leaves the first scheduled one, then the highest the level allows.
-    const id = choice.kind === 'expedition' ? choice.expeditionId : scheduled[0]?.expeditionId ?? highest(owner.progression.level);
-    return { id, kind: 'current' };
+  if (activity?.kind === 'expedition' && activity.status !== 'completed' && nowMs >= activity.startsAtMs && nowMs < activity.endsAtMs) {
+    return { id: expeditionAt(location), kind: 'current' };
   }
-  if (scheduled.length > 0) return { id: scheduled[0].expeditionId, kind: 'scheduled' };
+  const current = Math.floor(nowMs / RULES_V1.clock.slotMs);
+  for (let ahead = 1; ahead <= PHASES.length; ahead++) {
+    const choice = owner.schedule[PHASES[(current + ahead) % PHASES.length]];
+    if (choice.kind === 'expedition') return { id: choice.expeditionId, kind: 'scheduled' };
+  }
   return { id: highest(owner.progression.level), kind: 'highest' };
 }
 
 const highest = (level: number): ExpeditionId => EXPEDITIONS.filter(e => e.requiredLevel <= level).sort((a, b) => b.requiredLevel - a.requiredLevel)[0].id as ExpeditionId;
 
-export function xpView(owner: Pick<OwnerState, 'progression' | 'schedule' | 'currentActivity'>, rules: Rules, nowMs: number): XpView {
+export function xpView(owner: Pick<OwnerState, 'progression' | 'schedule' | 'currentActivity'>, rules: Rules, nowMs: number, location?: string | null): XpView {
   const { level, xp } = owner.progression;
   const ruleText = `Each level costs ${rules.progression.xpPerCurrentLevel} × your level`;
   const levelText = `Level ${count(level)}`;
   if (level >= RULES_V1.attributes.maximumLevel) {
-    return { max: true, levelText, valueText: 'Max level', toNextText: '', ruleText, hint: null, crosses: false, fill: 1, ghost: 0, xp, need: 0 };
+    return { max: true, levelText, valueText: 'Max level', toNextText: '', leftText: '', nextLevelText: '', ruleText, hint: null, crosses: false, fill: 1, ghost: 0, xp, need: 0 };
   }
   const need = rules.progression.xpPerCurrentLevel * level;
   const left = Math.max(0, need - xp);
-  const base = { max: false, levelText, valueText: `${count(xp)} / ${count(need)} XP`, toNextText: `${count(left)} XP to Level ${count(level + 1)}`, ruleText, xp, need };
+  const base = { max: false, levelText, valueText: `${count(xp)} / ${count(need)} XP`, toNextText: `${count(left)} XP to Level ${count(level + 1)}`,
+    leftText: `${count(left)} XP`, nextLevelText: `Level ${count(level + 1)}`, ruleText, xp, need };
   const fill = Math.min(1, xp / need);
   try {
-    const next = nextExpedition(owner, nowMs);
+    const next = nextExpedition(owner, nowMs, location);
+    // A running expedition whose destination is not known yet is named, never guessed at: no number and no ghost.
+    if (next.id === null) return { ...base, hint: 'Current expedition', crosses: false, fill, ghost: 0 };
     const award = expeditionReward(rules, next.id).xp;
     const reached = applyXp(level, xp, award).level;
     const crosses = reached > level;

@@ -2,7 +2,9 @@ import { describe, expect, it } from 'vitest';
 import type { EquipmentSlot, Stance } from '@contracts/commands';
 import { CATALOG_V1 } from '@domain/catalog-v1';
 import type { PublicBuild, PublicGear } from '../../src/lib/api/reads';
-import { attributeRows, cardStats, gearRows, overloadLine, pointsTotal, recordText, sinceText, statRows } from '../../src/features/character/profile-card';
+import type { OwnerState } from '@contracts/reads';
+import { attributeRows, cardStats, gearRows, overloadLine, ownBuild, pointsTotal, recordText, sinceText, statRows } from '../../src/features/character/profile-card';
+import { ownerFixture } from '../fixtures/domain';
 
 // Task 11c (Patch A spec, "A richer profile card"; Avi approved the mockup, 2026-10-29): the card's words from the public build, computed
 // with the shared rules (deriveStats, makeFighter, criticalProbability), so they are what a fight uses.
@@ -66,5 +68,22 @@ describe('profile card data', () => {
     expect(sinceText(Date.UTC(2026, 9, 9, 20), now, 'UTC')).toBe('9 Oct · 1 day');
     expect(sinceText(Date.UTC(2026, 9, 9, 20), now, 'Asia/Tokyo')).toBe('10 Oct · today');
     expect(sinceText(Date.UTC(2025, 9, 2, 12), Date.UTC(2026, 9, 29, 12), 'UTC')).toBe('2 Oct 2025 · 392 days');
+  });
+});
+
+describe('My gladiator own stats', () => {
+  it('are the profile card numbers for the same worn build', () => {
+    const slots = ['weapon', 'head', 'body'] as const;
+    const owner = structuredClone(ownerFixture) as OwnerState;
+    owner.currentBuild = { ...owner.currentBuild, stance: LUCILLA.stance, allocations: { ...LUCILLA.allocations },
+      equipment: { weapon: 'w', offHand: null, head: 'h', body: 'b', feet: null } };
+    owner.inventory = slots.map((slot, index) => {
+      const worn = LUCILLA.equipment[slot]!;
+      return { ...worn, id: ['w', 'h', 'b'][index], ownerId: owner.gladiatorId, quantity: 1, origin: 'shop' as const, binding: 'tradable' as const, reservation: null };
+    });
+    expect(ownBuild(owner)).toEqual(LUCILLA);
+    expect(cardStats('guardian', ownBuild(owner))).toEqual(cardStats('guardian', LUCILLA));
+    expect(statRows(cardStats('guardian', ownBuild(owner))!)).toEqual([['Health', '197'], ['Damage', '15'], ['Attack speed', 'every 1.13 s'],
+      ['Armor', '12.3 · blocks 25%'], ['Critical', '7% of hits']]);
   });
 });

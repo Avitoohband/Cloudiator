@@ -61,11 +61,10 @@ type Hints = ReturnType<typeof useStatHints>;
  * after the fill (hatched blue, hatched gold where it reaches the end) with the line that says so. The XP is from the saved schedule and the
  * active rules; an expedition pays it only on a win, so the words say "up to".
  */
-function XpBar({ owner, rules, nowMs }: { owner: OwnerState; rules: Rules; nowMs: number }) {
+function XpBar({ owner, rules, nowMs, location }: { owner: OwnerState; rules: Rules; nowMs: number; location: string | null }) {
   const hintId = useId();
-  const view = xpView(owner, rules, nowMs);
+  const view = xpView(owner, rules, nowMs, location);
   const percent = (fraction: number) => `${Math.round(fraction * 10000) / 100}%`;
-  const [leftXp, toLevel] = view.toNextText.split(' to ');
   return (
     <div className={styles.xp} data-testid="xp-block">
       <div className={styles.xpLabel}><span>{view.levelText}</span><span>{view.valueText}</span></div>
@@ -74,7 +73,7 @@ function XpBar({ owner, rules, nowMs }: { owner: OwnerState; rules: Rules; nowMs
         <i className={styles.xpFill} data-testid="xp-fill" style={{ width: percent(view.fill) }} />
         {view.ghost > 0 && <i className={`${styles.xpGhost} ${view.crosses ? styles.xpGhostUp : ''}`} data-testid="xp-ghost" data-crosses={view.crosses || undefined} style={{ width: percent(view.ghost) }} />}
       </div>
-      {!view.max && <p className={styles.xpSub}><span><strong>{leftXp}</strong> to {toLevel}</span><span>{view.ruleText}</span></p>}
+      {!view.max && <p className={styles.xpSub}><span><strong>{view.leftText}</strong> to {view.nextLevelText}</span><span>{view.ruleText}</span></p>}
       {view.hint && <p id={hintId} className={`${styles.xpHint} ${view.crosses ? styles.xpHintUp : ''}`} data-testid="xp-hint"><span className={styles.xpSwatch} aria-hidden="true" />{view.hint}</p>}
     </div>
   );
@@ -110,10 +109,12 @@ function BuildFacts({ owner, hints }: { owner: OwnerState; hints: Hints }) {
   );
 }
 
-function OwnerSummary({ owner, slotIndex, clock, fixture, stale, resting, onRetry, titles, covered, rules, hints }: {
+function OwnerSummary({ owner, slotIndex, clock, fixture, stale, resting, onRetry, titles, covered, rules, location, hints }: {
   owner: OwnerState; slotIndex: number | null; clock: DisplayClock; fixture: boolean; stale: boolean; resting: boolean; onRetry(): void;
   titles?: TitleControls;
   rules: Rules;
+  /** Where the owner's world actor is (`expedition:<id>` while away), which names a running expedition for the XP bar; null when unknown. */
+  location: string | null;
   /** The panel's one set of help tooltips (shared with the Worn equipment's Load). */
   hints: Hints;
   /** A phone's equip sheet is open over the panel: this is hidden under it. */
@@ -158,7 +159,7 @@ function OwnerSummary({ owner, slotIndex, clock, fixture, stale, resting, onRetr
         <span id={staminaId}>{owner.stamina.current} / {owner.stamina.maximum}</span>
       </div>
       <progress className={styles.bar} aria-label="Stamina" aria-describedby={staminaId} value={owner.stamina.current} max={owner.stamina.maximum} />
-      <XpBar owner={owner} rules={rules} nowMs={now} />
+      <XpBar owner={owner} rules={rules} nowMs={now} location={location} />
       <dl className={styles.wallets}><div><dt>Gold</dt><dd>{owner.wallets.money}</dd></div><div><dt>Renown</dt><dd>{owner.wallets.renown}</dd></div></dl>
       <BuildFacts owner={owner} hints={hints} />
     </section>
@@ -166,7 +167,7 @@ function OwnerSummary({ owner, slotIndex, clock, fixture, stale, resting, onRetr
 }
 
 export function CharacterPanel({ viewer, session, owner, ownerError, slotIndex, clock, gateway, fixture, previewAs, previewFailed, refreshOwner, onCreate,
-  resting = false, titles, rules = RULES_V2 }: {
+  resting = false, titles, rules = RULES_V2, location = null }: {
   viewer: Viewer;
   session: SessionState;
   owner: OwnerState | null;
@@ -188,6 +189,8 @@ export function CharacterPanel({ viewer, session, owner, ownerError, slotIndex, 
   resting?: boolean;
   /** The active rules (`displayRules` of the latest revision read's version): the XP an expedition pays is theirs. */
   rules?: Rules;
+  /** The owner's world actor's location (`expedition:<id>` while away), for the XP bar; null while the world is not loaded. */
+  location?: string | null;
 }) {
   const retry = () => { void refreshOwner().catch(() => undefined); };
   // Patch 1.9: a Worn equipment slot opens the equip picker; on a phone it is a sheet over the panel body, and what it covers is hidden.
@@ -197,7 +200,7 @@ export function CharacterPanel({ viewer, session, owner, ownerError, slotIndex, 
   if (owner) {
     return <>
       <OwnerSummary owner={owner} slotIndex={slotIndex} clock={clock} fixture={fixture} stale={ownerError !== null} resting={resting} onRetry={retry}
-        titles={titles} covered={picking} rules={rules} hints={hints} />
+        titles={titles} covered={picking} rules={rules} location={location} hints={hints} />
       <WornEquipment key={`worn-${owner.gladiatorId}`} owner={owner} gateway={gateway} refresh={refreshOwner} clock={clock} preview={fixture} onPicking={setPicking}
         loadHelp={{ row: hints.hintRow('Load'), label: hints.hintLabel('Load', loadHelp, statNumbers.Load), className: styles.loadRow }} />
       <div className={styles.planner} data-covered={picking || undefined}>

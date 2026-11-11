@@ -37,7 +37,7 @@
   overscroll-behavior: contain;
   scrollbar-width: thin;
   scrollbar-color: #746252 #211b1b;
-  padding: 5px;
+  padding: 5px 9px 9px 5px;
   border: 1px solid #55493b;
   border-radius: 9px;
   background: #191719;
@@ -46,7 +46,7 @@
 .grid {
   display: grid;
   grid-template-columns: repeat(6, minmax(0, 1fr));
-  gap: 6px;
+  gap: 7px 9px;
 }
 
 .grid .tile,
@@ -78,7 +78,7 @@
 
 .mark,
 .count,
-.copy {
+.level {
   position: absolute;
   padding: 0 3px;
   border-radius: 3px;
@@ -87,13 +87,16 @@
   font: 700 10px/14px system-ui, sans-serif;
 }
 
-.mark { inset: 2px auto auto 2px; min-width: 14px; text-align: center; }
-.mark[data-gear-badge="wearing"]::before { content: '✓'; }
-.mark[data-gear-badge="wears-from"] { color: #ffe2a6; background: #4b3824; }
-.mark[data-gear-badge="wears-from"]::before { content: '↗'; }
-.mark[data-gear-badge="off-at"]::before { content: '↘'; }
-.count { inset: auto 2px 2px auto; font-variant-numeric: tabular-nums; }
-.copy { inset: auto auto 2px 2px; color: #ede2cf; background: #39312b; }
+/* The tags of a tile (the approved stacks mockup): its level top-left, Worn / Next / Listed top-right, a stack's count bottom-right. */
+.level { inset: 2px auto auto 2px; color: #ede2cf; background: #39312b; }
+.mark { inset: 2px 2px auto auto; font-size: 9px; letter-spacing: .02em; color: #f3e2b3; background: #14120f; }
+.mark[data-mark="worn"] { color: #bdf0cc; background: #1c3a2a; }
+.mark[data-mark="next"] { color: var(--gold); background: #5b4322; }
+.mark[data-mark="listed"] { color: #dccdf2; background: #3a3342; }
+.count { inset: auto 3px 2px auto; color: #f3e2b3; background: #14120f; font-size: 11px; font-variant-numeric: tabular-nums; }
+/* A stack is drawn as layers behind its tile. */
+.grid .tile[data-stack] { box-shadow: 3px 3px 0 -0.5px #4a4036, 6px 6px 0 -1px #2c2620; }
+.grid .tile[data-stack][aria-pressed="true"] { box-shadow: inset 0 0 0 1px var(--gold), 3px 3px 0 -0.5px #4a4036, 6px 6px 0 -1px #2c2620; }
 
 .visuallyHidden {
   position: absolute;
@@ -127,6 +130,23 @@
 .card label { margin-bottom: 8px; }
 .actions { margin-top: 8px; }
 .actions > :first-child:is(:global(.gear-wear), :global(.gear-undo)) { flex-basis: 100%; }
+
+.hint { color: var(--muted); font-size: .78rem !important; }
+
+.sellBox { margin-top: 10px; padding: 9px 10px 10px; border: 1px solid #4a4030; border-radius: 8px; background: #1a1914; }
+.sellBox h4 { margin: 0 0 6px; font-size: .7rem; letter-spacing: .08em; text-transform: uppercase; color: var(--gold); }
+.qtyRow { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 8px; font-size: .85rem; }
+.qtyRow label { display: flex; align-items: center; gap: 8px; margin: 0; }
+.qtyRow input { width: 64px; min-height: 38px; padding: 5px 8px; text-align: center; }
+.of { color: var(--muted); }
+.max { min-height: 34px; padding: 2px 10px; font-size: .8rem; }
+.sellButton { width: 100%; min-height: 44px; padding: 8px 12px; border: 1px solid #ae864a; border-radius: 6px; background: #4b3726; color: var(--gold); font-weight: 700; text-align: center; text-wrap: balance; }
+.sellButton:hover:not(:disabled) { background: #5a4430; }
+.sellButton:disabled { background: #292526; color: #cbbfae; border-color: #655847; }
+.sellNote { min-height: 1.1em; margin: 6px 0 0 !important; font-size: .78rem !important; color: #ffd9a0; }
+.progress { margin-top: 8px; padding: 8px 10px; border: 1px solid #3d5a8a; border-radius: 8px; background: #101a2c; font-size: .85rem; }
+.track { height: 8px; margin-top: 6px; border-radius: 99px; background: #25324b; overflow: hidden; }
+.track i { display: block; height: 100%; border-radius: 99px; background: var(--gold); transition: width .25s; }
 
 @container (max-width: 370px) {
   .grid { grid-template-columns: repeat(5, minmax(0, 1fr)); }

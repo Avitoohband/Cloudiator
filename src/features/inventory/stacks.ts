@@ -17,6 +17,9 @@ export function isStackable(owner: OwnerState, item: ItemInstance): boolean {
     && !owner.pendingBuild?.reservedItemIds.includes(item.id) && wearBadge(owner, item) === null;
 }
 
+/** The kind pieces stack by: the catalog id (which holds the level and the rarity), the level and rarity themselves, and the binding. */
+const stackKind = (item: ItemInstance) => `${item.catalogId}|${item.tier}|${item.rarity}|${item.binding}`;
+
 /**
  * The tiles of `items`: stackable pieces of one kind (the catalog id, which holds the level and the rarity, and the binding) share the
  * tile of the first of them; every other piece is a tile of its own. Tiles keep the order of their first piece.
@@ -25,7 +28,7 @@ export function groupStacks(items: readonly ItemInstance[], canStack: (item: Ite
   const tiles: StackTile[] = [], stacks = new Map<string, StackTile>();
   for (const item of items) {
     if (!canStack(item)) { tiles.push({ key: item.id, items: [item] }); continue; }
-    const kind = `${item.catalogId}|${item.tier}|${item.rarity}|${item.binding}`, stack = stacks.get(kind);
+    const kind = stackKind(item), stack = stacks.get(kind);
     if (stack) stack.items.push(item);
     else { const tile = { key: item.id, items: [item] }; stacks.set(kind, tile); tiles.push(tile); }
   }
@@ -39,4 +42,13 @@ export function groupStacks(items: readonly ItemInstance[], canStack: (item: Ite
 export function stackSaleItems(tile: StackTile, quantity: number): ItemInstance[] {
   if (!Number.isSafeInteger(quantity) || quantity < 1 || quantity > tile.items.length) return [];
   return tile.items.slice(tile.items.length - quantity).reverse();
+}
+
+/**
+ * Whether `item`, once it is free again (an undone wear), goes back into a stack: another free piece of its kind is in the bag. The
+ * Inventory and My gladiator's picker word Undo by it ("Swap undone. Sword is back in the stack.").
+ */
+export function joinsStack(owner: OwnerState, item: ItemInstance): boolean {
+  const kind = stackKind(item);
+  return owner.inventory.some(other => other.id !== item.id && stackKind(other) === kind && isStackable(owner, other));
 }

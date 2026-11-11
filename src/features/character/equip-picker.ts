@@ -56,6 +56,8 @@ export type Comparison = {
   load: (ComparisonRow & { over: boolean; value: number; capacity: number }) | null;
   /** The off-hand piece that comes off with a two-handed weapon, or null. */
   offHandOff: ItemInstance | null;
+  /** The worn off-hand piece that goes back on when a queued two-handed weapon is removed or replaced by a one-handed one, or null. */
+  offHandBack: ItemInstance | null;
   /** The chosen piece uses both hands. */
   twoHanded: boolean;
 };
@@ -89,17 +91,33 @@ export function equipmentLoad(owner: OwnerState, equipment: Equipment): { load: 
   } catch { return null; }
 }
 
+/**
+ * Whether the next slot's build differs from the current one in what the Load heading reads: the gear, or the attribute points (which set
+ * the capacity). The class and points are those a gear command sends (`fixedClassAndPoints`); a stance change alone changes neither.
+ */
+export function nextBuildDiffers(owner: OwnerState): boolean {
+  const pending = owner.pendingBuild?.build, current = owner.currentBuild;
+  if (!pending) return false;
+  const { allocations } = fixedClassAndPoints(pending, current);
+  return GEAR_SLOTS.some(slot => pending.equipment[slot] !== current.equipment[slot])
+    || (Object.keys(current.allocations) as (keyof typeof current.allocations)[]).some(key => allocations[key] !== current.allocations[key]);
+}
+
+/** The operation id of the commands the card only reads the equipment of: they are never sent, so they need no fresh id. */
+const COMPARE_ONLY = 'compare-only';
+
 /** The equipment a gear command leaves for the next slot: a cancel-build goes back to what is worn now. */
 export const commandEquipment = (owner: OwnerState, command: GearCommand): Equipment => (command.kind === 'queue-build' ? { ...command.equipment } : wornNow(owner));
 
 /**
  * The card's comparison of `choice` (a piece, or null for Remove) with what is worn next in `slot`: Damage, Attack interval and (when
  * either uses both hands) Hands for a weapon, Armor for the rest, Weight, the attribute bonuses when either piece has any, then Load
- * against capacity. The gear after it is the equipment of the command Wear (or Remove) sends.
+ * against capacity. The gear after it is the equipment of the command Wear (or Remove) sends, so it names the off-hand piece that comes
+ * off with a two-handed weapon, and the one that goes back on when a queued two-handed weapon gives way.
  */
 export function compareChoice(owner: OwnerState, slot: EquipmentSlot, choice: ItemInstance | null): Comparison {
   const before = nextEquipment(owner), current = owner.inventory.find(item => item.id === before[slot]);
-  const after = commandEquipment(owner, choice ? wearCommand(owner, choice.id) : removeCommand(owner, slot));
+  const after = commandEquipment(owner, choice ? wearCommand(owner, choice.id, COMPARE_ONLY) : removeCommand(owner, slot, COMPARE_ONLY));
   const chosen = choice ?? undefined;
   const value = (item: ItemInstance | undefined, read: (item: ItemInstance) => number) => (item ? read(item) : null);
   const rows: ComparisonRow[] = [];
@@ -117,6 +135,8 @@ export function compareChoice(owner: OwnerState, slot: EquipmentSlot, choice: It
   const was = equipmentLoad(owner, before), will = equipmentLoad(owner, after);
   const load = was && will ? { ...numberRow('Load', was.load, will.load, true), after: `${statText(will.load)} / ${statText(will.capacity)}`,
     over: will.load > will.capacity, value: will.load, capacity: will.capacity } : null;
-  const off = before.offHand && !after.offHand && slot === 'weapon' ? owner.inventory.find(item => item.id === before.offHand) ?? null : null;
-  return { rows, load, offHandOff: off, twoHanded: isTwoHanded(chosen) };
+  const offHand = (id: string | null) => owner.inventory.find(item => item.id === id) ?? null;
+  const off = slot === 'weapon' && before.offHand && !after.offHand ? offHand(before.offHand) : null;
+  const back = slot === 'weapon' && !before.offHand && after.offHand ? offHand(after.offHand) : null;
+  return { rows, load, offHandOff: off, offHandBack: back, twoHanded: isTwoHanded(chosen) };
 }

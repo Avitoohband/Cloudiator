@@ -5,7 +5,13 @@
  * the "At the next slot" box and the outcome line.
  */
 .worn {
+  position: relative;
   min-width: 0;
+}
+
+/* The details box keeps its place under an open picker (nothing below the slots moves); hidden there, as the mockup drops it. */
+.details[data-covered] {
+  visibility: hidden;
 }
 
 .over strong {
@@ -51,10 +57,18 @@
   letter-spacing: .03em;
 }
 
-/* ---- The picker. Desktop: a popover under the slot row; two columns once it is 560 px wide (the panel's wide layout). */
+/*
+ * ---- The picker. Desktop: a popover laid over the panel under the slot row (the approved mockups' `.pop`): absolute in the section, at
+ * its static place right after the slot row, as wide as the row and above what follows, so nothing below it moves; two columns once it is
+ * 560 px wide (the panel's wide layout).
+ */
 .frame {
   container: picker / inline-size;
-  margin-block: 12px .65rem;
+  position: absolute;
+  left: 0;
+  right: 0;
+  z-index: 5;
+  margin-top: 12px;
 }
 
 .picker {
@@ -556,12 +570,18 @@
    with Back, a list that scrolls and a Wear bar that stays at the foot. What it covers is hidden, so neither Tab nor a screen reader
    reaches it. */
 @media (hover: none), (max-width: 480px) {
+  /* Nothing between the sheet and the panel is positioned, so the sheet is placed against the panel itself. */
+  .worn {
+    position: static;
+  }
+
   .worn[data-picking] {
     visibility: hidden;
   }
 
   .frame {
     container-type: normal;
+    position: static;
     margin: 0;
     visibility: visible;
   }

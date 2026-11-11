@@ -1,7 +1,7 @@
 import { expect, it } from 'vitest';
 import type { ItemInstance, OwnerState } from '@contracts/reads';
 import { CATALOG_V1 } from '@domain/catalog-v1';
-import { groupStacks, isStackable, stackSaleItems } from '../../src/features/inventory/stacks';
+import { groupStacks, isStackable, joinsStack, stackSaleItems } from '../../src/features/inventory/stacks';
 import { itemFixture, ownerFixture } from '../fixtures/domain';
 
 // Identical pieces share one tile (Patch 1.9, the approved stacks mockup). Worn, listed, reserved and queued pieces keep their own
@@ -59,4 +59,15 @@ it('sells from the end of the stack, so its first piece stays and the card keeps
   expect(stackSaleItems(tile, 0)).toEqual([]);
   expect(stackSaleItems(tile, 4)).toEqual([]);
   expect(stackSaleItems(tile, 1.5)).toEqual([]);
+});
+
+it('says an undone piece goes back into a stack only when another free piece of its kind is in the bag', () => {
+  const [queued, free, other, bound] = [piece('sword:1:common'), piece('sword:1:common'), piece('sword:1:uncommon'), piece('sword:1:common', { binding: 'bound' })];
+  const state = owner([queued, free, other, bound]);
+  state.pendingBuild = { build: { ...state.currentBuild, version: 2, equipment: { ...state.currentBuild.equipment, weapon: queued.id } }, effectiveSlotIndex: 1,
+    reservedMoney: 0, reservedItemIds: [queued.id], operationId: 'op' };
+  expect(joinsStack(state, queued)).toBe(true);
+  expect(joinsStack(owner([queued, other, bound]), queued)).toBe(false);
+  const reserved = owner([queued, { ...free, reservation: { kind: 'listing', referenceId: 'l' } }]);
+  expect(joinsStack(reserved, queued)).toBe(false);
 });

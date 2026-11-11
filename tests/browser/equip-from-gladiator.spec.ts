@@ -7,7 +7,7 @@ import { CATALOG_V1 } from '../../supabase/functions/_shared/domain/catalog-v1';
 import { SLOT_MS, emptyWorld, isPresence, routeLiveReads } from './live-routes';
 import { openMenu } from './shell-helpers';
 import { slotTime } from './slot-time';
-import { contrastIssues } from './a11y-helpers';
+import { contrastIssues, focusDrops, watchFocus } from './a11y-helpers';
 
 // Patch 1.9 Task 6: equip and swap gear straight from My gladiator's Worn equipment slots (the approved equip-from-gladiator and
 // stacks mockups). A slot opens a picker of the pieces that fit it, one tile per stack; choosing a tile compares it with what is worn
@@ -30,6 +30,8 @@ async function gearFlow(context: BrowserContext, setup: (state: OwnerState) => v
     if (worn) worn.reservation = { kind: 'equipment', referenceId: state.gladiatorId };
   }
   const commands: GameCommand[] = [];
+  /** A refusal the server gives every command until it is cleared (`reject('')`), as the Inventory's spec does. */
+  let code = '';
   const user = { id: randomUUID(), aud: 'authenticated', role: 'authenticated', email: 'equip@example.invalid',
     app_metadata: { provider: 'google', providers: ['google'] }, user_metadata: {}, identities: [], created_at: new Date().toISOString() };
   await context.addInitScript(({ user }) => {
@@ -49,6 +51,7 @@ async function gearFlow(context: BrowserContext, setup: (state: OwnerState) => v
     if (path === '/functions/v1/game-command') {
       const command = request.postDataJSON() as GameCommand; commands.push(command);
       if (command.kind !== 'queue-build' && command.kind !== 'cancel-build') throw new Error(`Unexpected command ${command.kind}`);
+      if (code) return json({ ok: false, code }, 409);
       if (command.expectedVersion !== state.buildVersion) return json({ ok: false, code: 'conflict' }, 409);
       state.buildVersion++;
       if (command.kind === 'queue-build') {
@@ -62,7 +65,7 @@ async function gearFlow(context: BrowserContext, setup: (state: OwnerState) => v
     }
     return route.fallback();
   });
-  return { state, commands };
+  return { state, commands, reject: (value: string) => { code = value; } };
 }
 
 const wornRegion = (menu: Locator) => menu.getByRole('region', { name: 'Worn equipment', exact: true });
@@ -86,7 +89,7 @@ const shotDir = process.env.EQUIP_SHOT_DIR;
 test.describe('equip from My gladiator (live)', () => {
   test.beforeEach(() => { test.skip(process.env.PLAYWRIGHT_STATIC === 'true', 'Live UI uses development-only intercepted identity transport.'); });
 
-  test('a worn slot opens a picker of the pieces that fit, one tile per stack, and Wear, Undo, Remove and Cancel changes queue the Inventory\'s commands', async ({ page, context }, info) => {
+  test('a worn slot opens a picker of the pieces that fit, one tile per stack, and Wear, Undo, Remove and Cancel changes queue the Inventory\'s commands', async ({ page, context, hasTouch }, info) => {
     if (info.project.name === 'mobile') await page.setViewportSize({ width: 360, height: 740 });
     const sword = piece('sword:1:common'), spare1 = piece('sword:1:common'), spare2 = piece('sword:1:common'), uncommon = piece('sword:1:uncommon');
     const high = piece('sword:5:common'), spear = piece('spear:1:common'), bow = piece('bow:1:common', { reservation: listing() });
@@ -167,8 +170,26 @@ test.describe('equip from My gladiator (live)', () => {
     await expect(pendingBox(menu).getByText(/^Gear changes start/)).toHaveText(`Gear changes start at the next slot, ${time}. Anything already running keeps the gear it started with.`);
     await expect(pendingBox(menu).getByRole('button', { name: 'Cancel changes', exact: true })).toBeVisible();
     expect(await contrastIssues(wornRegion(menu))).toEqual([]);
+    // The desktop picker is laid over the panel: opening it moves neither the "At the next slot" box nor the planner, and it covers the
+    // details box under the slot row (the approved mockups' popover). Offsets are read from the section's top, so a scroll does not count.
+    const planner = menu.getByTestId('current-build');
+    const offsets = async () => {
+      const top = await worn.evaluate(element => element.getBoundingClientRect().top);
+      return Promise.all([pendingBox(menu), planner].map(locator => locator.evaluate((element, from) => Math.round(element.getBoundingClientRect().top - from), top)));
+    };
+    const before = hasTouch ? [] : await offsets();
     // The queued piece has its own → tile and Undo; the stack is down to one piece. Escape closes the picker, not the menu.
     await weapon.click();
+    if (!hasTouch) {
+      await expect(dialog).toBeVisible();
+      expect(await offsets()).toEqual(before);
+      const covered = await worn.locator('[role="group"][aria-label="Worn equipment details"]').evaluate(element => {
+        const box = element.getBoundingClientRect(), hit = document.elementFromPoint(box.left + box.width / 2, box.top + 20);
+        return !!hit?.closest('[role="dialog"][aria-label="Change Weapon"]');
+      });
+      expect(covered).toBe(true);
+      if (shotDir) await page.screenshot({ path: `${shotDir}/task-6-fix1-overlay-desktop.png` });
+    }
     await expect(pick(dialog, spare1).locator('[data-mark]')).toHaveText('→');
     await expect(pick(dialog, spare2)).not.toContainText('×');
     await pick(dialog, spare1).click();
@@ -201,7 +222,7 @@ test.describe('equip from My gladiator (live)', () => {
     expect(await menu.evaluate(element => element.scrollWidth <= element.clientWidth)).toBe(true);
   });
 
-  test('a two-handed weapon names the off-hand piece that comes off, blocks the off-hand picker, and Undo brings the shield back', async ({ page, context }, info) => {
+  test('a two-handed weapon names the off-hand piece that comes off, blocks the off-hand picker, and Undo brings the shield back', async ({ page, context, hasTouch }, info) => {
     if (info.project.name === 'mobile') await page.setViewportSize({ width: 360, height: 740 });
     const sword = piece('sword:1:common'), spear = piece('spear:1:common'), shield = piece('round-shield:1:common'), shield2 = piece('round-shield:1:common');
     const armor = piece('light-armor:1:common');
@@ -231,6 +252,16 @@ test.describe('equip from My gladiator (live)', () => {
     await expect(box).toContainText('Next: Spear, level 1 · common');
     await expect(box).toContainText('Next: Empty (two-handed weapon)');
     await expect(box.getByRole('button', { name: 'Undo Off hand change', exact: true })).toHaveCount(0);
+    // Removing the queued spear, or choosing a one-handed weapon instead, brings the worn shield back on: the card says so and counts it.
+    await weapon.click();
+    await dialog.getByRole('button', { name: 'Remove Spear and leave Weapon empty', exact: true }).click();
+    await expect(dialog).toContainText('Round shield goes back on.');
+    await expectRow(dialog, 'Load', ['9', '8 / 24.7', '−1']);
+    await pick(dialog, sword).click();
+    await expect(dialog).toContainText('Round shield goes back on.');
+    await expectRow(dialog, 'Load', ['9', '12 / 24.7', '+3']);
+    await page.keyboard.press('Escape');
+    await expect(dialog).toHaveCount(0);
     // The off-hand picker is blocked while the next weapon is two-handed.
     await offHand.click();
     const hands = picker(menu, 'Off hand');
@@ -252,6 +283,18 @@ test.describe('equip from My gladiator (live)', () => {
     await offHand.click();
     await expect(pick(hands, shield2)).not.toHaveAttribute('data-locked', /.*/);
     await expect(pick(hands, shield).locator('[data-mark]')).toHaveText('✓');
+    await page.keyboard.press('Escape');
+    // A slot with nothing to offer: the focus goes to Back on a phone (the sheet hides the slot) and to the picker on the desktop.
+    const head = slotButton(menu, 'Head');
+    await head.click();
+    const empty = picker(menu, 'Head');
+    await expect(empty).toContainText('You have nothing for this slot.');
+    await expect(empty.locator('[data-tile]')).toHaveCount(0);
+    if (hasTouch) await expect(empty.getByRole('button', { name: 'Back', exact: true })).toBeFocused();
+    else await expect(empty).toBeFocused();
+    await page.keyboard.press('Escape');
+    await expect(empty).toHaveCount(0);
+    await expect(head).toBeFocused();
   });
 
   test('a piece that would overload the gladiator turns Load red and says so, and Wear stays enabled', async ({ page, context }, info) => {
@@ -282,6 +325,84 @@ test.describe('equip from My gladiator (live)', () => {
     const load = wornRegion(menu).getByText(/^Load /);
     await expect(load).toHaveText('Load 29 / 24.7 (next slot)');
     await expect(load.locator('strong')).toHaveCSS('color', 'rgb(255, 169, 156)');
+  });
+
+  test('the Load heading reads the next build: "(next slot)" for added points too, not only for queued gear', async ({ page, context }, info) => {
+    if (info.project.name === 'mobile') await page.setViewportSize({ width: 360, height: 740 });
+    const sword = piece('sword:1:common');
+    await gearFlow(context, state => {
+      state.inventory = [sword];
+      state.currentBuild.equipment = { ...state.currentBuild.equipment, weapon: sword.id };
+      state.progression.earnedAttributePoints = 11;
+      state.buildVersion = 2;
+      // An Endurance point queued through the planner: the next build's capacity is 10 + 2 × (5 + 3) × 1.05.
+      state.pendingBuild = { build: { ...state.currentBuild, version: 2, allocations: { ...state.currentBuild.allocations, endurance: 3 } },
+        effectiveSlotIndex: state.processedSlotIndex + 1, reservedMoney: 0, reservedItemIds: [sword.id], operationId: randomUUID() };
+    });
+    await page.goto('/game/');
+    const menu = await openMenu(page, 'My gladiator');
+    await expect(wornRegion(menu).getByText(/^Load /)).toHaveText('Load 4 / 26.8 (next slot)');
+    await expect(pendingBox(menu)).toHaveCount(0);
+  });
+
+  test('the picker\'s own Undo, a conflict that reloads, and a transient refusal whose Retry reuses the operation id; the keyboard lands on the outcome', async ({ page, context }, info) => {
+    if (info.project.name === 'mobile') await page.setViewportSize({ width: 360, height: 740 });
+    await watchFocus(page);
+    const sword = piece('sword:1:common'), spare1 = piece('sword:1:common'), spare2 = piece('sword:1:common'), uncommon = piece('sword:1:uncommon');
+    const flow = await gearFlow(context, state => {
+      state.inventory = [sword, spare1, spare2, uncommon];
+      state.currentBuild.equipment = { ...state.currentBuild.equipment, weapon: sword.id };
+    });
+    await page.goto('/game/');
+    const menu = await openMenu(page, 'My gladiator');
+    const weapon = slotButton(menu, 'Weapon'), worn = wornRegion(menu), dialog = picker(menu, 'Weapon');
+    /** Puts the keyboard focus on `button` the way the Inventory's spec does (Tab away and back), so its press is a keyboard one. */
+    const reach = async (button: Locator) => { await button.focus(); await page.keyboard.press('Tab'); await page.keyboard.press('Shift+Tab'); await expect(button).toBeFocused(); };
+    await weapon.click();
+    await pick(dialog, spare1).click();
+    await wearButton(dialog).click();
+    await expect(worn.getByRole('status')).toHaveText('Sword will be worn from the next slot. 1 left in the stack.');
+    // The picker's own Undo, by keyboard: it sends the undo, closes the picker and gives the focus back to the slot.
+    await weapon.click();
+    await pick(dialog, spare1).click();
+    const undo = dialog.getByRole('button', { name: 'Undo wearing Sword, level 1 common', exact: true });
+    await reach(undo);
+    await page.keyboard.press('Enter');
+    await expect(dialog).toHaveCount(0);
+    await expect(weapon).toBeFocused();
+    await expect(worn.getByRole('status')).toHaveText('Swap undone. Sword is back in the stack.');
+    expect(flow.commands[1]).toMatchObject({ kind: 'cancel-build', expectedVersion: 2 });
+    // Another session changed the build: the next command is a conflict, said in words with no Retry, and the gear is read again.
+    flow.state.buildVersion++;
+    await weapon.click();
+    await pick(dialog, uncommon).click();
+    await wearButton(dialog).click();
+    await expect(worn.getByRole('alert')).toHaveText('Your build changed. The latest state has been loaded; review and try again.');
+    await expect(worn.getByRole('button', { name: 'Retry request', exact: true })).toHaveCount(0);
+    expect(flow.commands[2]).toMatchObject({ kind: 'queue-build', expectedVersion: 3, equipment: { weapon: uncommon.id } });
+    await expect(pendingBox(menu)).toHaveCount(0);
+    // A transient refusal offers Retry; Retry by keyboard sends the very same command (its operation id too) and the outcome takes the focus.
+    flow.reject('processing');
+    await weapon.click();
+    await pick(dialog, uncommon).click();
+    await wearButton(dialog).click();
+    await expect(worn.getByRole('alert')).toHaveText('The world is processing previous results. Retry shortly.');
+    const retry = worn.getByRole('button', { name: 'Retry request', exact: true });
+    flow.reject('');
+    await reach(retry);
+    await page.keyboard.press('Enter');
+    await expect(worn.getByRole('status')).toHaveText('Sword will be worn from the next slot.');
+    await expect(worn.getByRole('status')).toBeFocused();
+    expect(flow.commands).toHaveLength(5);
+    expect(flow.commands[4]).toEqual(flow.commands[3]);
+    expect(flow.commands[4]).toMatchObject({ kind: 'queue-build', expectedVersion: 4, equipment: { weapon: uncommon.id } });
+    // Cancel changes by keyboard leaves with its box: the outcome takes the focus.
+    await reach(pendingBox(menu).getByRole('button', { name: 'Cancel changes', exact: true }));
+    await page.keyboard.press('Enter');
+    await expect(worn.getByRole('status')).toHaveText('Gear changes canceled.');
+    await expect(worn.getByRole('status')).toBeFocused();
+    expect(flow.commands[5]).toMatchObject({ kind: 'cancel-build', expectedVersion: 5 });
+    expect(await focusDrops(page)).toEqual([]);
   });
 
   test('the card and Wear stay on the chosen one of two same-name pieces as hover and keyboard focus move', async ({ page, context, hasTouch }, info) => {

@@ -7,8 +7,10 @@
 // (`wearCommand`, `undoCommand`, `removeCommand`, `cancelGearCommand`), close the picker and give the focus back to the slot. A queued
 // change shows a NEXT tag on its slot and a row in "At the next slot", with Undo and Cancel changes. The card and its Wear always follow
 // the CHOSEN tile (the AGENTS.md detail-card rule): hover and keyboard focus move nothing but the focus ring.
-// Desktop: a popover under the slot row with a caret, the grid on the left and the card with Wear on the right (two columns from 560 px).
-// Touch (the shell's compact query): a sheet over the panel body with Back and a Wear bar at its foot; what it covers is hidden.
+// Desktop: a popover laid over the panel under the slot row (nothing below it moves), with a caret at the slot, the grid on the left and
+// the card with Wear on the right (two columns from 560 px). Touch (the shell's compact query): a sheet over the panel body with Back and a
+// Wear bar at its foot; what it covers is hidden. A keyboard command whose control leaves (Retry, Cancel changes) gives the focus to its
+// outcome line (`useOutcomeFocus`, as the Inventory does); Wear, Undo and Remove give it back to the slot.
 import { useEffect, useId, useLayoutEffect, useRef, useState, type KeyboardEvent } from 'react';
 import type { EquipmentSlot } from '@contracts/commands';
 import type { ItemInstance, OwnerState } from '@contracts/reads';
@@ -23,11 +25,12 @@ import {
   wornNow, type GearCommand,
 } from '../inventory/gear';
 import { ItemIcon } from '../inventory/ItemPresentation';
-import { isStackable, type StackTile } from '../inventory/stacks';
+import { joinsStack, type StackTile } from '../inventory/stacks';
 import { slotTimeText } from '../schedule/slot-time';
 import { useMinuteNow } from '../schedule/use-minute-now';
+import { useOutcomeFocus } from '../shell/focus-lost';
 import {
-  SLOT_NAMES, compareChoice, equipmentLoad, isTwoHanded, itemLabel, itemName, lockText, nextLabel, slotTiles, statText, tileMark,
+  SLOT_NAMES, compareChoice, equipmentLoad, isTwoHanded, itemLabel, itemName, lockText, nextBuildDiffers, nextLabel, slotTiles, statText, tileMark,
 } from './equip-picker';
 import styles from './WornEquipment.module.css';
 
@@ -79,7 +82,9 @@ export function WornEquipment({ owner, gateway, refresh, clock, preview = false,
   const attempt = useRef<GearCommand | null>(null), success = useRef(''), sending = useRef(false), mounted = useRef(false);
   const nowMs = useMinuteNow(clock), clockMode = useClockMode();
   const effective = owner.pendingBuild ? slotTimeText(owner.pendingBuild.effectiveSlotIndex * RULES_V1.clock.slotMs, nowMs, clockMode) : '';
-  const load = equipmentLoad(owner, next);
+  const load = equipmentLoad(owner, next), loadIsNext = nextBuildDiffers(owner);
+  // A command sent by keyboard whose control leaves (Retry, Cancel changes) gives the focus to its outcome, never to <body>.
+  const { outcome: outcomeRef, begin, end, target } = useOutcomeFocus(busy);
   const wearing = equipmentSlots.some(slot => worn[slot] !== null);
   const inspectedItem = inspected && pieceOf(worn[inspected]);
 
@@ -91,10 +96,14 @@ export function WornEquipment({ owner, gateway, refresh, clock, preview = false,
     triggers.current[focusTo]?.focus();
     setFocusTo(null);
   }, [focusTo, open]);
-  // On opening, the focus goes to the grid's tab stop (the first tile) without scrolling the panel.
+  // On opening, the focus goes to the grid's tab stop (the first tile) without scrolling the panel. A slot with nothing to offer gives it to
+  // Back on a phone (the sheet hides the slot) and to the picker itself on the desktop.
   useEffect(() => {
-    if (!open) return;
-    picker.current?.querySelector<HTMLElement>('[data-tile][tabindex="0"]')?.focus({ preventScroll: true });
+    const element = picker.current;
+    if (!open || !element) return;
+    const back = element.querySelector<HTMLElement>('[data-back]');
+    const first = element.querySelector<HTMLElement>('[data-tile][tabindex="0"]') ?? (back && getComputedStyle(back).display !== 'none' ? back : element);
+    first.focus({ preventScroll: true });
   }, [open]);
   // Where the picker sits: on desktop its caret points at the slot; on a phone the sheet starts where the panel's body does.
   useLayoutEffect(() => {
@@ -133,6 +142,7 @@ export function WornEquipment({ owner, gateway, refresh, clock, preview = false,
     if (preview) { setOutcome({ role: 'status', text: 'Gear changes are unavailable in this preview.' }); return; }
     const comparable = ({ operationId: _id, ...rest }: GearCommand) => JSON.stringify(rest);
     const command = attempt.current && comparable(attempt.current) === comparable(intent) ? attempt.current : intent;
+    begin();
     success.current = done; attempt.current = command; sending.current = true;
     setBusy(true); setOutcome(null); setRetry(false);
     try {
@@ -149,11 +159,12 @@ export function WornEquipment({ owner, gateway, refresh, clock, preview = false,
       }
     } catch {
       if (mounted.current) { setOutcome({ role: 'alert', text: 'This request could not be confirmed. Retry the same request.' }); setRetry(true); }
-    } finally { sending.current = false; if (mounted.current) setBusy(false); }
+    } finally { sending.current = false; end(); if (mounted.current) setBusy(false); }
   }
 
+  /** Opens the picker over the panel. The last outcome (and its Retry) stays until the next command, so nothing below the slots moves. */
   function openPicker(slot: EquipmentSlot) {
-    setOpen(slot); setChosen(null); setStop(null); setOutcome(null); setRetry(false);
+    setOpen(slot); setChosen(null); setStop(null);
   }
   function closePicker(slot: EquipmentSlot) {
     setOpen(null); setChosen(null); setStop(null); setFocusTo(slot);
@@ -176,14 +187,15 @@ export function WornEquipment({ owner, gateway, refresh, clock, preview = false,
     if (sending.current) return;
     const item = pieceOf(next[slot]), back = pieceOf(worn[slot]);
     // A piece that goes back to a stack says so (the Inventory's words); otherwise what stays worn, or that the slot stays empty.
-    const stacked = !!item && inventory.some(other => other.id !== item.id && other.catalogId === item.catalogId && other.binding === item.binding && isStackable(owner, other));
+    const stacked = !!item && joinsStack(owner, item);
     if (open) closePicker(slot); else setFocusTo(slot);
     void send(undoCommand(owner, slot), stacked ? `Swap undone. ${itemName(item)} is back in the stack.`
       : `Swap undone. ${back ? `${itemName(back)} stays worn` : `${SLOT_NAMES[slot]} stays empty`}.`);
   }
   function cancel() {
     if (sending.current) return;
-    setFocusTo(changed[0] ?? 'weapon');
+    // The box leaves with the queue: by keyboard, the outcome takes the focus (`useOutcomeFocus`). An open picker closes so it is seen.
+    if (open) { setOpen(null); setChosen(null); setStop(null); }
     void send(cancelGearCommand(owner), keepsOtherChanges(owner) ? 'Gear changes canceled. Your other queued build changes are kept.' : 'Gear changes canceled.');
   }
   /** Arrow keys move the focus over the grid (rows by the tiles' positions); Home and End go to its ends. Enter or Space chooses. */
@@ -228,9 +240,9 @@ export function WornEquipment({ owner, gateway, refresh, clock, preview = false,
         aria-label={`Wear ${itemLabel(item)}${count > 1 ? ` (one of ${count})` : ''}`} onClick={() => wear(tile)}>Wear {itemName(item)}</button>;
     }
     return <div className={styles.frame}>
-      <div ref={picker} id={pickerId} className={styles.picker} role="dialog" aria-label={`Change ${name}`}>
+      <div ref={picker} id={pickerId} className={styles.picker} role="dialog" aria-label={`Change ${name}`} tabIndex={-1}>
         <div className={styles.head}>
-          <button type="button" className={styles.back} onClick={() => closePicker(slot)}><span className={styles.backMark} aria-hidden="true">‹</span>Back</button>
+          <button type="button" className={styles.back} data-back="" onClick={() => closePicker(slot)}><span className={styles.backMark} aria-hidden="true">‹</span>Back</button>
           <h4>{name}</h4>
           <small>Now: {nowName}</small>
           <button type="button" className={styles.close} aria-label={`Close ${name} choices`} onClick={() => closePicker(slot)}>✕</button>
@@ -282,6 +294,7 @@ export function WornEquipment({ owner, gateway, refresh, clock, preview = false,
               {count > 1 && <p className={styles.info}>You own {count}. Wear takes one.</p>}
               {comparison.offHandOff ? <p className={styles.note}>Two-handed: the off hand goes empty, {itemName(comparison.offHandOff)} comes off.</p>
                 : comparison.twoHanded ? <p className={styles.info}>Two-handed: it uses both hands; the off hand is already empty.</p> : null}
+              {comparison.offHandBack && <p className={styles.note}>{itemName(comparison.offHandBack)} goes back on.</p>}
               {comparison.load?.over && <p className={styles.bad}>This would overload your gladiator (load {statText(comparison.load.value)} of {statText(comparison.load.capacity)}).</p>}
               {blocked && <p id={blockedId} className={styles.bad}>{blocked}</p>}
               {preview && <p id={previewId} className={styles.info}>Gear changes are unavailable in this preview.</p>}
@@ -302,7 +315,7 @@ export function WornEquipment({ owner, gateway, refresh, clock, preview = false,
     }}>
     <div className={inspection.heading}>
       <h3 id={headingId}>Worn equipment</h3>
-      {load && <p className={load.load > load.capacity ? styles.over : undefined}>Load <strong>{statText(load.load)} / {statText(load.capacity)}</strong>{changed.length > 0 ? ' (next slot)' : ''}</p>}
+      {load && <p className={load.load > load.capacity ? styles.over : undefined}>Load <strong>{statText(load.load)} / {statText(load.capacity)}</strong>{loadIsNext ? ' (next slot)' : ''}</p>}
     </div>
     <div className={inspection.slots} data-slot-row="">
       {equipmentSlots.map(slot => {
@@ -324,9 +337,13 @@ export function WornEquipment({ owner, gateway, refresh, clock, preview = false,
         </button>;
       })}
     </div>
-    {open ? renderPicker(open) : <EquipmentDetails label="Worn equipment details" item={inspectedItem} detailsRef={detail}
-      empty={inspected ? (worn[inspected] ? 'This equipment is unavailable.' : 'No equipment worn in this slot.')
-        : wearing ? 'Choose a slot to see its stats and weight, or to change it.' : 'No equipment worn. Choose a slot to wear something from your inventory.'} />}
+    {/* The picker is laid over what follows (its place in the order keeps Tab from the slot row into it); the details stay in place under it. */}
+    {open && renderPicker(open)}
+    <div className={styles.details} data-covered={open ? '' : undefined}>
+      <EquipmentDetails label="Worn equipment details" item={inspectedItem} detailsRef={detail}
+        empty={inspected ? (worn[inspected] ? 'This equipment is unavailable.' : 'No equipment worn in this slot.')
+          : wearing ? 'Choose a slot to see its stats and weight, or to change it.' : 'No equipment worn. Choose a slot to wear something from your inventory.'} />
+    </div>
     {changed.length > 0 && <section className={styles.pending} aria-labelledby={pendingId}>
       <h4 id={pendingId}>At the next slot</h4>
       {changed.map(slot => {
@@ -340,7 +357,7 @@ export function WornEquipment({ owner, gateway, refresh, clock, preview = false,
       <p>{pendingNote(effective)}{keepsOtherChanges(owner) && ' Cancel changes puts the gear back; your other queued build changes stay.'}</p>
       <button type="button" className={`${styles.small} ${styles.cancel}`} disabled={preview} {...busyProps} onClick={cancel}>Cancel changes</button>
     </section>}
-    {outcome && <p className={outcome.role === 'alert' ? styles.alert : styles.message} role={outcome.role}>{outcome.text}</p>}
+    {outcome && <p ref={outcomeRef} className={outcome.role === 'alert' ? styles.alert : styles.message} role={outcome.role} tabIndex={-1} {...target}>{outcome.text}</p>}
     {retry && <button type="button" className={styles.small} {...busyProps} onClick={() => { if (attempt.current && !sending.current) void send(attempt.current, success.current); }}>Retry request</button>}
   </section>;
 }

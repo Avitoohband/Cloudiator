@@ -1,8 +1,8 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import type { Equipment } from '@contracts/commands';
 import type { ItemInstance, OwnerState } from '@contracts/reads';
 import { CATALOG_V1 } from '@domain/catalog-v1';
-import { compareChoice, equipmentLoad, slotTiles, tileMark } from '../../src/features/character/equip-picker';
+import { compareChoice, equipmentLoad, nextBuildDiffers, slotTiles, tileMark } from '../../src/features/character/equip-picker';
 import { wearState } from '../../src/features/inventory/gear';
 import { itemFixture, ownerFixture } from '../fixtures/domain';
 
@@ -103,6 +103,41 @@ describe('compareChoice', () => {
     // Endurance raises the capacity: 10 + 2 × (7 + 1) × 1.05.
     expect(result.load?.after).toBe('1 / 26.8');
     expect(result.load?.capacity).toBeCloseTo(26.8, 9);
+  });
+});
+
+describe('compareChoice: the off hand that goes back on, and no fresh ids', () => {
+  it('names the worn shield that goes back on when a queued two-handed weapon is removed or replaced by a one-handed one', () => {
+    const state = owner([sword, spear, shield, armor], { weapon: sword.id, offHand: shield.id, body: armor.id }, 1, { weapon: spear.id, offHand: null });
+    const removed = compareChoice(state, 'weapon', null);
+    expect(removed.offHandBack?.id).toBe(shield.id);
+    expect(removed.offHandOff).toBeNull();
+    // Spear 6 + armor 3 now; with the spear removed, shield 5 + armor 3.
+    expect(removed.load).toMatchObject({ before: '9', after: '8 / 24.7', change: '−1' });
+    expect(compareChoice(state, 'weapon', sword).offHandBack?.id).toBe(shield.id);
+    expect(compareChoice(owner([sword, spare1, shield], { weapon: sword.id, offHand: shield.id }), 'weapon', spare1).offHandBack).toBeNull();
+  });
+
+  it('never asks for a fresh operation id: the commands it reads are never sent', () => {
+    const fresh = vi.spyOn(crypto, 'randomUUID');
+    try {
+      const state = owner([sword, spare1, spear, shield], { weapon: sword.id, offHand: shield.id });
+      compareChoice(state, 'weapon', spear); compareChoice(state, 'weapon', null); compareChoice(state, 'offHand', shield);
+      expect(fresh).not.toHaveBeenCalled();
+    } finally { fresh.mockRestore(); }
+  });
+});
+
+describe('nextBuildDiffers', () => {
+  it('is true for queued gear or added points, and false for nothing queued or a stance change alone', () => {
+    expect(nextBuildDiffers(owner([sword], { weapon: sword.id }))).toBe(false);
+    expect(nextBuildDiffers(owner([sword, spare1], { weapon: sword.id }, 1, { weapon: spare1.id }))).toBe(true);
+    const points = owner([sword], { weapon: sword.id }, 1, {});
+    expect(nextBuildDiffers(points)).toBe(false);
+    points.pendingBuild!.build.stance = 'offensive';
+    expect(nextBuildDiffers(points)).toBe(false);
+    points.pendingBuild!.build.allocations = { ...points.currentBuild.allocations, endurance: points.currentBuild.allocations.endurance + 1 };
+    expect(nextBuildDiffers(points)).toBe(true);
   });
 });
 

@@ -16,7 +16,7 @@ import { ShopPanel } from '../shops/ShopPanel';
 import { useOutcomeFocus } from '../shell/focus-lost';
 import { ItemIcon, ItemStats } from './ItemPresentation';
 import { ItemSearch, MatchCount, NoMatch } from './ItemSearch';
-import { groupStacks, isStackable, stackSaleItems, type StackTile } from './stacks';
+import { groupStacks, isStackable, joinsStack, stackSaleItems, type StackTile } from './stacks';
 import { INVENTORY_SORTS, queryItems, type Queryable, type SortKey } from './item-query';
 import {
   GEAR_SLOTS, SLOT_LABELS, blockedText, cancelGearCommand, changedSlots, gearRefusal, isWearable, keepsOtherChanges, nextEquipment, pendingNote,
@@ -184,8 +184,7 @@ export function InventoryPanel({ owner, gateway, refresh, clock, preview = false
   const undoItem = (item: ItemInstance, slot: EquipmentSlot) => {
     const back = pieceOf(worn[slot]);
     // A piece that goes back to a stack says so (the approved wording); a single piece says what stays worn.
-    const stacked = owner.inventory.some(other => other.id !== item.id && other.catalogId === item.catalogId && other.binding === item.binding && isStackable(owner, other));
-    void send(undoCommand(owner, slot), stacked ? `Swap undone. ${itemName(item)} is back in the stack.`
+    void send(undoCommand(owner, slot), joinsStack(owner, item) ? `Swap undone. ${itemName(item)} is back in the stack.`
       : `Swap undone. ${back ? `${itemName(back)} stays worn` : `${SLOT_LABELS[slot]} stays empty`}.`, item.id);
   };
   const cancelGear = () => void send(cancelGearCommand(owner), keepsOtherChanges(owner) ? 'Gear changes canceled. Your other queued build changes are kept.' : 'Gear changes canceled.', 'gear');

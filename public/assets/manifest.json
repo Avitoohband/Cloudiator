@@ -189,7 +189,7 @@
    "kind": "effects"
   },
   "icons": {
-   "image": "ui/icons.d5a35f5d74.png",
+   "image": "ui/icons.6b99fde99e.png",
    "data": "ui/icons.json",
    "width": 192,
    "height": 64,
@@ -3783,9 +3783,9 @@
    "license": "Project-original artwork generated from repository source (assets/source); owned by the Cloudiator project. No third-party assets."
   },
   {
-   "file": "ui/icons.d5a35f5d74.png",
-   "sha256": "d5a35f5d74c5af72d9049d3afc5281ac2fd6d43c6be59a1aef5d0810ee5c8620",
-   "bytes": 2559,
+   "file": "ui/icons.6b99fde99e.png",
+   "sha256": "6b99fde99e5df81d6f0bb50952b83e8c42b694665317f63020f2a8ca7fa02b13",
+   "bytes": 2566,
    "source": "generated",
    "generator": "assets/source/generators/effects.mjs",
    "inputs": [
@@ -3802,7 +3802,7 @@
   },
   {
    "file": "ui/icons.json",
-   "sha256": "ee231d15f1b0f0656021c2fcf1fd6ffb5f62e25e2a5cf46662a63b213c8396df",
+   "sha256": "18731cf158aa628418e293c2dbc0dbef944eb9728ebd11a9539c3f2d95fba8e8",
    "bytes": 7878,
    "source": "generated",
    "generator": "assets/source/generators/effects.mjs",

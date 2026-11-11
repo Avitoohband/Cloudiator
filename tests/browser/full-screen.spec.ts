@@ -114,6 +114,7 @@ test.describe('the camp shell with a pointer', () => {
     await expect(chip.getByTestId('chip-stamina')).toHaveText(/104 \/ 104/);
     await expect(chip.getByTestId('chip-money')).toBeVisible();
     await expect(chip.getByTestId('chip-renown')).toBeVisible();
+    await expect(chip.getByTestId('chip-renown').locator('[data-currency-icon="renown"]')).toBeVisible();
     await expect(chip.getByTestId('chip-countdown')).toHaveText(/^\d{1,2}:\d\d$/);
     const c = await boxOf(chip);
     expect(c.x + c.width).toBeGreaterThan(1280 - 20);

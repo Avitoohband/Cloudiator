@@ -72,7 +72,8 @@ test.describe('the bar behind the name', () => {
       const signOut = menu.getByRole('button', { name: 'Sign out', exact: true });
       await expect(stamina).toHaveText(/^⚡\s*(Stamina\s*)?74 \/ 104$/);
       await expect(gold).toHaveText(/^💰\s*(Gold\s*)?240$/);
-      await expect(renown).toHaveText(/^★\s*(Renown\s*)?35$/);
+      await expect(renown).toHaveText(/^\s*(Renown\s*)?35$/);
+      await expect(renown.locator('[data-currency-icon="renown"]')).toBeVisible();
       await expect(slot).toHaveText(/⏱ \d+:\d{2}/);
       await expect(line).toBeVisible();
       await expect(bar).toBeVisible();

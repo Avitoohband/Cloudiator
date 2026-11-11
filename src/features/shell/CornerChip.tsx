@@ -18,6 +18,7 @@ import { saveClockMode, useClockMode } from '../../lib/clock-setting';
 import { PATCH, isBehind } from '../../lib/patch';
 import type { Viewer } from '../character/useGameState';
 import { GameInfoPanel } from '../game-info/GameInfoPanel';
+import { CurrencyIcon } from '../shops/ShopArt';
 import { MessagesButton } from '../messages/MessagesButton';
 import type { MessagingActions } from '../messages/messages';
 import type { NoticeTitles } from '../messages/TitleNotices';
@@ -183,7 +184,7 @@ export function CornerChip({ viewer, session, owner, fixture, previewAs, clock, 
             <span className={`${styles.wide} ${styles.chipSep}`} aria-hidden="true">|</span>
             <span className={styles.wide} data-testid="chip-stamina" title="Stamina"><span aria-hidden="true">⚡ </span><span className={styles.sr}>Stamina </span>{owner.stamina.current} / {owner.stamina.maximum}</span>
             <span className={styles.wide} data-testid="chip-money" title="Gold"><span aria-hidden="true">💰 </span><span className={styles.sr}>Gold </span>{owner.wallets.money}</span>
-            <span className={styles.wide} data-testid="chip-renown" title="Renown"><span aria-hidden="true">★ </span><span className={styles.sr}>Renown </span>{owner.wallets.renown}</span>
+            <span className={styles.wide} data-testid="chip-renown" title="Renown"><CurrencyIcon currency="renown" size={14} /> <span className={styles.sr}>Renown </span>{owner.wallets.renown}</span>
             <span className={styles.chipSep} aria-hidden="true">|</span>
             <Countdown seconds={seconds} />
           </> : <span>Signed in</span>}
@@ -198,7 +199,7 @@ export function CornerChip({ viewer, session, owner, fixture, previewAs, clock, 
             <div className={styles.barRow}>
               <span data-testid="bar-stamina"><span aria-hidden="true">⚡ </span><span className={styles.sr}>Stamina </span>{owner.stamina.current} / {owner.stamina.maximum}</span>
               <span data-testid="bar-money"><span aria-hidden="true">💰 </span><span className={styles.sr}>Gold </span>{owner.wallets.money}</span>
-              <span data-testid="bar-renown"><span aria-hidden="true">★ </span><span className={styles.sr}>Renown </span>{owner.wallets.renown}</span>
+              <span data-testid="bar-renown"><CurrencyIcon currency="renown" size={14} /> <span className={styles.sr}>Renown </span>{owner.wallets.renown}</span>
               <span data-testid="bar-countdown"><Countdown seconds={seconds} testId="bar-countdown-time" /></span>
             </div>
             <div className={styles.staminaLine}>

@@ -101,7 +101,28 @@ const sun = (c, m, x, y, r) => { c.stamp(m().ellipse(x, y, r, r), shade('fire1',
 
 const ICONS = {
   money: (c, m) => { coin(c, m, 6, 11); coin(c, m, 10, 9); coin(c, m, 7, 6); },
-  renown: (c, m) => { c.stamp(m().curve([[4, 13], [3, 9], [4, 5], [7, 3]], 2), shade('grass1', 'grass2', 'grass3')); c.stamp(m().curve([[11, 13], [12, 9], [11, 5], [8, 3]], 2), shade('grass1', 'grass2', 'grass3')); c.stamp(m().ellipse(7.5, 10, 2, 2), 'gold2'); },
+  renown: c => {
+    // Gold laurel (Avi's pick A, 2026-11-11): hand-placed 16x16 grid, each char one pixel, '.' empty; the outline is drawn in the grid.
+    const key = { 1: 'gold1', 2: 'gold2', 3: 'gold3', o: 'outline' };
+    [
+      '......o..o......',
+      '...ooo1oo1ooo...',
+      '..o11o2oo2o11o..',
+      '.oo2o3o..o3o2oo.',
+      'o1oo3o....o3oo1o',
+      'o123o1o..o1o321o',
+      '.oo32o....o23oo.',
+      'o1o3oo....oo3o1o',
+      'o123o1o..o1o321o',
+      '.oo32o....o23oo.',
+      '.o123o....o321o.',
+      '..oo13o..o31oo..',
+      '..o1oo3oo3oo1o..',
+      '...o..o33o..o...',
+      '.....o3oo3o.....',
+      '......o..o......',
+    ].forEach((row, y) => [...row].forEach((ch, x) => { if (key[ch]) c.set(x, y, key[ch]); }));
+  },
   stamina: (c, m) => c.stamp(m().polygon([[9, 1], [3, 9], [7, 9], [5, 15], [12, 6], [8, 6], [10, 1]]), shade('fire1', 'fire2', 'fire3')),
   xp: (c, m) => c.stamp(m().polygon([[8, 1], [10, 6], [15, 6], [11, 9], [12.5, 14.5], [8, 11.5], [3.5, 14.5], [5, 9], [1, 6], [6, 6]]), shade('violet1', 'violet1', 'violet2')),
   level: (c, m) => { c.stamp(m().polygon([[3, 2], [13, 2], [13, 10], [8, 14], [3, 10]]), shade('teal1', 'teal2', 'teal3')); c.paint(m().polygon([[5, 9], [8, 5], [11, 9], [10, 10], [8, 8], [6, 10]]), 'gold1'); },

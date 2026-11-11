@@ -115,6 +115,9 @@ export const TABLE_CLASSES: Readonly<Record<string, { retention: Retention; wind
   'public.notification_marks': { retention: 'player' },
   // M26: the patch list and its features (a row per release, recorded by hand and kept; at most 20 features each): tiny, kept.
   'public.patches': { retention: 'singleton' }, 'public.patch_features': { retention: 'singleton' },
+  // The two published documents and drafts, and the operator allowlist, do not grow per game slot.
+  'public.game_info_reads': { retention: 'singleton' }, 'private.game_info_drafts': { retention: 'singleton' },
+  'private.game_info_editors': { retention: 'singleton' },
   // Titles, kept forever with the player: at most 37 titles (35 earned by play and two hand-given ones), 22 counters
   // and one ownership-history row per catalog id (132 today) per character. The release back-fill's one record.
   'public.gladiator_titles': { retention: 'player' }, 'public.title_counters': { retention: 'player' },

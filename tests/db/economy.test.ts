@@ -55,14 +55,12 @@ async function reapply(source: string) {
   }
 }
 /**
- * 21-economy.sql reapplied, then every later reapplicable source in order (22-titles.sql on), so the database is always left at
- * the latest source. Patch 1.7 restates public.public_profile_reads (with titlesEarned): 21-economy.sql alone would put M27's view
- * back for every test that runs after this file.
+ * SQL21's reviewed replay chain restores the later definitions it restates. SQL26 creates and seeds separate Game Info
+ * objects and is not reapplicable. Keep that authored content intact while testing the historical economy backfill.
  */
 async function reapplyEconomy() {
   const folder = new URL('../../supabase/sql/', import.meta.url);
-  const later = readdirSync(folder).filter(name => /^\d{2}-[a-z0-9-]+\.sql$/.test(name) && name > '21-economy.sql').sort();
-  expect(later[0]).toBe('22-titles.sql');
+  const later = ['22-titles.sql', '23-awards.sql', '24-dungeons.sql', '25-bot-label.sql'];
   for (const name of ['21-economy.sql', ...later]) await reapply(readFileSync(new URL(name, folder), 'utf8'));
 }
 
@@ -1165,24 +1163,38 @@ describe('the Arena banner', () => {
     });
     expect((await profile(owner.gid)).banner).toBe(false);
     const balances = await sql`select gladiator_id,money::text,renown::text from public.wallets order by gladiator_id`;
-    await reapplyEconomy();
-    expect((await profile(owner.gid)).banner).toBe(true);
-    expect((await profile(other.gid)).banner).toBe(false);
-    const filled = await profile(owner.gid);
-    await reapplyEconomy();
-    expect(await profile(owner.gid)).toEqual(filled);
-    expect(await sql`select gladiator_id,money::text,renown::text from public.wallets order by gladiator_id`).toEqual(balances);
-    expect(await sql`select version,active from private.rules_versions order by version`)
-      .toEqual([{ version: 'v1', active: true }, { version: 'v2', active: false }]);
-    // Reapplying is equally inert when the operator has already selected v2.
-    await sql.begin(async tx => {
-      await tx`update private.rules_versions set active=false where version='v1'`;
-      await tx`update private.rules_versions set active=true where version='v2'`;
-    });
-    await reapplyEconomy();
-    expect(await sql`select version from private.rules_versions where active`).toEqual([{ version: 'v2' }]);
-    expect((await revision()).rules_version).toBe('v2');
-    expect(await sql`select gladiator_id,money::text,renown::text from public.wallets order by gladiator_id`).toEqual(balances);
+    await sql`insert into private.game_info_editors(user_id) values(${owner.id})`;
+    const [draftBefore] = await sql`select version,document from private.game_info_drafts where tab='wiki'`;
+    await sql`update private.game_info_drafts set version=version+1,
+      document=jsonb_set(document,'{entries,0,body}', '"Unpublished test guide."'::jsonb) where tab='wiki'`;
+    const gameInfo = () => sql`select
+      (select jsonb_agg(to_jsonb(p) order by tab) from public.game_info_reads p) as published,
+      (select jsonb_agg(to_jsonb(d) order by tab) from private.game_info_drafts d) as drafts,
+      (select coalesce(jsonb_agg(user_id order by user_id), '[]'::jsonb) from private.game_info_editors) as editors`;
+    const infoBefore = await gameInfo();
+    try {
+      await reapplyEconomy();
+      expect((await profile(owner.gid)).banner).toBe(true);
+      expect((await profile(other.gid)).banner).toBe(false);
+      const filled = await profile(owner.gid);
+      await reapplyEconomy();
+      expect(await profile(owner.gid)).toEqual(filled);
+      expect(await sql`select gladiator_id,money::text,renown::text from public.wallets order by gladiator_id`).toEqual(balances);
+      expect(await sql`select version,active from private.rules_versions order by version`)
+        .toEqual([{ version: 'v1', active: true }, { version: 'v2', active: false }]);
+      // Reapplying is equally inert when the operator has already selected v2.
+      await sql.begin(async tx => {
+        await tx`update private.rules_versions set active=false where version='v1'`;
+        await tx`update private.rules_versions set active=true where version='v2'`;
+      });
+      await reapplyEconomy();
+      expect(await sql`select version from private.rules_versions where active`).toEqual([{ version: 'v2' }]);
+      expect((await revision()).rules_version).toBe('v2');
+      expect(await sql`select gladiator_id,money::text,renown::text from public.wallets order by gladiator_id`).toEqual(balances);
+      expect(await gameInfo()).toEqual(infoBefore);
+    } finally {
+      await sql`update private.game_info_drafts set version=${draftBefore.version},document=${sql.json(draftBefore.document)} where tab='wiki'`;
+    }
   });
 });
 

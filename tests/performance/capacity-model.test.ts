@@ -44,6 +44,17 @@ describe('Task 23.3: capacity projections', () => {
     expect([...classes].sort()).toEqual(['detail', 'operational', 'permanent', 'player', 'season', 'singleton', 'summary']);
   });
 
+  it('keeps measured guide, draft and editor storage fixed across projected time', () => {
+    const tables = Object.fromEntries(['public.game_info_reads', 'private.game_info_drafts', 'private.game_info_editors']
+      .map((name, index) => [name, { regularRows: 0, tournamentRows: 0, rows: 2, bytesPerRow: 100, totalBytes: (index + 1) * 200 }]));
+    const projected = projectDatabase({ players: 0, baselineBytes: 0, slotsPerSeason: 504, tables,
+      system: { cronBytesPerRow: 0, netBytes: 0, authBytesPerPlayer: 0 }, commandReceipts: { perPlayerPerDay: 0, bytesPerRow: 0 } });
+    for (const days of [1, 90, 365]) {
+      expect(projected.atDays(days).bytes).toBe(1200);
+      expect(projected.atDays(days).byClass.singleton).toBe(1200);
+    }
+  });
+
   it('accounts for the bounded bot roster and routines and prunable duty history', () => {
     expect(TABLE_CLASSES['private.bots']).toEqual({ retention: 'singleton' });
     expect(TABLE_CLASSES['private.bot_routines']).toEqual({ retention: 'singleton' });

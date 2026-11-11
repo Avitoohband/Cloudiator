@@ -1,5 +1,9 @@
 # Deployment checklist
 
+## Patch 1.8.1 live — 2026-11-11
+
+Client `f1be5c9` on Pages deployment `b7626f26-ead1-4968-a771-b091480837bd`. The full local gate and seven public smoke checks passed. Patch History lists “Clearer gladiator stats,” and the public revision reports 1.8.1. [Evidence](release-evidence.md#patch-181-client-deployed--2026-11-11).
+
 ## Patch 1.8 rollout — client deployed 2026-11-08
 
 Production serves the 1.8 client from `7804b1e` on Pages deployment `62eb6655-ae04-4289-89e2-8bcb78fa342e`. Supabase has M01–M31, active rules v2, worker v4 and command v8. All 10 anonymous deployed checks passed and GitHub release run `42486998287` passed. Tullia, Grit, Cinder, Rufus and Pip are active. The first eligible dungeon boundary is 19:20 Israel time. The public patch record reports 1.8 and links to visible notification 11. [Evidence](release-evidence.md#patch-18-history-record-published--2026-11-08).

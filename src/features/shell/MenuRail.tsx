@@ -54,6 +54,15 @@ export function MenuRail({ menus, state, send, onToggle, zoom, place = 'left' }:
     setTip({ label, top: button.offsetTop + button.offsetHeight / 2, left: button.offsetLeft + button.offsetWidth / 2 });
   };
 
+  const settings = menus.find(menu => menu.id === 'settings');
+  const iconButton = (menu: MenuDef) => (
+    <button key={menu.id} type="button" className={styles.railButton} aria-label={menu.label} aria-expanded={state.open === menu.id}
+      aria-controls={`menu-${menu.id}`} data-menu-icon={menu.id} onClick={() => onToggle(menu.id)}
+      onPointerEnter={name(menu.label)} onFocus={name(menu.label)} onPointerLeave={() => setTip(null)}>
+      <span aria-hidden="true">{menu.icon}</span>
+    </button>
+  );
+
   return <>
     <div className={styles.edge} data-place={place} onPointerEnter={enter} onPointerLeave={leave} aria-hidden="true" />
     <div className={styles.grip} data-place={place} onPointerEnter={enter} onPointerLeave={leave} data-testid="menu-grip" aria-hidden="true" />
@@ -62,13 +71,7 @@ export function MenuRail({ menus, state, send, onToggle, zoom, place = 'left' }:
     <div ref={rail} id={railId} className={styles.rail} data-revealed={state.revealed} data-place={place} data-testid="menu-rail"
       onPointerEnter={enter} onPointerLeave={event => { setTip(null); leave(event); }} onFocus={() => send('focus-in')} onBlur={focusOut}>
       <nav className={styles.menus} aria-label="Game menus">
-        {menus.map(menu => (
-          <button key={menu.id} type="button" className={menu.id === 'settings' ? `${styles.railButton} ${styles.railEnd}` : styles.railButton} aria-label={menu.label} aria-expanded={state.open === menu.id}
-            aria-controls={`menu-${menu.id}`} data-menu-icon={menu.id} onClick={() => onToggle(menu.id)}
-            onPointerEnter={name(menu.label)} onFocus={name(menu.label)} onPointerLeave={() => setTip(null)}>
-            <span aria-hidden="true">{menu.icon}</span>
-          </button>
-        ))}
+        {menus.filter(menu => menu.id !== 'settings').map(menu => iconButton(menu))}
       </nav>
       {zoom && <>
         <div className={styles.sep} aria-hidden="true" />
@@ -77,7 +80,11 @@ export function MenuRail({ menus, state, send, onToggle, zoom, place = 'left' }:
           <button type="button" className={`${styles.railButton} ${styles.zoom}`} aria-label="Zoom out" onClick={() => zoom('out')}>−</button>
           <button type="button" className={`${styles.railButton} ${styles.zoom} ${styles.zoomReset}`} aria-label="Reset zoom" onClick={() => zoom('reset')}>1:1</button>
         </div>
-        <div className={`${styles.sep} ${styles.sepEnd}`} aria-hidden="true" />
+      </>}
+      {/* The gear is the rail's last entry, after the camera buttons (and ends the touch row). */}
+      {settings && <>
+        <div className={styles.sep} aria-hidden="true" />
+        {iconButton(settings)}
       </>}
       {tip && state.open === null && <span className={styles.tip} role="tooltip" style={place === 'bottom' ? { left: tip.left } : { top: tip.top }}>{tip.label}</span>}
     </div>

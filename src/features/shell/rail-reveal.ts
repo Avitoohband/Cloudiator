@@ -1,8 +1,8 @@
-// The left-edge menu rail as a pure state machine (spec "Screen"): whether the rail is shown, and which panel is open.
+// The menu rail (on the left, right or bottom edge) as a pure state machine (spec "Screen"): whether the rail is shown, and which panel is open.
 // The component owns the pointer and focus listeners and the 300 ms timer; this reducer only decides.
 import type { MenuId } from './menus';
 
-/** The pointer reveals the rail within this many pixels of the left edge (or over the grip). */
+/** The pointer reveals the rail within this many pixels of its edge (or over the grip). */
 export const EDGE_PX = 12;
 /** The rail slides away this long after the pointer leaves it, unless a panel is open. */
 export const RAIL_HIDE_MS = 300;

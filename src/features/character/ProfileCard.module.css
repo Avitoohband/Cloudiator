@@ -9,7 +9,7 @@
   left: var(--card-left, 458px);
   top: var(--card-top, 64px);
   z-index: 11;
-  width: 520px;
+  width: var(--card-width, 520px);
   /* A narrow pointer window (481-597 px): never past the right edge, so × stays in view (fix round). */
   max-width: calc(100% - 78px);
   max-height: calc(100% - 76px);

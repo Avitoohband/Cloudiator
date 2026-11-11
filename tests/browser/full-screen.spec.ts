@@ -3,7 +3,7 @@ import { ownerFixture, worldFixture } from '../fixtures/domain';
 import { DUNGEON_FIXTURES } from '../fixtures/dungeons';
 import { MENUS } from '../../src/features/shell/menus';
 import { SUPABASE_URL, dungeonLiveData, emptyWorld, routeLiveReads, seedSession } from './live-routes';
-import { cornerChip, expectOwnerShown, joinButton, menuDialog, openMenu, railMenus, revealRail, touchLayout } from './shell-helpers';
+import { cornerChip, expectOwnerShown, joinButton, menuDialog, openMenu, railIcons, railMenus, revealRail, touchLayout } from './shell-helpers';
 
 // Task 13.5: the full-screen camp shell. The camp fills the window; a hidden rail on the left edge (a ☰ button and
 // bottom sheets on touch) opens one floating menu at a time; the corner chip sits top right.
@@ -154,7 +154,7 @@ test.describe('the camp shell with a pointer', () => {
   test('names each rail icon on hover', { tag: '@render' }, async ({ page }) => {
     await openCamp(page);
     await revealRail(page);
-    const icons = railMenus(page).getByRole('button');
+    const icons = railIcons(page);
     expect(await icons.evaluateAll(els => els.map(e => e.getAttribute('aria-label')))).toEqual(LABELS);
     for (const [i, label] of LABELS.entries()) {
       await icons.nth(i).hover();
@@ -176,13 +176,13 @@ test.describe('the camp shell with a pointer', () => {
     const icons = railMenus(page).getByRole('button');
     await expect(icons.first()).toBeFocused();
     await expect(rail(page)).toHaveAttribute('data-revealed', 'true');
-    // Tab order: the rail icons (the menus, then the zoom buttons at its bottom), then the corner chip.
+    // Tab order is the order they are drawn: the menus, the zoom buttons, the gear (Settings) at the rail's end, then the corner chip.
     const focused = () => page.evaluate(() => {
       const el = document.activeElement as HTMLElement | null;
       return el?.closest('[data-testid="corner-chip"]') ? 'corner chip' : el?.getAttribute('aria-label') ?? el?.tagName ?? null;
     });
     const order = [await focused()];
-    const expected = [...LABELS, 'Zoom in', 'Zoom out', 'Reset zoom', 'corner chip'];
+    const expected = [...LABELS.filter(label => label !== 'Settings'), 'Zoom in', 'Zoom out', 'Reset zoom', 'Settings', 'corner chip'];
     for (let i = 1; i < expected.length; i++) { await page.keyboard.press('Tab'); order.push(await focused()); }
     expect(order).toEqual(expected);
     // Back to Schedule: Enter opens its panel and moves the focus into it; Escape closes it and returns the focus.
@@ -397,7 +397,7 @@ test.describe('the camp shell on touch', () => {
     await expect(burger).toHaveAttribute('aria-expanded', 'false');
     await burger.click();
     await expect(burger).toHaveAttribute('aria-expanded', 'true');
-    await expect(railMenus(page).getByRole('button')).toHaveCount(LABELS.length);
+    await expect(railIcons(page)).toHaveCount(LABELS.length);
     const view = page.viewportSize()!;
     const sheet = await settled(await openMenu(page, 'Arena'));
     const b = await boxOf(sheet);
@@ -423,7 +423,7 @@ test.describe('the camp shell on touch', () => {
     await page.setViewportSize({ width: 360, height: 640 });
     await openCamp(page);
     await revealRail(page);
-    const icons = railMenus(page).getByRole('button');
+    const icons = railIcons(page);
     await expect(icons).toHaveCount(LABELS.length);
     const tops = await icons.evaluateAll(els => els.map(e => Math.round(e.getBoundingClientRect().top)));
     expect(new Set(tops).size, `icon tops ${tops.join(', ')}`).toBe(1);

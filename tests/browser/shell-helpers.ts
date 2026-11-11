@@ -14,6 +14,8 @@ export const touchLayout = (page: Page) => page.evaluate(query => matchMedia(que
 export const menuDialog = (page: Page, label: string) => page.getByRole('dialog', { name: label, exact: true });
 /** The rail's menu icons (the touch dock shows the same buttons). */
 export const railMenus = (page: Page) => page.getByRole('navigation', { name: 'Game menus' });
+/** Every menu icon of the rail in order: the eight menus, then the gear (Settings) after the camera buttons. */
+export const railIcons = (page: Page) => page.getByTestId('menu-rail').locator('[data-menu-icon]');
 /** The corner chip, top right. */
 export const cornerChip = (page: Page) => page.getByTestId('corner-chip');
 /** A visitor's corner chip button: "Sign in with Google to join", or "Sign in to join" in the touch layout (Task 13.6). */
@@ -48,7 +50,7 @@ export async function openMenu(page: Page, label: string): Promise<Locator> {
   const dialog = menuDialog(page, label);
   if (await dialog.isVisible()) return dialog;
   await revealRail(page);
-  await railMenus(page).getByRole('button', { name: label, exact: true }).click();
+  await page.getByTestId('menu-rail').getByRole('button', { name: label, exact: true }).click();
   await expect(dialog).toBeVisible();
   return dialog;
 }

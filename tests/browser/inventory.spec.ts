@@ -1305,6 +1305,8 @@ test('lays the search field above the chips with Sort beside it, on one row at 3
   if (info.project.name === 'mobile') await page.setViewportSize({ width: 360, height: 740 });
   await page.goto('/game/');
   const menu = await openMenu(page, 'Inventory and shops');
+  // The phone sheet rises for 0.2 s: read the boxes once it has settled.
+  await menu.evaluate(el => Promise.all(el.getAnimations().map(a => a.finished)));
   const shops = shopsRegion(menu), field = searchField(shops), sort = sortSelect(shops);
   const chips = shops.getByRole('group', { name: 'Shop filters', exact: true });
   const [f, s, c, g] = await Promise.all([field.boundingBox(), sort.boundingBox(), chips.boundingBox(), shops.getByRole('group', { name: 'Shop items', exact: true }).boundingBox()]);

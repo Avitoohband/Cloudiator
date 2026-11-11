@@ -4,7 +4,7 @@ import { ownerFixture, worldFixture } from '../fixtures/domain';
 import { createDemoWorld } from '../../src/game/demo-world';
 import { SUPABASE_URL, emptyWorld, routeLiveReads, seedSession } from './live-routes';
 import {
-  cornerChip, creationDialog, expectOwnerShown, joinButton, menuDialog, openMenu, railMenus, revealRail, signOutFromChip, spendSuggestedPoints, touchLayout,
+  cornerChip, creationDialog, expectOwnerShown, joinButton, menuDialog, openMenu, railIcons, railMenus, revealRail, signOutFromChip, spendSuggestedPoints, touchLayout,
 } from './shell-helpers';
 
 // Task 13.6: a visitor watches the live camp and opens every public menu without an account or a command, and joins by
@@ -39,7 +39,7 @@ function watchCommands(page: Page) {
   page.on('request', request => { if (request.url().includes('/functions/v1/')) sent.push(request.url()); });
   return sent;
 }
-const railLabels = (page: Page) => railMenus(page).getByRole('button').evaluateAll(buttons => buttons.map(b => b.getAttribute('aria-label')));
+const railLabels = (page: Page) => railIcons(page).evaluateAll(buttons => buttons.map(b => b.getAttribute('aria-label')));
 /** A visitor signs in with Google (the test-only consent page) without a gladiator; the creation dialog opens. */
 async function signInToCreate(page: Page) {
   await page.goto('/game/');

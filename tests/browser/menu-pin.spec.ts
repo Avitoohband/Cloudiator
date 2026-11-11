@@ -11,14 +11,24 @@ const rail = (page: Page) => page.getByTestId('menu-rail');
 const settings = (page: Page) => menuDialog(page, 'Settings');
 const pinSwitch = (page: Page) => settings(page).getByRole('switch', { name: 'Keep the menu open' });
 const placeRadio = (page: Page, place: 'Left' | 'Right' | 'Bottom') => settings(page).getByRole('radiogroup', { name: 'Menu position' }).getByRole('radio', { name: place, exact: true });
+const banner = (page: Page) => page.getByTestId('arrival-banner');
+const notices = (page: Page) => page.locator('[data-notices]');
 const settled = async (locator: Locator) => { await locator.evaluate(el => Promise.all(el.getAnimations().map(a => a.finished))); return locator; };
 const shotDir = process.env.MENU_PIN_SHOT_DIR;
 
-async function openCamp(page: Page, saved?: string) {
+async function openCamp(page: Page, saved?: string, query = '') {
   if (saved !== undefined) await page.addInitScript(([key, value]) => localStorage.setItem(key, value), [MENU_PREFS_KEY, saved]);
-  await page.goto('/game/?mode=fixture');
+  await page.goto(`/game/?mode=fixture${query}`);
   await page.waitForFunction(() => window.__cloudiatorCamp?.state()?.ready === true, null, { timeout: 45_000 });
   await expectOwnerShown(page, 'Aster');
+}
+/** Opens the menu named `label` from the (pinned) rail wherever it is, and returns its panel. */
+async function openMenuAt(page: Page, label: string) {
+  await expect(rail(page)).toHaveAttribute('data-revealed', 'true');
+  await rail(page).getByRole('button', { name: label, exact: true }).click();
+  const dialog = menuDialog(page, label);
+  await expect(dialog).toBeVisible();
+  return dialog;
 }
 /** Opens Settings from the rail (wherever it is) and returns its panel. */
 async function openSettings(page: Page) {
@@ -29,7 +39,7 @@ async function openSettings(page: Page) {
     await page.mouse.move(...(place === 'right' ? [size.width - 3, 500] : place === 'bottom' ? [size.width / 2, size.height - 3] : [2, 400]) as [number, number]);
     await expect(rail_).toHaveAttribute('data-revealed', 'true');
   }
-  if (!(await settings(page).isVisible())) await railMenus(page).getByRole('button', { name: 'Settings', exact: true }).click();
+  if (!(await settings(page).isVisible())) await rail(page).getByRole('button', { name: 'Settings', exact: true }).click();
   await expect(settings(page)).toBeVisible();
 }
 async function choose(page: Page, place: 'left' | 'right' | 'bottom') {
@@ -70,7 +80,7 @@ test.describe('the menu pin and position (pointer layout)', () => {
     await expect(rail(page)).toHaveAttribute('data-revealed', 'true');
     expect((await boxOf(rail(page))).x).toBeGreaterThanOrEqual(0);
     await expect(page.getByTestId('menu-grip')).toHaveCSS('opacity', '0');
-    await railMenus(page).getByRole('button', { name: 'Settings', exact: true }).click();
+    await rail(page).getByRole('button', { name: 'Settings', exact: true }).click();
     await pinSwitch(page).click();
     await settings(page).getByRole('button', { name: 'Close' }).click();
     // The pointer comes onto the rail and leaves it: the usual 300 ms hide.
@@ -80,24 +90,31 @@ test.describe('the menu pin and position (pointer layout)', () => {
     await expect(rail(page)).toHaveAttribute('data-revealed', 'false');
   });
 
-  test('Right: a rail clear of the chip and the banner, with the panel to its left', async ({ page }) => {
-    await openCamp(page);
+  test('Right: a rail and panel clear of the chip, the banner and a second notice, with the panel to the rail\'s left', async ({ page }) => {
+    await openCamp(page, undefined, '&signin=cancelled');
+    await expect(banner(page)).toBeVisible();
     await openSettings(page);
     if (!(await pinSwitch(page).isChecked())) await pinSwitch(page).click();
     await choose(page, 'right');
-    await railMenus(page).getByRole('button', { name: 'Inventory and shops', exact: true }).click();
+    await rail(page).getByRole('button', { name: 'Inventory and shops', exact: true }).click();
     const panel = await settled(menuDialog(page, 'Inventory and shops'));
     await expect(panel).toBeVisible();
     const r = await boxOf(rail(page));
     const p = await boxOf(panel);
     const chip = await boxOf(cornerChip(page));
+    const arrival = await boxOf(banner(page));
+    const column = await boxOf(notices(page));
+    // Two things stack under the chip: the banner and the sign-in notice, so the column is taller than the banner alone.
+    expect(column.height).toBeGreaterThan(arrival.height + 20);
     expect(r.x + r.width).toBeLessThanOrEqual(1280 - 8 + 1);
     expect(r.x + r.width).toBeGreaterThan(1280 - 70);
-    expect(r.y).toBeGreaterThanOrEqual(chip.y + chip.height + 8);
+    for (const above of [chip.y + chip.height, arrival.y + arrival.height, column.y + column.height]) {
+      expect(r.y).toBeGreaterThanOrEqual(above + 8);
+      expect(p.y).toBeGreaterThanOrEqual(above);
+    }
     expect(p.x + p.width).toBeLessThanOrEqual(r.x);
     expect(intersects(p, r)).toBe(false);
-    expect(p.y).toBeGreaterThanOrEqual(chip.y + chip.height);
-    expect(intersects(p, chip)).toBe(false);
+    for (const other of [chip, arrival, column]) expect(intersects(p, other)).toBe(false);
     if (shotDir) await page.screenshot({ path: `${shotDir}/task-5-right.png` });
   });
 
@@ -112,12 +129,12 @@ test.describe('the menu pin and position (pointer layout)', () => {
     expect(r.width).toBeGreaterThan(r.height);
     expect(Math.abs(r.x + r.width / 2 - 640)).toBeLessThanOrEqual(2);
     expect(Math.abs(r.y + r.height - (800 - 8))).toBeLessThanOrEqual(2);
-    await railMenus(page).getByRole('button', { name: 'Schedule', exact: true }).hover();
+    await rail(page).getByRole('button', { name: 'Schedule', exact: true }).hover();
     const tip = page.getByRole('tooltip');
     await expect(tip).toHaveText('Schedule');
     const t = await boxOf(tip);
     expect(t.y + t.height).toBeLessThanOrEqual(r.y);
-    await railMenus(page).getByRole('button', { name: 'Inventory and shops', exact: true }).click();
+    await rail(page).getByRole('button', { name: 'Inventory and shops', exact: true }).click();
     const panel = await settled(menuDialog(page, 'Inventory and shops'));
     const p = await boxOf(panel);
     expect(p.y + p.height).toBeLessThanOrEqual(r.y);
@@ -160,7 +177,7 @@ test.describe('the menu pin and position (pointer layout)', () => {
     await page.waitForFunction(() => window.__cloudiatorCamp?.state()?.ready === true, null, { timeout: 45_000 });
     await expect(rail(page)).toHaveAttribute('data-place', 'bottom');
     await expect(rail(page)).toHaveAttribute('data-revealed', 'true');
-    await railMenus(page).getByRole('button', { name: 'Settings', exact: true }).click();
+    await rail(page).getByRole('button', { name: 'Settings', exact: true }).click();
     await expect(pinSwitch(page)).toBeChecked();
     await expect(placeRadio(page, 'Bottom')).toBeChecked();
   });
@@ -187,9 +204,56 @@ test.describe('the phone layout', () => {
     expect(r.x).toBeLessThan(200);
     expect(r.y).toBeGreaterThan(600);
     await expect(rail(page).getByRole('button', { name: /^(Pin|Unpin) menu$|^Menu position$/ })).toHaveCount(0);
-    await railMenus(page).getByRole('button', { name: 'Settings', exact: true }).click();
-    await expect(settings(page).getByText('Menu options are available on larger screens.')).toBeVisible();
+    await rail(page).getByRole('button', { name: 'Settings', exact: true }).click();
+    await expect(settings(page).getByText('Menu options are available with a mouse or trackpad.')).toBeVisible();
     await expect(settings(page).getByRole('switch')).toHaveCount(0);
     await expect(settings(page).getByRole('radio')).toHaveCount(0);
   });
 });
+
+for (const place of ['left', 'right', 'bottom'] as const) {
+  test.describe(`a short window (1280×640), menu on the ${place}`, () => {
+    test.use({ viewport: { width: 1280, height: 640 } });
+    test.beforeEach(({}, testInfo) => { test.skip(testInfo.project.name !== 'desktop', 'The pointer layout.'); });
+
+    test('keeps the whole rail in view, the gear fully visible and clickable', async ({ page }) => {
+      await openCamp(page, JSON.stringify({ pinned: true, place }), '&signin=cancelled');
+      await expect(banner(page)).toBeVisible();
+      await expect(rail(page)).toHaveAttribute('data-revealed', 'true');
+      await expect.poll(async () => { const b = await boxOf(rail(page)); return b.y >= 0 && b.y + b.height <= 640; }).toBe(true);
+      const r = await boxOf(rail(page));
+      const gearButton = rail(page).getByRole('button', { name: 'Settings', exact: true });
+      await expect.poll(async () => { const g = await boxOf(gearButton); return g.y >= 0 && g.y + g.height <= 640 && g.x >= 0 && g.x + g.width <= 1280; }).toBe(true);
+      expect(r.y + r.height).toBeLessThanOrEqual(640 - 4);
+      if (place === 'right') expect(r.y).toBeGreaterThanOrEqual((await boxOf(notices(page))).y + (await boxOf(notices(page))).height);
+      // Every button keeps a usable size, and the gear opens Settings.
+      expect((await boxOf(gearButton)).width).toBeGreaterThanOrEqual(24);
+      await gearButton.click();
+      await expect(settings(page)).toBeVisible();
+    });
+  });
+}
+
+for (const place of ['right', 'bottom'] as const) {
+  test.describe(`a profile card opened from a list, menu on the ${place}`, () => {
+    test.beforeEach(({}, testInfo) => { test.skip(testInfo.project.name !== 'desktop', 'The pointer layout.'); });
+
+    test('sits beside the open panel, never over it or the rail', async ({ page }) => {
+      await openCamp(page, JSON.stringify({ pinned: true, place }));
+      const list = await openMenuAt(page, 'Gladiators');
+      await settled(list);
+      const row = list.getByRole('button', { name: /^Profile: / }).first();
+      await row.click();
+      const card = page.getByRole('dialog', { name: /^Profile: / });
+      await expect(card).toBeVisible();
+      const panelBox = await boxOf(list);
+      await expect.poll(async () => !intersects(await boxOf(card), panelBox)).toBe(true);
+      const c = await boxOf(card);
+      expect(intersects(c, await boxOf(rail(page)))).toBe(false);
+      expect(c.x).toBeGreaterThanOrEqual(0);
+      expect(c.x + c.width).toBeLessThanOrEqual(1280);
+      expect(c.y + c.height).toBeLessThanOrEqual(page.viewportSize()!.height);
+      if (place === 'right') expect(c.x + c.width).toBeLessThanOrEqual(panelBox.x);
+    });
+  });
+}

@@ -26,6 +26,7 @@ import type { GameGateway } from '../../lib/api/gateway';
 import type { ProfileRead } from '../../lib/api/reads';
 import type { Point } from '../../game/iso';
 import { useClockMode } from '../../lib/clock-setting';
+import type { MenuPlace } from '../shell/menu-prefs';
 import type { MenuId } from '../shell/menus';
 import { COMPACT_QUERY } from '../shell/rail-reveal';
 import type { Roster } from './RosterPanel';
@@ -248,29 +249,55 @@ export function ProfileCard({ actor, profile, profileFailed = false, own, ownPla
 }
 
 type Size = { width: number; height: number };
-/** The menus' left edge (beside the rail) and the panel's right edge (shell.module.css), the chip row's height, a margin. */
+/** The open menu panel's box in the shell (layout coordinates), for a card that opens beside it. */
+export type PanelBox = { left: number; top: number; width: number };
+/** Which edge the menu is on and the open panel's box (null when none is measured): a card opened from a list sits beside that panel. */
+export type MenuSide = { place: MenuPlace; panel: PanelBox | null };
+/** The menus' left edge (beside a left rail) and the panel's right edge (shell.module.css), the chip row's height, a margin. */
 const RAIL_RIGHT = 66, PANEL_RIGHT = 66 + 380 + 12, TOP = 64, MARGIN = 12;
+/** A right rail takes this much of the window's right side (its 8 px, 54 px and a gap), and a bottom bar this much of the bottom. */
+const RAIL_SIDE = 66, BAR = 8 + 54 + 12;
 /** The card's bottom sits this far above a clicked body's centre (clear of the head), or its top this far below. */
 const ABOVE = 64, BELOW = 44;
 /** Beside a clicked body: the card's near edge this far from the body's centre (clear of the gladiator at the camp's zoom). */
 const SIDE = 40;
+/** The narrowest a card is made to sit beside a panel (it is 520 px wide when it has the room). */
+const MIN_CARD = 300, CARD_WIDTH = 520;
 const clamp = (value: number, min: number, max: number) => Math.max(min, Math.min(value, max));
 
 /**
  * Where the card sits on desktop. Beside a clicked gladiator: centred over them and above their head, or below their feet
- * when there is no room above; beside the menus otherwise. Always right of the rail, below the corner chip, in the view.
+ * when there is no room above; beside the open menu panel otherwise (right of a left panel, left of a right panel, left of a
+ * panel above a bottom bar, or right of it when there is no room). Always clear of the rail, below the corner chip, in the view.
  */
-export function placeCard(screen: Point | null, card: Size, view: Size): { left: number; top: number } {
-  const maxLeft = view.width - card.width - MARGIN, maxTop = view.height - card.height - MARGIN;
-  if (!screen) return { left: clamp(PANEL_RIGHT, RAIL_RIGHT, maxLeft), top: TOP };
+export function placeCard(screen: Point | null, card: Size, view: Size, side: MenuSide = { place: 'left', panel: null }): { left: number; top: number; width?: number } {
+  const { place, panel } = side;
+  const minLeft = place === 'left' ? RAIL_RIGHT : MARGIN;
+  const maxLeft = view.width - card.width - (place === 'right' ? RAIL_SIDE : MARGIN);
+  const maxTop = view.height - card.height - (place === 'bottom' ? BAR : MARGIN);
+  if (!screen) {
+    if (place === 'left') return { left: clamp(PANEL_RIGHT, minLeft, maxLeft), top: TOP };
+    // Right and bottom panels start below the chip and the notices, so the card lines up with the panel's top.
+    const top = clamp(panel?.top ?? TOP, TOP, Math.max(TOP, maxTop));
+    const panelLeft = panel?.left ?? (place === 'right' ? view.width - 78 - 380 : view.width / 2 - 190), panelWidth = panel?.width ?? 380;
+    // Room left of the panel (always), and right of it (a bottom bar's panel is centred; a right panel has the rail there).
+    const leftRoom = panelLeft - MARGIN - minLeft;
+    const rightRoom = place === 'bottom' ? view.width - MARGIN - (panelLeft + panelWidth + MARGIN) : 0;
+    if (card.width <= leftRoom) return { left: panelLeft - MARGIN - card.width, top };
+    if (card.width <= rightRoom) return { left: panelLeft + panelWidth + MARGIN, top };
+    // Neither side holds the full card: it narrows to the roomier side (not below MIN_CARD) rather than cover the panel.
+    const roomier = rightRoom > leftRoom ? 'right' : 'left';
+    const room = Math.max(MIN_CARD, Math.floor(roomier === 'right' ? rightRoom : leftRoom));
+    return roomier === 'right' ? { left: panelLeft + panelWidth + MARGIN, top, width: room } : { left: Math.max(minLeft, panelLeft - MARGIN - room), top, width: room };
+  }
   const above = screen.y - ABOVE - card.height, below = screen.y + BELOW;
-  const centred = clamp(screen.x - card.width / 2, RAIL_RIGHT, maxLeft);
+  const centred = clamp(screen.x - card.width / 2, minLeft, maxLeft);
   if (above >= TOP) return { left: centred, top: above };
   if (below <= maxTop) return { left: centred, top: below };
   // Task 11c: a card too tall for either (the richer card in a short window) sits beside the gladiator instead, right of the click
   // or, near the right edge, left of it, so the gladiator stays in view.
   const right = screen.x + SIDE, left = screen.x - SIDE - card.width;
-  return { left: right <= maxLeft ? right : left >= RAIL_RIGHT ? left : centred, top: clamp(screen.y - card.height / 2, TOP, maxTop) };
+  return { left: right <= maxLeft ? right : left >= minLeft ? left : centred, top: clamp(screen.y - card.height / 2, TOP, maxTop) };
 }
 
 /**
@@ -287,7 +314,7 @@ function followReasonOf(actor: PublicActor, roster: Roster | null, sceneStatus: 
 }
 
 /** The profile card over the camp: resolves the actor, loads the public profile and places the card. */
-export function ProfileLayer({ target, world, reads, ownerId, ownPlace = null, roster, sceneStatus, following, nowMs, onFollow, onWatch, onOpenMenu, onClose }: {
+export function ProfileLayer({ target, world, reads, ownerId, ownPlace = null, roster, sceneStatus, following, nowMs, menuPlace = 'left', onFollow, onWatch, onOpenMenu, onClose }: {
   target: ProfileTarget;
   world: WorldSnapshot | null;
   /** Public profile reads (null until the fixture preview's reads load). */
@@ -302,6 +329,8 @@ export function ProfileLayer({ target, world, reads, ownerId, ownPlace = null, r
   following: string | null;
   /** The viewer's clock (the shell's minute clock), for "In camp since". */
   nowMs: number;
+  /** The edge the menu is on (Settings): the card sits beside the open panel there. */
+  menuPlace?: MenuPlace;
   onFollow(gladiatorId: string): void;
   onWatch(activityId: string, gladiatorId: string): void;
   onOpenMenu(id: MenuId): void;
@@ -309,7 +338,9 @@ export function ProfileLayer({ target, world, reads, ownerId, ownPlace = null, r
 }) {
   const card = useRef<HTMLElement>(null);
   const [loaded, setLoaded] = useState<{ profile: ProfileRead | null; failed: boolean } | null>(null);
-  const [place, setPlace] = useState<{ left: number; top: number } | null>(null);
+  const [place, setPlace] = useState<{ left: number; top: number; width?: number } | null>(null);
+  // A card narrowed to fit beside a panel measures its narrow width; its natural one (CARD_WIDTH) is what it asks the room for.
+  const narrowed = useRef(false);
   const id = target.gladiatorId;
 
   useEffect(() => {
@@ -328,19 +359,22 @@ export function ProfileLayer({ target, world, reads, ownerId, ownPlace = null, r
     if (!element) return;
     const update = () => {
       if (window.matchMedia?.(COMPACT_QUERY).matches) { setPlace(null); return; }
-      const next = placeCard(screen, { width: element.offsetWidth, height: element.offsetHeight }, { width: window.innerWidth, height: window.innerHeight });
-      setPlace(current => (current && current.left === next.left && current.top === next.top ? current : next));
+      const surface = document.querySelector<HTMLElement>('[data-menu-surface]:not([hidden])');
+      const panel = surface ? { left: surface.offsetLeft, top: surface.offsetTop, width: surface.offsetWidth } : null;
+      const next = placeCard(screen, { width: narrowed.current ? CARD_WIDTH : element.offsetWidth, height: element.offsetHeight }, { width: window.innerWidth, height: window.innerHeight }, { place: menuPlace, panel });
+      narrowed.current = next.width !== undefined;
+      setPlace(current => (current && current.left === next.left && current.top === next.top && current.width === next.width ? current : next));
     };
     update();
     const observer = typeof ResizeObserver === 'function' ? new ResizeObserver(update) : null;
     observer?.observe(element);
     window.addEventListener('resize', update);
     return () => { observer?.disconnect(); window.removeEventListener('resize', update); };
-  }, [screen]);
+  }, [screen, menuPlace]);
 
   const actor = world?.actors.find(a => a.gladiatorId === id) ?? loaded?.profile?.actor ?? null;
   const name = actor?.name ?? target.name;
-  const style = place ? ({ '--card-left': `${place.left}px`, '--card-top': `${place.top}px` } as CSSProperties) : undefined;
+  const style = place ? ({ '--card-left': `${place.left}px`, '--card-top': `${place.top}px`, ...(place.width ? { '--card-width': `${place.width}px` } : {}) } as CSSProperties) : undefined;
   return (
     <section ref={card} className={styles.card} role="dialog" aria-label={`Profile: ${name}`} tabIndex={-1} style={style} data-profile-card="">
       <button type="button" className={styles.close} aria-label="Close profile" onClick={onClose}>×</button>

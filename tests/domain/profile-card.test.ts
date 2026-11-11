@@ -331,4 +331,23 @@ describe('profile card', () => {
     expect(placeCard(null, size, view)).toEqual({ left: 458, top: 64 });
     expect(placeCard(null, size, { width: 600, height: 720 })).toEqual({ left: 328, top: 64 });
   });
+
+  it('sits beside the open panel when the menu is on the right or at the bottom (Settings)', () => {
+    const size = { width: 260, height: 200 }, view = { width: 1280, height: 800 };
+    // Right: left of the panel (its left edge 502 here), lined up with its top, clear of the rail's 66 px on the right.
+    const right = { place: 'right' as const, panel: { left: 502, top: 156, width: 704 } };
+    expect(placeCard(null, size, view, right)).toEqual({ left: 502 - 12 - 260, top: 156 });
+    // No panel measured yet: the standard 380 px panel 78 px from the right edge.
+    expect(placeCard(null, size, view, { place: 'right', panel: null })).toEqual({ left: 1280 - 78 - 380 - 12 - 260, top: 64 });
+    // A clicked gladiator near the right edge keeps clear of the rail; near the left edge it may use the whole left side.
+    expect(placeCard({ x: 1270, y: 400 }, size, view, right).left).toBe(1280 - 66 - 260);
+    expect(placeCard({ x: 20, y: 700 }, size, view, right).left).toBe(12);
+    // Bottom: left of the centred panel, or right of it when there is no room; the bar keeps the bottom 74 px.
+    const bottom = { place: 'bottom' as const, panel: { left: 450, top: 156, width: 380 } };
+    expect(placeCard(null, size, view, bottom)).toEqual({ left: 450 - 12 - 260, top: 156 });
+    expect(placeCard(null, size, view, { place: 'bottom', panel: { left: 200, top: 156, width: 380 } })).toEqual({ left: 200 + 380 + 12, top: 156 });
+    // The 520 px card has 426 px either side of a centred 380 px panel at 1280: it narrows rather than cover the panel.
+    expect(placeCard(null, { width: 520, height: 400 }, view, bottom)).toEqual({ left: 12, top: 156, width: 426 });
+    expect(placeCard({ x: 640, y: 700 }, { width: 260, height: 400 }, view, bottom).top).toBeLessThanOrEqual(800 - 74 - 400);
+  });
 });

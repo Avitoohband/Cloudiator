@@ -1,7 +1,7 @@
 'use client';
 
 // The game screen (spec "Full-screen camp"): the camp fills the window, and everything else floats on it. A hidden rail
-// on the left edge opens one menu at a time, beside it (a bottom sheet on touch); the corner chip sits top right. The
+// on the left edge (or the right or bottom one, by the Settings choice) opens one menu at a time, beside it (a bottom sheet on touch); the corner chip sits top right. The
 // shell owns the shared game state (`useGameState`), the scene bridge and the menus' contents, which are the existing
 // panels, re-housed. Keyboard: the first Tab reaches the skip link and the next one the rail's first icon, which reveals
 // the rail (Task 23.5: the shell no longer takes the first Tab); Escape closes the open menu and returns the focus to its
@@ -567,7 +567,7 @@ export function CampShell({ fixture, previewAs, previewResting = false, previewB
     <div ref={shellRef} className={styles.shell} data-rail={railShown ? 'shown' : 'hidden'} data-menu-place={prefs.place} data-sheet={open ? 'open' : undefined}
       data-card={card ? 'open' : undefined} data-owner-menu={owner ? '' : undefined} data-pill={fixture || fixtureRefused ? 'shown' : undefined}
       style={{ '--chip-w': `${place.chipWidth}px`, '--chip-bottom': `${place.chipBottom}px`,
-        '--panel-clear-left': `${place.panelClearLeft}px`, '--panel-clear-right': `${place.panelClearRight}px` } as CSSProperties}>
+        '--panel-clear-left': `${place.panelClearLeft}px`, '--panel-clear-right': `${place.panelClearRight}px`, '--menu-clear-top': `${place.menuClearTop}px` } as CSSProperties}>
       <h1 className={styles.sr}>Cloudiator — Hearthstone Camp</h1>
       <MenuRail menus={menus} state={{ revealed: railShown, open }} place={prefs.place} send={send} onToggle={id => send({ toggle: id })}
         zoom={sceneUnavailable ? null : direction => bridge.emit('camera-zoom', { direction })} />
@@ -575,7 +575,7 @@ export function CampShell({ fixture, previewAs, previewResting = false, previewB
         latestPatch={game.latestPatch} onChangeLook={openLook} onOpenMenu={show} onCreate={joining.offer} titles={noticeTitles} />
       {fixture && <p className={styles.pill} role="status">Fixture mode — progress is not saved online</p>}
       {fixtureRefused && <p className={styles.pill} role="status">Fixture preview is unavailable in this build.</p>}
-      <div className={styles.notices} data-stacked={place.stacked ? 'true' : undefined}>
+      <div className={styles.notices} data-notices="" data-stacked={place.stacked ? 'true' : undefined}>
         {arrivalSlot}
         <div className={styles.noticeList}>
           <PatchNotice number={patchNotice} compact={compact} onReload={reloadPage} onLater={() => setPatchLater(patchNotice)} />
@@ -600,7 +600,7 @@ export function CampShell({ fixture, previewAs, previewResting = false, previewB
       ))}
       {card && <ProfileLayer key={card.n} target={card} world={world} reads={reads} ownerId={ownerId} ownPlace={ownPlace} roster={roster} sceneStatus={game.sceneStatus}
         nowMs={nowMs}
-        following={following} onClose={() => closeCard(true)} onOpenMenu={id => { closeCard(false); show(id); }}
+        following={following} menuPlace={prefs.place} onClose={() => closeCard(true)} onOpenMenu={id => { closeCard(false); show(id); }}
         onFollow={id => { bridge.emit('follow-character', { gladiatorId: following === id ? null : id }); closeCard(false); handBack(); }}
         onWatch={(activityId, gladiatorId) => { closeCard(false); bridge.emit('open-arena', { activityId, gladiatorId }); }} />}
       <main id="main" className={styles.camp} data-camp-view="" tabIndex={-1}

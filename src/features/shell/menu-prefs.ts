@@ -1,5 +1,4 @@
 import { useSyncExternalStore } from 'react';
-import { COMPACT_QUERY } from './rail-reveal';
 
 // The menu's two device preferences (Patch 1.9): whether it stays pinned open, and which edge it sits on. Kept on this
 // device only (never on the account), read and written inside try/catch, with the page's own memory as the fallback; a
@@ -55,11 +54,3 @@ export function useMenuPrefs(): [MenuPrefs, (change: Partial<MenuPrefs>) => void
   const prefs = useSyncExternalStore(subscribe, readMenuPrefs, () => DEFAULT_MENU_PREFS);
   return [prefs, change => writeMenuPrefs({ ...readMenuPrefs(), ...change })];
 }
-
-const subscribeCompact = (onChange: () => void) => {
-  const query = window.matchMedia?.(COMPACT_QUERY);
-  query?.addEventListener('change', onChange);
-  return () => query?.removeEventListener('change', onChange);
-};
-/** Whether the touch layout (the ☰ button) is in use; the pin and the position are for the pointer layout only. */
-export const useCompactLayout = () => useSyncExternalStore(subscribeCompact, () => window.matchMedia?.(COMPACT_QUERY).matches ?? false, () => false);

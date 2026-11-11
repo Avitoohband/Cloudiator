@@ -6,10 +6,13 @@
 // Without a gladiator it holds the joining path (Task 13.6): a visitor is told everything is open to watch and offered
 // "Sign in with Google to create your gladiator"; signed in without one, "Create your gladiator" reopens the creation
 // dialog over the camp; and the session and owner-load states. Names render as React text.
+// Patch 1.9 Task 10: the XP bar under Stamina, the Attributes and Stats blocks, and help on their labels (and on Stamina and Load).
 // Patch 1.9: Worn equipment's slots open the equip picker (`WornEquipment`); a phone's picker is a sheet over the panel body, and the
 // summary and the build planner it covers are hidden meanwhile.
 import { useEffect, useId, useState, type ReactNode } from 'react';
 import type { OwnerState } from '@contracts/reads';
+import { RULES_V2 } from '@domain/rules-v2';
+import type { Rules } from '@domain/types';
 import type { GameGateway } from '../../lib/api/gateway';
 import type { SessionState } from '../../lib/api/session';
 import type { DisplayClock } from '../../game/display-clock';
@@ -22,6 +25,10 @@ import { slotTimeText } from '../schedule/slot-time';
 import { TitleButton } from '../titles/TitlePicker';
 import { activityStatus } from './activity-status';
 import { ClassCard } from './ClassCard';
+import { attributeHelp, attributeRows, cardStats, ownBuild, pointsTotal, statHelp, statRows } from './profile-card';
+import { useStatHints } from './stat-hints';
+import { attributeNumbers, loadHelp, staminaHelp, statNumbers } from './stat-numbers';
+import { xpView } from './xp-progress';
 import { WornEquipment } from './WornEquipment';
 import type { Viewer } from './useGameState';
 import styles from './CharacterPanel.module.css';
@@ -47,9 +54,68 @@ function useNow(clock: DisplayClock) {
  */
 export type TitleControls = { worn: string | null; status: string | null; onOpen(): void };
 
-function OwnerSummary({ owner, slotIndex, clock, fixture, stale, resting, onRetry, titles, covered }: {
+type Hints = ReturnType<typeof useStatHints>;
+
+/**
+ * The XP bar (Patch 1.9 Task 10): the level, the XP into it, what is left, the level's price, and the next expedition's XP as a ghost segment
+ * after the fill (hatched blue, hatched gold where it reaches the end) with the line that says so. The XP is from the saved schedule and the
+ * active rules; an expedition pays it only on a win, so the words say "up to".
+ */
+function XpBar({ owner, rules, nowMs }: { owner: OwnerState; rules: Rules; nowMs: number }) {
+  const hintId = useId();
+  const view = xpView(owner, rules, nowMs);
+  const percent = (fraction: number) => `${Math.round(fraction * 10000) / 100}%`;
+  const [leftXp, toLevel] = view.toNextText.split(' to ');
+  return (
+    <div className={styles.xp} data-testid="xp-block">
+      <div className={styles.xpLabel}><span>{view.levelText}</span><span>{view.valueText}</span></div>
+      <div className={styles.xpBar} role="progressbar" aria-label="Experience" aria-valuemin={0} aria-valuenow={view.max ? 1 : view.xp} aria-valuemax={view.max ? 1 : view.need}
+        aria-valuetext={view.valueText} aria-describedby={view.hint ? hintId : undefined}>
+        <i className={styles.xpFill} data-testid="xp-fill" style={{ width: percent(view.fill) }} />
+        {view.ghost > 0 && <i className={`${styles.xpGhost} ${view.crosses ? styles.xpGhostUp : ''}`} data-testid="xp-ghost" data-crosses={view.crosses || undefined} style={{ width: percent(view.ghost) }} />}
+      </div>
+      {!view.max && <p className={styles.xpSub}><span><strong>{leftXp}</strong> to {toLevel}</span><span>{view.ruleText}</span></p>}
+      {view.hint && <p id={hintId} className={`${styles.xpHint} ${view.crosses ? styles.xpHintUp : ''}`} data-testid="xp-hint"><span className={styles.xpSwatch} aria-hidden="true" />{view.hint}</p>}
+    </div>
+  );
+}
+
+/** Attributes (the build's points and the class's bonus) beside Stats (what a fight uses), each label with its help (Patch 1.9 Task 10). */
+function BuildFacts({ owner, hints }: { owner: OwnerState; hints: Hints }) {
+  const build = ownBuild(owner);
+  const classId = owner.currentBuild.classId;
+  const stats = cardStats(classId, build);
+  return (
+    <div className={styles.facts}>
+      <section aria-label="Attributes">
+        <h3 className={styles.factsHead}>Attributes · {pointsTotal(build.allocations)} points</h3>
+        <ul className={styles.factRows}>
+          {attributeRows(classId, build.allocations).map(row => <li key={row.attribute} className={styles.factRow} {...hints.hintRow(row.label)}>
+            <span className={styles.factName}>{hints.hintLabel(row.label, attributeHelp[row.attribute], attributeNumbers[row.attribute])}</span>
+            <span className={styles.track} aria-hidden="true"><i style={{ width: `${row.width * 100}%` }} /></span>
+            <span className={styles.factValue}>{row.points}{row.bonus && <span className={styles.bonus}> {row.bonus}</span>}</span>
+          </li>)}
+        </ul>
+      </section>
+      {stats && <section aria-label="Stats">
+        <h3 className={styles.factsHead}>Stats</h3>
+        <ul className={styles.factRows}>
+          {statRows(stats).map(([label, value]) => <li key={label} className={styles.factRow} {...hints.hintRow(label)}>
+            <span className={styles.factName}>{hints.hintLabel(label, statHelp[label], statNumbers[label])}</span>
+            <span className={styles.factValue}>{value}</span>
+          </li>)}
+        </ul>
+      </section>}
+    </div>
+  );
+}
+
+function OwnerSummary({ owner, slotIndex, clock, fixture, stale, resting, onRetry, titles, covered, rules, hints }: {
   owner: OwnerState; slotIndex: number | null; clock: DisplayClock; fixture: boolean; stale: boolean; resting: boolean; onRetry(): void;
   titles?: TitleControls;
+  rules: Rules;
+  /** The panel's one set of help tooltips (shared with the Worn equipment's Load). */
+  hints: Hints;
   /** A phone's equip sheet is open over the panel: this is hidden under it. */
   covered: boolean;
 }) {
@@ -87,15 +153,20 @@ function OwnerSummary({ owner, slotIndex, clock, fixture, stale, resting, onRetr
         <p className={styles.status} role="status">{status.label}{ends ? ` · ends ${ends}` : ''}</p>
         {gain && <p className={styles.gain} data-testid="rest-gain"><RestGainText text={gain} /></p>}
       </div>
-      <label className={styles.stamina} htmlFor={staminaId}>Stamina <span>{owner.stamina.current} / {owner.stamina.maximum}</span></label>
-      <progress id={staminaId} className={styles.bar} value={owner.stamina.current} max={owner.stamina.maximum} />
+      <div className={`${styles.stamina} ${styles.hintRow}`} {...hints.hintRow('Stamina')}>
+        <span>{hints.hintLabel('Stamina', staminaHelp, statNumbers.Stamina)}</span>
+        <span id={staminaId}>{owner.stamina.current} / {owner.stamina.maximum}</span>
+      </div>
+      <progress className={styles.bar} aria-label="Stamina" aria-describedby={staminaId} value={owner.stamina.current} max={owner.stamina.maximum} />
+      <XpBar owner={owner} rules={rules} nowMs={now} />
       <dl className={styles.wallets}><div><dt>Gold</dt><dd>{owner.wallets.money}</dd></div><div><dt>Renown</dt><dd>{owner.wallets.renown}</dd></div></dl>
+      <BuildFacts owner={owner} hints={hints} />
     </section>
   );
 }
 
 export function CharacterPanel({ viewer, session, owner, ownerError, slotIndex, clock, gateway, fixture, previewAs, previewFailed, refreshOwner, onCreate,
-  resting = false, titles }: {
+  resting = false, titles, rules = RULES_V2 }: {
   viewer: Viewer;
   session: SessionState;
   owner: OwnerState | null;
@@ -115,15 +186,20 @@ export function CharacterPanel({ viewer, session, owner, ownerError, slotIndex, 
   titles?: TitleControls;
   /** The owner's own gladiator rests at home in the shared world (Task 23.9 fix round 1). */
   resting?: boolean;
+  /** The active rules (`displayRules` of the latest revision read's version): the XP an expedition pays is theirs. */
+  rules?: Rules;
 }) {
   const retry = () => { void refreshOwner().catch(() => undefined); };
   // Patch 1.9: a Worn equipment slot opens the equip picker; on a phone it is a sheet over the panel body, and what it covers is hidden.
   const [picking, setPicking] = useState(false);
+  // One set of help tooltips for the whole panel (the stamina, attribute and stat labels and the Worn equipment's Load): one is open at a time.
+  const hints = useStatHints({ buttonClass: styles.hintButton, tipClass: styles.hint, aboveClass: styles.hintAbove, numbersClass: styles.hintNumbers });
   if (owner) {
     return <>
       <OwnerSummary owner={owner} slotIndex={slotIndex} clock={clock} fixture={fixture} stale={ownerError !== null} resting={resting} onRetry={retry}
-        titles={titles} covered={picking} />
-      <WornEquipment key={`worn-${owner.gladiatorId}`} owner={owner} gateway={gateway} refresh={refreshOwner} clock={clock} preview={fixture} onPicking={setPicking} />
+        titles={titles} covered={picking} rules={rules} hints={hints} />
+      <WornEquipment key={`worn-${owner.gladiatorId}`} owner={owner} gateway={gateway} refresh={refreshOwner} clock={clock} preview={fixture} onPicking={setPicking}
+        loadHelp={{ row: hints.hintRow('Load'), label: hints.hintLabel('Load', loadHelp, statNumbers.Load), className: styles.loadRow }} />
       <div className={styles.planner} data-covered={picking || undefined}>
         {fixture ? <p className="panel-notice">This preview cannot change the build.</p>
           : <BuildPanel key={owner.gladiatorId} owner={owner} gateway={gateway} refresh={refreshOwner} clock={clock} />}

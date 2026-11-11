@@ -11,7 +11,7 @@
 // the card with Wear on the right (two columns from 560 px). Touch (the shell's compact query): a sheet over the panel body with Back and a
 // Wear bar at its foot; what it covers is hidden. A keyboard command whose control leaves (Retry, Cancel changes) gives the focus to its
 // outcome line (`useOutcomeFocus`, as the Inventory does); Wear, Undo and Remove give it back to the slot.
-import { useEffect, useId, useLayoutEffect, useRef, useState, type KeyboardEvent } from 'react';
+import { useEffect, useId, useLayoutEffect, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
 import type { EquipmentSlot } from '@contracts/commands';
 import type { ItemInstance, OwnerState } from '@contracts/reads';
 import { RULES_V1 } from '@domain/rules-v1';
@@ -32,6 +32,7 @@ import { useOutcomeFocus } from '../shell/focus-lost';
 import {
   SLOT_NAMES, compareChoice, equipmentLoad, isTwoHanded, itemLabel, itemName, lockText, nextBuildDiffers, nextLabel, slotTiles, statText, tileMark,
 } from './equip-picker';
+import type { HintRowProps } from './stat-hints';
 import styles from './WornEquipment.module.css';
 
 /** The Remove tile's key (a tile's key is otherwise its first piece's id). */
@@ -53,7 +54,7 @@ function scrollParent(element: HTMLElement): HTMLElement | null {
 
 type Outcome = { role: 'status' | 'alert'; text: string };
 
-export function WornEquipment({ owner, gateway, refresh, clock, preview = false, onPicking }: {
+export function WornEquipment({ owner, gateway, refresh, clock, preview = false, onPicking, loadHelp }: {
   owner: OwnerState;
   /** The live gateway: gear commands always go online. */
   gateway: GameGateway;
@@ -63,6 +64,8 @@ export function WornEquipment({ owner, gateway, refresh, clock, preview = false,
   preview?: boolean;
   /** Whether a picker is open, for the panel to hide what a phone's sheet covers. */
   onPicking?(open: boolean): void;
+  /** The panel's help on the Load heading (Patch 1.9 Task 10): the row's props, the label (a button with its tooltip) and a class for the row. */
+  loadHelp?: { row: HintRowProps; label: ReactNode; className: string };
 }) {
   const { inventory } = owner;
   const worn = wornNow(owner), next = nextEquipment(owner), changed = changedSlots(owner);
@@ -315,7 +318,7 @@ export function WornEquipment({ owner, gateway, refresh, clock, preview = false,
     }}>
     <div className={inspection.heading}>
       <h3 id={headingId}>Worn equipment</h3>
-      {load && <p className={load.load > load.capacity ? styles.over : undefined}>Load <strong>{statText(load.load)} / {statText(load.capacity)}</strong>{loadIsNext ? ' (next slot)' : ''}</p>}
+      {load && <p className={[load.load > load.capacity ? styles.over : '', loadHelp?.className ?? ''].join(' ').trim() || undefined} {...loadHelp?.row}>{loadHelp?.label ?? 'Load'} <strong>{statText(load.load)} / {statText(load.capacity)}</strong>{loadIsNext ? ' (next slot)' : ''}</p>}
     </div>
     <div className={inspection.slots} data-slot-row="">
       {equipmentSlots.map(slot => {

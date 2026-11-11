@@ -3,7 +3,7 @@
 // (`deriveStats`, `makeFighter` for an expedition, `criticalProbability`), so they are what a fight uses; nothing more is sent.
 import type { Attributes, ClassId, EquipmentSlot } from '@contracts/commands';
 import type { ItemRarity } from '@contracts/events';
-import type { ItemInstance } from '@contracts/reads';
+import type { ItemInstance, OwnerState } from '@contracts/reads';
 import { CATALOG_V1 } from '@domain/catalog-v1';
 import { criticalProbability, makeFighter } from '@domain/combat';
 import { RULES_V1 } from '@domain/rules-v1';
@@ -45,6 +45,16 @@ export function cardStats(classId: ClassId, build: PublicBuild): CardStats | nul
   } catch {
     return null;
   }
+}
+
+/** The owner's current build in the public shape the card reads (a worn piece is found in the bag; a missing one is an empty slot). */
+export function ownBuild(owner: OwnerState): PublicBuild {
+  const { stance, allocations, equipment } = owner.currentBuild;
+  const gear = (id: string | null) => {
+    const item = owner.inventory.find(piece => piece.id === id);
+    return item ? { catalogId: item.catalogId, catalogVersion: item.catalogVersion, tier: item.tier, rarity: item.rarity, stats: item.stats } : null;
+  };
+  return { stance, allocations: { ...allocations }, equipment: Object.fromEntries(GEAR_SLOTS.map(slot => [slot, gear(equipment[slot])])) as PublicBuild['equipment'] };
 }
 
 /** A number as the card writes it: at most `places` decimals, trailing zeros dropped (12.30 is "12.3", 20.50 is "20.5"). */

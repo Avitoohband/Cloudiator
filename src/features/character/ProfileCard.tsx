@@ -20,7 +20,7 @@
 //
 // Patch 1.6 (spec "The Arena banner"): a gladiator who owns the Arena banner (the profile read's `banner`) shows the pill "🚩 Arena banner"
 // right after the name line, its flag decorative; every viewer sees the same card.
-import { useEffect, useId, useLayoutEffect, useRef, useState, type CSSProperties, type PointerEvent } from 'react';
+import { useEffect, useId, useLayoutEffect, useRef, useState, type CSSProperties } from 'react';
 import type { PublicActor, WorldSnapshot } from '@contracts/reads';
 import type { GameGateway } from '../../lib/api/gateway';
 import type { ProfileRead } from '../../lib/api/reads';
@@ -36,6 +36,7 @@ import { ownRestingText } from './activity-status';
 import { badgeText, seasonName } from '../seasons/season-text';
 import { wornTitleText } from '../titles/title-text';
 import { ActorPortrait } from './ActorPortrait';
+import { useStatHints } from './stat-hints';
 import { ClassChips } from './ClassCard';
 import { attributeHelp, attributeRows, cardStats, gearRows, overloadLine, pointsTotal, recordText, sinceText, statHelp, statRows } from './profile-card';
 import styles from './ProfileCard.module.css';
@@ -60,7 +61,6 @@ export type ProfileTarget = {
 };
 
 const RARITY_CLASS = { common: styles.rCommon, uncommon: styles.rUncommon, rare: styles.rRare } as const;
-type ProfileHint = { label: string; source: 'hover' | 'focus' | 'press' };
 
 export function ProfileCard({ actor, profile, profileFailed = false, own, ownPlace = null, record = null, followReason = null, following = false, nowMs, onFollow,
   onWatch, onOpenMenu }: {
@@ -88,75 +88,13 @@ export function ProfileCard({ actor, profile, profileFailed = false, own, ownPla
   onOpenMenu(id: MenuId): void;
 }) {
   const reasonId = useId();
-  const hintId = useId();
   const bodyRef = useRef<HTMLDivElement>(null);
-  const tooltipRef = useRef<HTMLSpanElement>(null);
-  const [hint, setHint] = useState<ProfileHint | null>(null);
-  const hintOpen = hint !== null;
-  const openLabel = hint?.label;
-  useLayoutEffect(() => {
-    const body = bodyRef.current;
-    const tooltip = tooltipRef.current;
-    const row = tooltip?.closest('[data-profile-stat-help]');
-    if (!body || !tooltip || !row) return;
-
-    const update = () => {
-      const scrollport = getComputedStyle(body).overflowY === 'auto' ? body : body.closest<HTMLElement>('[data-profile-card]') ?? body;
-      const top = scrollport.getBoundingClientRect().top + scrollport.clientTop;
-      const bounds = row.getBoundingClientRect();
-      const below = Math.min(window.innerHeight, top + scrollport.clientHeight) - bounds.bottom;
-      const above = bounds.top - Math.max(0, top);
-      tooltip.classList.toggle(styles.hintAbove, below < tooltip.offsetHeight && above > below);
-    };
-    update();
-    window.addEventListener('scroll', update, true);
-    window.addEventListener('resize', update);
-    return () => {
-      window.removeEventListener('scroll', update, true);
-      window.removeEventListener('resize', update);
-    };
-  }, [openLabel]);
-  useEffect(() => {
-    if (!hintOpen) return;
-    const dismissOnEscape = (event: KeyboardEvent) => {
-      if (event.key !== 'Escape' || event.defaultPrevented || (event.target instanceof Element && event.target.closest('dialog[open]'))) return;
-      event.preventDefault();
-      setHint(null);
-    };
-    const dismissOutside = (event: globalThis.PointerEvent) => {
-      if (event.target instanceof Element && !event.target.closest('[data-profile-stat-help]')) setHint(null);
-    };
-    document.addEventListener('keydown', dismissOnEscape, true);
-    document.addEventListener('pointerdown', dismissOutside, true);
-    return () => {
-      document.removeEventListener('keydown', dismissOnEscape, true);
-      document.removeEventListener('pointerdown', dismissOutside, true);
-    };
-  }, [hintOpen]);
-
-  const hintRow = (label: string) => ({
-    'data-profile-stat-help': '',
-    onPointerEnter: (event: PointerEvent<HTMLElement>) => {
-      if (event.pointerType === 'mouse' && window.matchMedia('(any-hover: hover)').matches) {
-        setHint(current => current && (current.label === label || current.source !== 'hover') ? current : { label, source: 'hover' });
-      }
-    },
-    onPointerLeave: () => setHint(current => current?.label === label && current.source === 'hover' ? null : current),
-  });
-  const hintLabel = (label: string, description: string) => {
-    const open = hint?.label === label;
-    const id = `${hintId}-${label.toLowerCase().replaceAll(' ', '-')}`;
-    return <>
-      <button type="button" className={styles.hintButton} aria-expanded={open} aria-describedby={open ? id : undefined}
-        onFocus={event => {
-          if (event.currentTarget.matches(':focus-visible')) setHint({ label, source: 'focus' });
-        }}
-        onBlur={() => setHint(current => current?.label === label ? null : current)}
-        onClick={() => setHint(current => current?.label === label && current.source === 'press' ? null : { label, source: 'press' })}
-      >{label}</button>
-      {open && <span ref={tooltipRef} id={id} role="tooltip" className={styles.hint}>{description}</span>}
-    </>;
-  };
+  // The help tooltips are shared with My gladiator (`useStatHints`); here the body scrolls on touch, the card itself on desktop.
+  const { hintRow, hintLabel } = useStatHints({ buttonClass: styles.hintButton, tipClass: styles.hint, aboveClass: styles.hintAbove,
+    scrollport: () => {
+      const body = bodyRef.current;
+      return body && (getComputedStyle(body).overflowY === 'auto' ? body : body.closest<HTMLElement>('[data-profile-card]') ?? body);
+    } });
 
   const clock = useClockMode();
   const bot = actor.botTeam === 'ludus-nimbus';

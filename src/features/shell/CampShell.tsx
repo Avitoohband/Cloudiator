@@ -538,7 +538,7 @@ export function CampShell({ fixture, previewAs, previewResting = false, previewB
     switch (id) {
       case 'gladiator': return <CharacterPanel viewer={viewer} session={game.session} owner={owner} ownerError={game.ownerError} slotIndex={game.slotIndex}
         clock={clock} gateway={gateway} fixture={fixture} previewAs={previewAs} previewFailed={previewError} refreshOwner={game.refreshOwner}
-        onCreate={joining.offer} resting={game.ownResting} titles={owner ? { worn: wornTitle, status: shownTitleStatus, onOpen: openTitlePicker } : undefined} />;
+        onCreate={joining.offer} resting={game.ownResting} rules={game.rules} titles={owner ? { worn: wornTitle, status: shownTitleStatus, onOpen: openTitlePicker } : undefined} />;
       case 'schedule': return owner && !fixture ? <SchedulePanel key={owner.gladiatorId} owner={owner} gateway={gateway} refresh={game.refreshOwner} clock={clock} rules={game.rules} />
         : <SchedulePreview owner={owner} />;
       case 'inventory': return owner ? <InventoryPanel key={owner.gladiatorId} owner={owner} gateway={gateway} refresh={game.refreshOwner} clock={clock} preview={fixture} rules={game.rules}
@@ -572,7 +572,7 @@ export function CampShell({ fixture, previewAs, previewResting = false, previewB
       <MenuRail menus={menus} state={{ revealed: railShown, open }} place={prefs.place} send={send} onToggle={id => send({ toggle: id })}
         zoom={sceneUnavailable ? null : direction => bridge.emit('camera-zoom', { direction })} />
       <CornerChip viewer={viewer} session={game.session} owner={owner} fixture={fixture} previewAs={previewAs} clock={clock} messaging={messaging} messagesRequest={currentMessagesRequest}
-        latestPatch={game.latestPatch} onChangeLook={openLook} onOpenMenu={show} onCreate={joining.offer} titles={noticeTitles} />
+        latestPatch={game.latestPatch} onChangeLook={openLook} onOpenMenu={show} onCreate={joining.offer} titles={noticeTitles} rules={game.rules} />
       {fixture && <p className={styles.pill} role="status">Fixture mode — progress is not saved online</p>}
       {fixtureRefused && <p className={styles.pill} role="status">Fixture preview is unavailable in this build.</p>}
       <div className={styles.notices} data-notices="" data-stacked={place.stacked ? 'true' : undefined}>

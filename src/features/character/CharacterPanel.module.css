@@ -217,6 +217,211 @@
   color: #c4dcd1;
 }
 
+/* Patch 1.9 Task 10: help on a label (the profile card's tooltip, shared through stat-hints.tsx). The row that holds the button is positioned,
+   and its tooltip opens under it (over it when the menu has no room below). */
+.hintRow,
+.factRow {
+  position: relative;
+}
+
+.hintButton {
+  min-height: 24px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  text-decoration: underline dotted;
+  text-underline-offset: 3px;
+  cursor: help;
+}
+
+.hintButton:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.hint {
+  position: absolute;
+  inset: 100% 0 auto;
+  z-index: 20;
+  padding: 8px 10px;
+  border: 1px solid var(--glass-line);
+  border-radius: 8px;
+  background: #262331;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+  color: var(--ink);
+  font-size: 0.8rem;
+  font-weight: 400;
+  line-height: 1.4;
+  text-align: left;
+}
+
+.hintAbove {
+  inset: auto 0 100%;
+}
+
+.hintNumbers {
+  display: block;
+  margin-top: 4px;
+  color: #cfd8ea;
+}
+
+/* The Load beside "Worn equipment": a narrow right-aligned row, so its tooltip is a box of its own under it. */
+.loadRow {
+  position: relative;
+}
+
+.loadRow .hint {
+  inset: 100% 0 auto auto;
+  width: min(320px, 80vw);
+}
+
+.loadRow .hintAbove {
+  inset: auto 0 100% auto;
+}
+
+/* The XP bar: under Stamina, with the next expedition's XP as a hatched ghost segment after the fill. */
+.xp {
+  margin: 0 0 1rem;
+}
+
+.xpLabel {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  font-size: 0.72rem;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.xpBar {
+  display: flex;
+  height: 9px;
+  margin-top: 0.45rem;
+  border-radius: 5px;
+  background: #232738;
+  overflow: hidden;
+}
+
+.xpBar i {
+  display: block;
+  height: 100%;
+}
+
+.xpFill {
+  background: #8fa6f2;
+}
+
+.xpGhost {
+  background: repeating-linear-gradient(135deg, rgba(143, 166, 242, 0.4) 0 4px, rgba(143, 166, 242, 0.2) 4px 8px);
+}
+
+.xpGhostUp {
+  background: repeating-linear-gradient(135deg, rgba(242, 198, 107, 0.9) 0 4px, rgba(217, 169, 71, 0.9) 4px 8px);
+}
+
+.xpSub {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.5rem;
+  margin: 0.3rem 0 0;
+  font-size: 0.72rem;
+  color: var(--muted);
+}
+
+.xpSub strong {
+  color: #8fa6f2;
+  font-weight: 600;
+}
+
+.xpHint {
+  margin: 0.4rem 0 0;
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+
+.xpHintUp {
+  color: var(--gold);
+  font-weight: 600;
+}
+
+.xpSwatch {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  margin-right: 6px;
+  border-radius: 2px;
+  vertical-align: -1px;
+  background: repeating-linear-gradient(135deg, rgba(143, 166, 242, 0.6) 0 3px, rgba(143, 166, 242, 0.27) 3px 6px);
+}
+
+.xpHintUp .xpSwatch {
+  background: repeating-linear-gradient(135deg, #f2c66b 0 3px, #d9a947 3px 6px);
+}
+
+/* Attributes beside Stats (one column on a phone). */
+.facts {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.4rem 1.1rem;
+  margin: 1rem 0 0;
+}
+
+.factsHead {
+  margin: 0 0 0.35rem;
+  font: 700 0.68rem/1.2 system-ui, sans-serif;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--gold);
+}
+
+.factRows {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.factRow {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  min-height: 28px;
+  font-size: 0.88rem;
+}
+
+.factName {
+  flex: none;
+  min-width: 5.6em;
+}
+
+.factValue {
+  margin-left: auto;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.track {
+  flex: 1;
+  height: 7px;
+  border-radius: 4px;
+  background: #2a2f40;
+  overflow: hidden;
+}
+
+.track i {
+  display: block;
+  height: 100%;
+  background: linear-gradient(90deg, #b88a46, #f0c670);
+}
+
+.bonus {
+  color: #e7c77f;
+  font-size: 0.75rem;
+  font-weight: 700;
+}
+
 .bar {
   appearance: none;
   width: 100%;
@@ -473,5 +678,15 @@ p.partTitle {
   .summary[data-covered],
   .planner[data-covered] {
     visibility: hidden;
+  }
+}
+
+@media (hover: none), (max-width: 480px) {
+  .facts {
+    grid-template-columns: 1fr;
+  }
+
+  .hint {
+    font-size: 0.78rem;
   }
 }

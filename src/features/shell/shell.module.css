@@ -318,6 +318,38 @@
   font-weight: 600;
 }
 
+/* The thin XP line along the chip button's foot, in its bottom padding (Patch 1.9 Task 10). */
+.chipButton {
+  position: relative;
+}
+
+.chipXp {
+  position: absolute;
+  inset: auto 12px 2px;
+  display: flex;
+  height: 4px;
+  border-radius: 2px;
+  background: #2a2f44;
+  overflow: hidden;
+}
+
+.chipXp i {
+  display: block;
+  height: 100%;
+}
+
+.chipXpFill {
+  background: #8fa6f2;
+}
+
+.chipXpGhost {
+  background: repeating-linear-gradient(135deg, rgba(143, 166, 242, 0.5) 0 3px, rgba(143, 166, 242, 0.25) 3px 6px);
+}
+
+.chipXpUp {
+  background: repeating-linear-gradient(135deg, #f2c66b 0 3px, #d9a947 3px 6px);
+}
+
 .join:hover,
 .chipButton:hover {
   background: rgba(30, 28, 40, 0.95);

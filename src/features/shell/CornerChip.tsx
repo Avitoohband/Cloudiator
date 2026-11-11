@@ -11,11 +11,14 @@
 import { useEffect, useId, useRef, useState } from 'react';
 import type { OwnerState } from '@contracts/reads';
 import { RULES_V1 } from '@domain/rules-v1';
+import { RULES_V2 } from '@domain/rules-v2';
+import type { Rules } from '@domain/types';
 import { signOut, type SessionState } from '../../lib/api/session';
 import { GoogleMark, SIGN_IN_NOT_STARTED, useGoogleSignIn } from '../auth/SignIn';
 import type { DisplayClock } from '../../game/display-clock';
 import { saveClockMode, useClockMode } from '../../lib/clock-setting';
 import { PATCH, isBehind } from '../../lib/patch';
+import { xpView } from '../character/xp-progress';
 import type { Viewer } from '../character/useGameState';
 import { GameInfoPanel } from '../game-info/GameInfoPanel';
 import { CurrencyIcon } from '../shops/ShopArt';
@@ -48,6 +51,18 @@ function useSlotCountdown(clock: DisplayClock, on: boolean) {
   return seconds;
 }
 
+/**
+ * The thin XP line along the foot of the chip, with no label (Patch 1.9 Task 10; the My gladiator panel says what it is): the XP into the level,
+ * and the next expedition's XP as the same hatched ghost segment (gold where it can finish the level). Decorative; the panel's bar is the readout.
+ */
+function XpLine({ owner, rules, nowMs }: { owner: OwnerState; rules: Rules; nowMs: number }) {
+  const view = xpView(owner, rules, nowMs);
+  return <span className={styles.chipXp} aria-hidden="true" data-testid="chip-xp">
+    <i className={styles.chipXpFill} data-testid="chip-xp-fill" style={{ width: `${view.fill * 100}%` }} />
+    {view.ghost > 0 && <i className={`${styles.chipXpGhost} ${view.crosses ? styles.chipXpUp : ''}`} data-testid="chip-xp-ghost" data-crosses={view.crosses || undefined} style={{ width: `${view.ghost * 100}%` }} />}
+  </span>;
+}
+
 function Countdown({ seconds, testId = 'chip-countdown' }: { seconds: number; testId?: string }) {
   const text = `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`;
   return <span title="Next slot starts in">
@@ -56,7 +71,7 @@ function Countdown({ seconds, testId = 'chip-countdown' }: { seconds: number; te
   </span>;
 }
 
-export function CornerChip({ viewer, session, owner, fixture, previewAs, clock, messaging, messagesRequest, latestPatch = null, onChangeLook, onOpenMenu, onCreate, titles }: {
+export function CornerChip({ viewer, session, owner, fixture, previewAs, clock, messaging, messagesRequest, latestPatch = null, onChangeLook, onOpenMenu, onCreate, titles, rules = RULES_V2 }: {
   viewer: Viewer;
   session: SessionState;
   owner: OwnerState | null;
@@ -75,6 +90,8 @@ export function CornerChip({ viewer, session, owner, fixture, previewAs, clock, 
   onCreate(): void;
   /** The owner's titles and the Wear and "Choose a title" actions for the Notifications tab (patch 1.7; the shell's). */
   titles?: NoticeTitles;
+  /** The active rules, for the XP line's next expedition (the shell's `rules`). */
+  rules?: Rules;
 }) {
   // One popover at a time under the corner controls.
   const [popover, setPopover] = useState<'account' | 'messages' | 'game-info' | null>(null);
@@ -187,6 +204,7 @@ export function CornerChip({ viewer, session, owner, fixture, previewAs, clock, 
             <span className={styles.wide} data-testid="chip-renown" title="Renown"><CurrencyIcon currency="renown" size={14} /> <span className={styles.sr}>Renown </span>{owner.wallets.renown}</span>
             <span className={styles.chipSep} aria-hidden="true">|</span>
             <Countdown seconds={seconds} />
+            <XpLine owner={owner} rules={rules} nowMs={clock.now()} />
           </> : <span>Signed in</span>}
         </button>
         {infoToggle}

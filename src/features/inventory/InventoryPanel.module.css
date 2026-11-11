@@ -136,3 +136,96 @@
   .gridScroll { height: 194px; }
   .grid { gap: 4px; }
 }
+
+/* Search and sort above the grid (Patch 1.9, the approved search mockup): the field on its own row above the chips, Sort beside it. */
+.searchRow { display: flex; gap: 6px; align-items: stretch; margin-bottom: 8px; }
+.search { position: relative; display: flex; align-items: center; flex: 1 1 0; min-width: 0; }
+.magnifier { position: absolute; left: 10px; pointer-events: none; color: var(--muted); }
+
+.searchRow .search input {
+  width: 100%;
+  min-height: 38px;
+  padding: 6px 38px 6px 33px;
+  background: #111c2d;
+  color: #f4ead5;
+  border: 1px solid #7a86a0;
+  border-radius: 7px;
+  font: inherit;
+  font-size: .92rem;
+}
+
+.searchRow .search input::placeholder { color: #8793ab; }
+.searchRow .search input::-webkit-search-cancel-button { display: none; }
+.searchRow .search input:focus-visible { outline: 3px solid var(--gold); outline-offset: 2px; }
+
+.searchRow .search .clear {
+  position: absolute;
+  right: 4px;
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 1.15rem;
+  line-height: 1;
+}
+
+.searchRow .search .clear:hover { background: #38302a; color: var(--ink); }
+
+.searchRow .sort {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 5px;
+  margin: 0;
+  padding: 0 4px 0 9px;
+  border: 1px solid #655847;
+  border-radius: 7px;
+  background: #292526;
+  color: var(--muted);
+  font-size: .82rem;
+}
+
+.searchRow .sort:hover { background: #38302a; }
+.searchRow .sort:focus-within { outline: 3px solid var(--gold); outline-offset: 2px; }
+.searchRow .sort[data-changed] { border-color: #ae864a; background: #4b3726; }
+
+.searchRow .sort select {
+  width: auto;
+  min-height: 34px;
+  padding: 0 2px;
+  border: 0;
+  background: transparent;
+  color: #e4d7c9;
+  font: inherit;
+  font-size: .82rem;
+  cursor: pointer;
+}
+
+.searchRow .sort select option { background: #292526; color: #e4d7c9; }
+.searchRow .sort select[data-changed] { color: var(--gold); }
+.searchRow .sort select:focus-visible { outline: none; }
+
+.noMatch {
+  display: grid;
+  place-items: center;
+  align-content: center;
+  gap: 10px;
+  height: 100%;
+  padding: 0 14px;
+  text-align: center;
+  color: var(--muted);
+}
+
+.noMatch b { color: var(--ink); overflow-wrap: anywhere; }
+.noMatch button { padding: 6px 12px; border: 1px solid #ae864a; border-radius: 7px; background: #4b3726; color: var(--gold); }
+
+.matchCount { min-height: 1.2em; margin: 8px 0 0; color: var(--muted); font-size: .8rem; }
+
+@media (hover: none), (max-width: 480px) {
+  .searchRow .search input { font-size: 16px; }
+}

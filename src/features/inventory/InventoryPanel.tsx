@@ -15,6 +15,8 @@ import { useMinuteNow } from '../schedule/use-minute-now';
 import { ShopPanel } from '../shops/ShopPanel';
 import { useOutcomeFocus } from '../shell/focus-lost';
 import { ItemIcon, ItemStats } from './ItemPresentation';
+import { ItemSearch, MatchCount, NoMatch } from './ItemSearch';
+import { INVENTORY_SORTS, queryItems, type Queryable, type SortKey } from './item-query';
 import {
   GEAR_SLOTS, SLOT_LABELS, blockedText, cancelGearCommand, changedSlots, gearRefusal, isWearable, keepsOtherChanges, nextEquipment, pendingNote,
   undoCommand, wearBadge, wearBadgeText, wearCommand, wearState, wornNow, type GearCommand,
@@ -38,6 +40,11 @@ function itemNumber(inventory: readonly ItemInstance[], item: ItemInstance) {
   return copies.length > 1 ? copies.indexOf(item) + 1 : null;
 }
 
+/** What search and sort read from a piece in the bag: its name, level, stats and what an NPC pays for it. */
+function itemView(item: ItemInstance): Queryable {
+  return { name: itemName(item), level: item.tier, damage: item.stats.damage, armor: item.stats.armor, weight: item.stats.weight, sell: npcSaleValue(item, CATALOG_V1) };
+}
+
 function matchesFilter(item: ItemInstance, filter: Filter) {
   const slot = CATALOG_V1.items[item.catalogId]?.slot;
   return filter === 'All' || (filter === 'Weapons' && slot === 'weapon')
@@ -57,6 +64,8 @@ export function InventoryPanel({ owner, gateway, refresh, clock, preview = false
   const [confirmation, setConfirmation] = useState<{ itemId: string; quantity: number } | 'stale' | null>(null);
   const [quantities, setQuantities] = useState<Record<string, number>>({});
   const [filter, setFilter] = useState<Filter>('All');
+  const [query, setQuery] = useState(''), [sort, setSort] = useState<SortKey>('newest');
+  const scroller = useRef<HTMLDivElement>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [retry, setRetry] = useState(false);
   /**
@@ -71,10 +80,20 @@ export function InventoryPanel({ owner, gateway, refresh, clock, preview = false
   const staleDiscardNotice = useRef<HTMLParagraphElement>(null);
   const panelId = useId(), gearHeading = `${panelId}-gear`, previewNote = `${panelId}-preview`;
   const detailsId = `${panelId}-details`;
-  const visibleItems = owner.inventory.filter(item => matchesFilter(item, filter));
+  const visibleItems = queryItems(owner.inventory.filter(item => matchesFilter(item, filter)), itemView, query, sort);
   const selected = visibleItems.find(item => item.id === selectedId) ?? visibleItems[0];
   // Remember the displayed fallback so a refresh cannot replace a still-visible selection.
   if (selectedId !== (selected?.id ?? null)) setSelectedId(selected?.id ?? null);
+  // After a filter, search or sort change the chosen piece is brought into view inside the grid only (never the page or the menu).
+  const latest = useRef(selected?.id);
+  latest.current = selected?.id;
+  useEffect(() => {
+    const box = scroller.current, tile = box?.querySelector<HTMLElement>(`[data-testid="tile-${latest.current}"]`);
+    if (!box || !tile) return;
+    const top = tile.getBoundingClientRect().top - box.getBoundingClientRect().top, bottom = top + tile.offsetHeight - box.clientHeight;
+    if (top < 0) box.scrollTop += top;
+    else if (bottom > 0) box.scrollTop += bottom;
+  }, [filter, query, sort]);
   const discardRequest = confirmation === 'stale' ? null : confirmation;
   const confirmingItem = discardRequest && owner.inventory.find(item => item.id === discardRequest.itemId);
   const canConfirmDiscard = !!(discardRequest && confirmingItem && !isReserved(owner, confirmingItem) && discardRequest.quantity <= confirmingItem.quantity);
@@ -196,16 +215,17 @@ export function InventoryPanel({ owner, gateway, refresh, clock, preview = false
       {place === item.id && outcomes}
     </article>;
   }
-  const emptyCells = filter === 'All' ? owner.inventoryCapacity - visibleItems.length : 6 - visibleItems.length;
+  const emptyCells = filter === 'All' && !query.trim() ? owner.inventoryCapacity - visibleItems.length : 6 - visibleItems.length;
   return <div className={`inventory-panel ${styles.panel}`}>
     <div className="section-title"><h2>Inventory</h2><span>{owner.inventory.length} / {owner.inventoryCapacity} slots</span></div>
     <div className={styles.columns}>
       <div>
+        <ItemSearch query={query} setQuery={setQuery} sorts={INVENTORY_SORTS} sort={sort} setSort={setSort} />
         <div className={styles.filters} role="group" aria-label="Inventory filters">
           {filters.map(option => <button key={option} type="button" aria-pressed={option === filter} onClick={() => setFilter(option)}>{option}</button>)}
         </div>
-        <div className={styles.gridScroll}>
-          <div className={styles.grid} data-testid="inventory-grid">
+        <div ref={scroller} className={styles.gridScroll}>
+          {visibleItems.length === 0 && query.trim() ? <NoMatch query={query} clear={() => setQuery('')} /> : <div className={styles.grid} data-testid="inventory-grid">
             {visibleItems.map(item => {
               const badge = wearBadge(owner, item);
               const status = badge ? wearBadgeText(badge, effective) : item.reservation?.kind === 'listing' ? 'Listed for sale' : '';
@@ -222,12 +242,13 @@ export function InventoryPanel({ owner, gateway, refresh, clock, preview = false
               </button>;
             })}
             {Array.from({ length: Math.max(0, emptyCells) }, (_, index) => <span key={index} className={styles.emptyCell} aria-hidden="true" />)}
-          </div>
+          </div>}
         </div>
+        <MatchCount count={visibleItems.length} query={query} />
       </div>
       <section id={detailsId} aria-label="Item details" className={styles.details}>
         {confirmation === 'stale' && <p ref={staleDiscardNotice} role="alert" tabIndex={-1}>Your inventory changed. Review the updated inventory before discarding.</p>}
-        {selected ? itemCard(selected) : <p className="muted">{owner.inventory.length ? `No ${filter.toLowerCase()} in your inventory.` : 'Your inventory is empty.'}</p>}
+        {selected ? itemCard(selected) : <p className="muted">{query.trim() ? 'Nothing to show. Clear the search to see every item.' : owner.inventory.length ? `No ${filter.toLowerCase()} in your inventory.` : 'Your inventory is empty.'}</p>}
       </section>
     </div>
     <p>Available gold: {owner.wallets.money - owner.reservedFees.money}</p><p>Available renown: {owner.wallets.renown - owner.reservedFees.renown}</p>

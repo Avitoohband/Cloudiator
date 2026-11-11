@@ -1126,3 +1126,302 @@ test('previews the gear read-only: Wear is disabled and says why', async ({ page
   await expect(helmet.getByRole('button', { name: /^Wear / })).toBeDisabled();
   await expect(helmet.getByRole('button', { name: /^Wear / })).toHaveAccessibleDescription(/Gear changes are unavailable in this preview\./);
 });
+
+// ---- Search and sort in the Inventory and the Shops (Patch 1.9, the approved search mockup) ---------------------------------
+
+const searchField = (scope: Locator) => scope.getByRole('searchbox', { name: 'Search items', exact: true });
+const sortSelect = (scope: Locator) => scope.getByRole('combobox', { name: 'Sort', exact: true });
+const matchLine = (scope: Locator, text: RegExp | string) => scope.getByText(text);
+const shopIds = (shops: Locator) => shops.locator('[data-testid^="offer-"]').evaluateAll(nodes => nodes.map(node => node.getAttribute('data-testid')!.slice('offer-'.length)));
+const tileIds = (inv: Locator) => inv.getByTestId('inventory-grid').locator('[data-testid^="tile-"]').evaluateAll(nodes => nodes.map(node => node.getAttribute('data-testid')!.slice('tile-'.length)));
+const entryName = (catalogId: string) => CATALOG_V1.items[catalogId].name;
+const BANNER_ID = CATALOG_V1.cosmetics.banner.id;
+
+test('searches the shop by part of a name, with the filters and the currency, and says how many match', async ({ page, context }, info) => {
+  const mobile = info.project.name === 'mobile';
+  const flow = await inventoryFlow(context);
+  flow.state.progression.level = 5;
+  flow.state.wallets = { money: 300, renown: 100 };
+  if (mobile) await page.setViewportSize({ width: 360, height: 740 });
+  await page.goto('/game/');
+  const menu = await openMenu(page, 'Inventory and shops');
+  const shops = shopsRegion(menu), details = offerDetails(shops), field = searchField(shops);
+  await expect(field).toBeVisible();
+  await expect(field).toHaveValue('');
+  await expect(shops.getByRole('button', { name: 'Clear search', exact: true })).toHaveCount(0);
+  await expect(matchLine(shops, /items? match/)).toHaveCount(0);
+  await chooseOffer(shops, 'axe:1:common', mobile);
+  // Case does not matter, and the chosen axe no longer matches: the first match takes its place.
+  await field.fill('SwOrD');
+  await expect(shops.locator('[data-testid^="offer-"]')).toHaveCount(3);
+  expect(await shopIds(shops)).toEqual(['sword:1:common', 'sword:5:common', 'sword:10:common']);
+  await expect(matchLine(shops, '3 items match “SwOrD”')).toBeVisible();
+  await expect(offerCell(shops, 'sword:1:common')).toHaveAttribute('aria-pressed', 'true');
+  await expect(details.getByRole('heading', { name: 'Sword' })).toBeVisible();
+  await expect(details).toContainText('Level 1');
+  // The chips and the currency still apply: no armor is a sword.
+  await shopButton(shops, 'Shop filters', 'Armor').click();
+  await expect(shops.locator('[data-testid^="offer-"]')).toHaveCount(0);
+  await expect(shops.getByText('No items match “SwOrD”')).toBeVisible();
+  await shopButton(shops, 'Shop filters', 'All').click();
+  await shopButton(shops, 'Shop currency', 'Renown').click();
+  expect(await shopIds(shops)).toEqual(['sword:1:renown', 'sword:5:renown', 'sword:10:renown']);
+  await field.fill(' heavy ');
+  await expect(matchLine(shops, '6 items match “heavy”')).toBeVisible();
+  await field.fill('banner');
+  expect(await shopIds(shops)).toEqual([BANNER_ID]);
+  await expect(matchLine(shops, '1 item match “banner”')).toBeVisible();
+});
+
+test('clears the shop search with the x button, Escape or Clear search, and a search with no match says so', async ({ page, context }, info) => {
+  await inventoryFlow(context);
+  if (info.project.name === 'mobile') await page.setViewportSize({ width: 360, height: 740 });
+  await page.goto('/game/');
+  const menu = await openMenu(page, 'Inventory and shops');
+  const shops = shopsRegion(menu), field = searchField(shops);
+  await field.fill('dagger');
+  await expect(shops.getByText('No items match “dagger”')).toBeVisible();
+  await expect(shops.locator('[data-testid^="offer-"]')).toHaveCount(0);
+  await expect(offerDetails(shops)).toContainText('Clear the search');
+  await shops.getByRole('button', { name: 'Clear search', exact: true }).last().click();
+  await expect(field).toHaveValue('');
+  await expect(shops.locator('[data-testid^="offer-"]')).toHaveCount(33);
+  await field.fill('axe');
+  await shops.getByRole('button', { name: 'Clear search', exact: true }).click();
+  await expect(field).toHaveValue('');
+  await expect(field).toBeFocused();
+  await expect(shops.locator('[data-testid^="offer-"]')).toHaveCount(33);
+  await field.fill('bow');
+  await field.press('Escape');
+  await expect(field).toHaveValue('');
+  await expect(shops.locator('[data-testid^="offer-"]')).toHaveCount(33);
+  // Escape in an empty field leaves the menu to close as it always did.
+  await expect(menu).toBeVisible();
+  await field.press('Escape');
+  await expect(menu).toBeHidden();
+});
+
+test('sorts the shop: Level, Price and Name ascend, Damage, Armor and Weight descend, ties keep the level order', async ({ page, context }, info) => {
+  await inventoryFlow(context);
+  if (info.project.name === 'mobile') await page.setViewportSize({ width: 360, height: 740 });
+  await page.goto('/game/');
+  const menu = await openMenu(page, 'Inventory and shops');
+  const shops = shopsRegion(menu), sort = sortSelect(shops);
+  await expect(sort.locator('option')).toHaveText(['Level', 'Price', 'Name', 'Damage', 'Armor', 'Weight']);
+  await expect(sort).toHaveValue('level');
+  await expect(sort).not.toHaveAttribute('data-changed', /.*/);
+  const baseline = await shopIds(shops);
+  const priceOf = (id: string) => shopOffers(CATALOG_V1).find(offer => offer.catalogId === id)!.unitPrice;
+  await sort.selectOption('price');
+  await expect(sort).toHaveAttribute('data-changed', '');
+  let ids = await shopIds(shops);
+  expect(ids).toHaveLength(33);
+  for (let i = 1; i < ids.length; i++) {
+    expect(priceOf(ids[i]), `price ${ids[i - 1]} then ${ids[i]}`).toBeGreaterThanOrEqual(priceOf(ids[i - 1]));
+    if (priceOf(ids[i]) === priceOf(ids[i - 1])) expect(baseline.indexOf(ids[i])).toBeGreaterThan(baseline.indexOf(ids[i - 1]));
+  }
+  await sort.selectOption('name');
+  ids = await shopIds(shops);
+  const names = ids.map(entryName);
+  expect(names).toEqual([...names].sort((a, b) => a.localeCompare(b, 'en')));
+  for (const stat of ['damage', 'armor', 'weight'] as const) {
+    await sort.selectOption(stat);
+    ids = await shopIds(shops);
+    for (let i = 1; i < ids.length; i++) {
+      const [before, after] = [CATALOG_V1.items[ids[i - 1]].stats[stat], CATALOG_V1.items[ids[i]].stats[stat]];
+      expect(after, `${stat} ${ids[i - 1]} then ${ids[i]}`).toBeLessThanOrEqual(before);
+      if (after === before) expect(baseline.indexOf(ids[i])).toBeGreaterThan(baseline.indexOf(ids[i - 1]));
+    }
+  }
+  await sort.selectOption('level');
+  expect(await shopIds(shops)).toEqual(baseline);
+  await expect(sort).not.toHaveAttribute('data-changed', /.*/);
+  // The Arena banner has no stats: it comes after every piece of equipment under a stat sort, and sorts by its renown price under Price.
+  await shopButton(shops, 'Shop currency', 'Renown').click();
+  await sort.selectOption('damage');
+  ids = await shopIds(shops);
+  expect(ids.at(-1)).toBe(BANNER_ID);
+  await sort.selectOption('price');
+  ids = await shopIds(shops);
+  const prices = (await shops.locator('[data-shop-price]').allTextContents()).map(Number);
+  const banner = ids.indexOf(BANNER_ID);
+  expect(banner).toBeGreaterThan(0);
+  expect(prices[banner]).toBe(CATALOG_V1.cosmetics.banner.renownPrice);
+  expect(prices[banner]).toBeGreaterThanOrEqual(prices[banner - 1]);
+  expect(prices[banner]).toBeLessThanOrEqual(prices[banner + 1] ?? Infinity);
+});
+
+test('keeps the shop card, the chosen cell and Buy on the same offer as search and sort change the grid', async ({ page, context }, info) => {
+  const mobile = info.project.name === 'mobile';
+  const flow = await inventoryFlow(context);
+  flow.state.progression.level = 10;
+  flow.state.wallets = { money: 1000, renown: 100 };
+  if (mobile) await page.setViewportSize({ width: 360, height: 740 });
+  await page.goto('/game/');
+  const menu = await openMenu(page, 'Inventory and shops');
+  const shops = shopsRegion(menu), details = offerDetails(shops);
+  await searchField(shops).fill('sword');
+  await sortSelect(shops).selectOption('damage');
+  // Highest damage first; the chosen level 1 sword is still a match, so it stays chosen and its card stays.
+  expect(await shopIds(shops)).toEqual(['sword:10:common', 'sword:5:common', 'sword:1:common']);
+  await expect(offerCell(shops, 'sword:1:common')).toHaveAttribute('aria-pressed', 'true');
+  await expect(details).toContainText('Level 1');
+  await chooseOffer(shops, 'sword:10:common', mobile);
+  await expect(details).toContainText('Level 10');
+  await expect(details.getByRole('button', { name: /^Buy Sword/ })).toBeVisible();
+  await chooseOffer(shops, 'sword:5:common', mobile);
+  await sortSelect(shops).selectOption('price');
+  await expect(offerCell(shops, 'sword:5:common')).toHaveAttribute('aria-pressed', 'true');
+  await expect(details).toContainText('Level 5');
+  await expect(shops.locator('[data-testid^="offer-"][aria-pressed="true"]')).toHaveCount(1);
+  await searchField(shops).fill('');
+  await expect(offerCell(shops, 'sword:5:common')).toHaveAttribute('aria-pressed', 'true');
+  await expect(details).toContainText('Level 5');
+});
+
+test('the chosen shop cell stays inside the grid after a search or a sort change', async ({ page, context }, info) => {
+  await inventoryFlow(context);
+  if (info.project.name === 'mobile') await page.setViewportSize({ width: 360, height: 740 });
+  await page.goto('/game/');
+  const menu = await openMenu(page, 'Inventory and shops');
+  const shops = shopsRegion(menu), scroll = shops.getByRole('group', { name: 'Shop items', exact: true });
+  const inside = async (testId: string) => {
+    const box = (await scroll.boundingBox())!, cell = (await shops.getByTestId(testId).boundingBox())!;
+    return cell.y >= box.y - 1 && cell.y + cell.height <= box.y + box.height + 1;
+  };
+  await sortSelect(shops).selectOption('price');
+  await scroll.evaluate(node => { node.scrollTop = node.scrollHeight; });
+  await searchField(shops).fill('shield');
+  const first = (await shopIds(shops))[0];
+  await expect.poll(() => inside(`offer-${first}`)).toBe(true);
+  await searchField(shops).fill('');
+  await sortSelect(shops).selectOption('name');
+  const [chosen] = await shops.locator('[data-testid^="offer-"][aria-pressed="true"]').evaluateAll(nodes => nodes.map(node => node.getAttribute('data-testid')!));
+  await expect.poll(() => inside(chosen)).toBe(true);
+});
+
+test('lays the search field above the chips with Sort beside it, on one row at 360 px', async ({ page, context }, info) => {
+  await inventoryFlow(context);
+  if (info.project.name === 'mobile') await page.setViewportSize({ width: 360, height: 740 });
+  await page.goto('/game/');
+  const menu = await openMenu(page, 'Inventory and shops');
+  const shops = shopsRegion(menu), field = searchField(shops), sort = sortSelect(shops);
+  const chips = shops.getByRole('group', { name: 'Shop filters', exact: true });
+  const [f, s, c, g] = await Promise.all([field.boundingBox(), sort.boundingBox(), chips.boundingBox(), shops.getByRole('group', { name: 'Shop items', exact: true }).boundingBox()]);
+  expect(Math.abs((f!.y + f!.height / 2) - (s!.y + s!.height / 2))).toBeLessThan(8);
+  expect(s!.x).toBeGreaterThan(f!.x + f!.width - 1);
+  expect(f!.y + f!.height).toBeLessThanOrEqual(c!.y + 1);
+  expect(c!.y).toBeLessThan(g!.y);
+  expect(f!.width).toBeGreaterThan(120);
+  await field.fill('sword');
+  await sort.selectOption('price');
+  await shops.screenshot({ path: info.outputPath(`shop-search-${info.project.name}.png`) });
+});
+
+const demoBag = async (page: Page) => {
+  await page.goto('/game/?mode=fixture&bag=demo');
+  return openMenu(page, 'Inventory and shops');
+};
+const inventoryRegion = (menu: Locator) => menu.locator('.inventory-panel');
+
+test('searches and sorts the inventory; a chosen piece that stops matching gives way to the first match', async ({ page }, info) => {
+  if (info.project.name === 'mobile') await page.setViewportSize({ width: 360, height: 740 });
+  const menu = await demoBag(page);
+  const inv = inventoryRegion(menu), field = searchField(inv).first(), sort = sortSelect(inv).first();
+  await expect(page.getByText('19 / 60 slots')).toBeVisible();
+  await expect(sort.locator('option')).toHaveText(['Newest', 'Level', 'Name', 'Damage', 'Armor', 'Weight', 'Sell value']);
+  await expect(sort).toHaveValue('newest');
+  await expect(matchLine(inv, /items? match/)).toHaveCount(0);
+  const all = await tileIds(inv);
+  expect(all).toHaveLength(19);
+  const name = (id: string) => inv.getByTestId(`tile-${id}`).getAttribute('aria-label').then(label => label!.split(',')[0]);
+  // Choose a sword, then search for boots: the chosen sword stops matching and the first boots take its place.
+  const sword = (await Promise.all(all.map(async id => [id, await name(id)] as const))).find(([, n]) => n === 'Sword')![0];
+  await inv.getByTestId(`tile-${sword}`).click();
+  await expect(inv.getByTestId(`item-${sword}`)).toBeVisible();
+  await field.fill('BOOTS');
+  const boots = await tileIds(inv);
+  expect(boots).toHaveLength(4);
+  await expect(matchLine(inv, '4 items match “BOOTS”')).toBeVisible();
+  await expect(inv.getByTestId(`tile-${boots[0]}`)).toHaveAttribute('aria-pressed', 'true');
+  await expect(inv.getByTestId(`item-${boots[0]}`)).toBeVisible();
+  await expect(inv.locator('[data-testid^="item-"]')).toHaveCount(1);
+  // Sorted by Weight (heaviest first): Heavy boots lead; the chosen boots still match, so they stay chosen with their card.
+  await sort.selectOption('weight');
+  await expect(sort).toHaveAttribute('data-changed', '');
+  const byWeight = await tileIds(inv);
+  expect(await name(byWeight[0])).toBe('Heavy boots');
+  await expect(inv.getByTestId(`tile-${boots[0]}`)).toHaveAttribute('aria-pressed', 'true');
+  await expect(inv.getByTestId(`item-${boots[0]}`)).toBeVisible();
+  // No match: the status and a Clear search button, and the card says so.
+  await field.fill('dagger');
+  await expect(inv.getByText('No items match “dagger”')).toBeVisible();
+  await expect(inv.getByTestId('inventory-grid').locator('[data-testid^="tile-"]')).toHaveCount(0);
+  await inv.getByRole('button', { name: 'Clear search', exact: true }).last().click();
+  await expect(field).toHaveValue('');
+  expect(await tileIds(inv)).toHaveLength(19);
+  await field.fill('x');
+  await field.press('Escape');
+  await expect(field).toHaveValue('');
+  await expect(menu).toBeVisible();
+  await sort.selectOption('newest');
+  expect(await tileIds(inv)).toEqual(all);
+});
+
+test('sorts the inventory by level, name, damage, armor, weight and sell value, ties in the newest order', async ({ page }, info) => {
+  if (info.project.name === 'mobile') await page.setViewportSize({ width: 360, height: 740 });
+  const menu = await demoBag(page);
+  const inv = inventoryRegion(menu), sort = sortSelect(inv).first();
+  const newest = await tileIds(inv);
+  type Entry = (typeof CATALOG_V1.items)[string] & { bound: boolean };
+  const catalogOf = async (id: string): Promise<Entry | undefined> => {
+    const label = (await inv.getByTestId(`tile-${id}`).getAttribute('aria-label'))!;
+    const match = /^(.+?), level (\d+) (\w+)/.exec(label)!;
+    const found = Object.values(CATALOG_V1.items).find(entry => entry.name === match[1] && entry.tier === Number(match[2]) && entry.rarity === match[3]);
+    return found && { ...found, bound: label.includes('Account-bound') };
+  };
+  const read = async (key: string, value: (entry: Entry) => number | string, direction: 1 | -1) => {
+    await sort.selectOption(key);
+    const ids = await tileIds(inv), entries = (await Promise.all(ids.map(catalogOf))) as Entry[];
+    for (let i = 1; i < ids.length; i++) {
+      const [a, b] = [value(entries[i - 1]), value(entries[i])];
+      const order = typeof a === 'string' ? a.localeCompare(String(b), 'en') : (a as number) - (b as number);
+      expect(order * direction, `${key}: ${ids[i - 1]} then ${ids[i]}`).toBeLessThanOrEqual(0);
+      if (order === 0) expect(newest.indexOf(ids[i])).toBeGreaterThan(newest.indexOf(ids[i - 1]));
+    }
+  };
+  await read('level', entry => entry.tier, 1);
+  await read('name', entry => entry.name, 1);
+  await read('damage', entry => entry.stats.damage, -1);
+  await read('armor', entry => entry.stats.armor, -1);
+  await read('weight', entry => entry.stats.weight, -1);
+  await read('sell', entry => entry.bound ? 0 : entry.npcSellValue ?? 0, -1);
+});
+
+test('keeps the inventory card on the same one of two same-name pieces as search and sort change the grid', async ({ page }, info) => {
+  if (info.project.name === 'mobile') await page.setViewportSize({ width: 360, height: 740 });
+  const menu = await demoBag(page);
+  const inv = inventoryRegion(menu);
+  await searchField(inv).first().fill('round shield');
+  const shields = await tileIds(inv);
+  expect(shields).toHaveLength(2);
+  await expect(inv.getByTestId(`tile-${shields[0]}`)).toHaveAttribute('aria-pressed', 'true');
+  await expect(inv.getByTestId(`item-${shields[0]}`)).toContainText('Item 1');
+  await inv.getByTestId(`tile-${shields[1]}`).click();
+  await expect(inv.getByTestId(`item-${shields[1]}`)).toContainText('Item 2');
+  await sortSelect(inv).first().selectOption('name');
+  await expect(inv.getByTestId(`tile-${shields[1]}`)).toHaveAttribute('aria-pressed', 'true');
+  await expect(inv.getByTestId(`item-${shields[1]}`)).toContainText('Item 2');
+  await expect(inv.locator('[data-testid^="item-"]')).toHaveCount(1);
+});
+
+test('lays the inventory search field above its chips, with Sort beside it', async ({ page }, info) => {
+  if (info.project.name === 'mobile') await page.setViewportSize({ width: 360, height: 740 });
+  const menu = await demoBag(page);
+  const inv = inventoryRegion(menu), field = searchField(inv).first(), sort = sortSelect(inv).first();
+  const [f, s, c] = await Promise.all([field.boundingBox(), sort.boundingBox(), inv.getByRole('group', { name: 'Inventory filters', exact: true }).boundingBox()]);
+  expect(Math.abs((f!.y + f!.height / 2) - (s!.y + s!.height / 2))).toBeLessThan(8);
+  expect(f!.y + f!.height).toBeLessThanOrEqual(c!.y + 1);
+  await field.fill('sword');
+  await inv.screenshot({ path: info.outputPath(`inventory-search-${info.project.name}.png`) });
+});

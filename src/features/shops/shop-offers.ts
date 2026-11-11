@@ -1,5 +1,6 @@
 import { CATALOG_V1 } from '@domain/catalog-v1';
 import { shopOffers, type Merchant, type ShopOffer } from '@domain/inventory';
+import type { Queryable } from '../inventory/item-query';
 
 /** The shop's filters (Patch 1.9): every piece, or one merchant's. */
 export const SHOP_FILTERS = ['All', 'Weapons', 'Armor'] as const;
@@ -36,4 +37,12 @@ export function counterpartId(catalogId: string, currency: ShopCurrency): string
   if (!entry) return null;
   return SORTED.find(offer => offer.currency === currency && offer.requiredLevel === entry.tier
     && CATALOG_V1.items[offer.catalogId]?.templateId === entry.templateId)?.catalogId ?? null;
+}
+
+/** What search and sort read from a cell: an offer's name, level, price and stats; the banner has a name and its renown price only. */
+export function choiceView(choice: ShopChoice): Queryable {
+  if (choice.kind === 'banner') return { name: BANNER.name, price: BANNER.renownPrice };
+  const entry = CATALOG_V1.items[choice.offer.catalogId];
+  return { name: entry?.name ?? choice.offer.catalogId, level: choice.offer.requiredLevel, price: choice.offer.unitPrice,
+    damage: entry?.stats.damage, armor: entry?.stats.armor, weight: entry?.stats.weight };
 }

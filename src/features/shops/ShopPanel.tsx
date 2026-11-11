@@ -5,11 +5,13 @@ import type { OwnerState } from '@contracts/reads';
 import { CATALOG_V1 } from '@domain/catalog-v1';
 import type { Merchant } from '@domain/inventory';
 import { ItemIcon } from '../inventory/ItemPresentation';
+import { MatchCount, ItemSearch, NoMatch } from '../inventory/ItemSearch';
+import { SHOP_SORTS, queryItems, type SortKey } from '../inventory/item-query';
 import inventory from '../inventory/InventoryPanel.module.css';
 import { BannerArt, CurrencyIcon } from './ShopArt';
 import { BannerCard, OfferCard, spendable } from './ShopCard';
 import {
-  BANNER, SHOP_FILTERS, counterpartId, currencyWord, merchantFilter, shopChoices, type ShopChoice, type ShopCurrency, type ShopFilter,
+  BANNER, SHOP_FILTERS, choiceView, counterpartId, currencyWord, merchantFilter, shopChoices, type ShopChoice, type ShopCurrency, type ShopFilter,
 } from './shop-offers';
 import styles from './ShopPanel.module.css';
 
@@ -37,12 +39,13 @@ export function ShopPanel({ owner, busy, preview, buy, initialMerchant }: {
   /** The cell the arrow keys last reached: the grid's one Tab stop while it is shown, else the chosen cell. */
   const [stopId, setStopId] = useState<string | null>(null);
   const [quantity, setQuantity] = useState(1);
-  const choices = shopChoices(filter, currency);
+  const [query, setQuery] = useState(''), [sort, setSort] = useState<SortKey>('level');
+  const choices = queryItems(shopChoices(filter, currency), choiceView, query, sort);
   // The first visible cell when nothing visible is chosen; remembered, so Buy never sends an offer the grid hides.
   const chosen: ShopChoice | undefined = choices.find(choice => choice.id === chosenId) ?? choices[0];
   if (chosen && chosenId !== chosen.id) setChosenId(chosen.id);
   const tabStop = choices.some(choice => choice.id === stopId) ? stopId : chosen?.id;
-  // After a filter or currency change the chosen cell is brought into view inside the grid only (never the page or the menu).
+  // After a filter, currency, search or sort change the chosen cell is brought into view inside the grid only (never the page or the menu).
   const latest = useRef(chosen?.id);
   latest.current = chosen?.id;
   useEffect(() => {
@@ -51,7 +54,7 @@ export function ShopPanel({ owner, busy, preview, buy, initialMerchant }: {
     const top = cell.getBoundingClientRect().top - box.getBoundingClientRect().top, bottom = top + cell.offsetHeight - box.clientHeight;
     if (top < 0) box.scrollTop += top;
     else if (bottom > 0) box.scrollTop += bottom;
-  }, [filter, currency]);
+  }, [filter, currency, query, sort]);
   const ids = useId(), detailsId = `${ids}-details`;
   const word = currencyWord(currency);
 
@@ -107,6 +110,7 @@ export function ShopPanel({ owner, busy, preview, buy, initialMerchant }: {
     </div>
     <div className={inventory.columns}>
       <div>
+        <ItemSearch query={query} setQuery={setQuery} sorts={SHOP_SORTS} sort={sort} setSort={setSort} />
         <div className={styles.bar}>
           <div className={inventory.filters} role="group" aria-label="Shop filters">
             {SHOP_FILTERS.map(option => <button key={option} type="button" aria-pressed={option === filter} onClick={() => setFilter(option)}>{option}</button>)}
@@ -116,15 +120,16 @@ export function ShopPanel({ owner, busy, preview, buy, initialMerchant }: {
           </div>
         </div>
         <div ref={scroller} className={`${inventory.gridScroll} ${styles.scroll}`} role="group" aria-label="Shop items" onKeyDown={move}>
-          <div ref={grid} className={inventory.grid}>
+          {choices.length === 0 ? <NoMatch query={query} clear={() => setQuery('')} /> : <div ref={grid} className={inventory.grid}>
             {choices.map(cell)}
-            {Array.from({ length: Math.max(0, (filter === 'All' ? 30 : 6) - choices.length) }, (_, index) => <span key={index} className={inventory.emptyCell} aria-hidden="true" />)}
-          </div>
+            {Array.from({ length: Math.max(0, (filter === 'All' && !query.trim() ? 30 : 6) - choices.length) }, (_, index) => <span key={index} className={inventory.emptyCell} aria-hidden="true" />)}
+          </div>}
         </div>
+        <MatchCount count={choices.length} query={query} />
         <p className={`muted ${styles.foot}`}>{EXPLAINERS[currency]} L = level needed; pieces with a lock are above your level. {choices.length} items.</p>
       </div>
       <section id={detailsId} aria-label="Offer details" className={inventory.details}>
-        {!chosen ? <p>Nothing here.</p> : chosen.kind === 'offer' ? <OfferCard offer={chosen.offer} quantity={quantity} setQuantity={setQuantity} {...purchase} /> : <BannerCard {...purchase} />}
+        {!chosen ? <p>{query.trim() ? 'Nothing to show. Clear the search to see every item.' : 'Nothing here.'}</p> : chosen.kind === 'offer' ? <OfferCard offer={chosen.offer} quantity={quantity} setQuantity={setQuantity} {...purchase} /> : <BannerCard {...purchase} />}
       </section>
     </div>
   </section>;

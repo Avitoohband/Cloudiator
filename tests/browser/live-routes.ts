@@ -260,6 +260,7 @@ export async function routeLiveReads(context: BrowserContext, initial: LiveData)
       presences.push({ operationId: command.operationId, reader: readerOf(request) });
       return readerOf(request) === null ? json(route, { ok: false, code: 'unauthenticated' }, 401) : json(route, { ok: true });
     }
+    if (url.pathname === '/functions/v1/game-info' && request.method() === 'POST') return json(route, { ok: false, code: 'forbidden' }, 403);
     const table = /^\/rest\/v1\/([a-z_]+)$/.exec(url.pathname)?.[1];
     if (!table || request.method() !== 'GET') throw new Error(`Unexpected live transport request ${request.method()} ${url.pathname}`);
     const reader = readerOf(request);
@@ -386,6 +387,7 @@ export type LiveState = { world: WorldSnapshot; owner: OwnerState | null; now: n
  * (`anon` has no grant). The routes use this, and unit tests run the app's real reads over it (tests/api/bouts-live-routes.test.ts).
  */
 export function liveRows(table: string, params: URLSearchParams, state: LiveState): Row[] | 'refused' {
+  if (table === 'game_info_reads') return [];
   const source = tables(state)[table];
   if (!source) throw new Error(`Unexpected live transport table ${table}`);
   return source.private && state.reader === null ? 'refused' : query(source.rows, params);

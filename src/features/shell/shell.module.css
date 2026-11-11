@@ -266,8 +266,24 @@
   display: flex;
   align-items: center;
   justify-content: flex-end;
+  flex-wrap: wrap;
   gap: 6px;
 }
+
+.infoToggle {
+  padding: 6px 10px;
+  min-height: 36px;
+  border: 1px solid var(--glass-line);
+  border-radius: 10px;
+  background: var(--glass);
+  color: var(--accent);
+  font-size: 13px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.infoToggle:hover, .infoToggle[aria-expanded='true'] { background: var(--glass-2); }
+.infoToggle:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 
 .chipButton,
 .chipNote,
@@ -1133,7 +1149,7 @@
   margin: 0;
 }
 
-/* While the account menu or the messages panel is open (each offers Reload itself while the server is ahead), the notice under it steps
+/* While a corner popover is open (each offers Reload itself while the server is ahead), the notice under it steps
    aside: the menu's glass would show it through. It is only visually hidden (the .sr treatment), so a patch that comes out meanwhile is
    still announced; its two buttons are hidden outright, so the keyboard never reaches a control nobody sees. */
 .chip[data-popover] ~ .notices .patchNotice {

@@ -17,6 +17,7 @@ import type { DisplayClock } from '../../game/display-clock';
 import { saveClockMode, useClockMode } from '../../lib/clock-setting';
 import { PATCH, isBehind } from '../../lib/patch';
 import type { Viewer } from '../character/useGameState';
+import { GameInfoPanel } from '../game-info/GameInfoPanel';
 import { MessagesButton } from '../messages/MessagesButton';
 import type { MessagingActions } from '../messages/messages';
 import type { NoticeTitles } from '../messages/TitleNotices';
@@ -74,8 +75,9 @@ export function CornerChip({ viewer, session, owner, fixture, previewAs, clock, 
   /** The owner's titles and the Wear and "Choose a title" actions for the Notifications tab (patch 1.7; the shell's). */
   titles?: NoticeTitles;
 }) {
-  // One popover at a time: the account menu or the messages panel.
-  const [popover, setPopover] = useState<'account' | 'messages' | null>(null);
+  // One popover at a time under the corner controls.
+  const [popover, setPopover] = useState<'account' | 'messages' | 'game-info' | null>(null);
+  const [infoDirty, setInfoDirty] = useState(false);
   // The messages panel opened from the account menu's "Patch history ›" opens on the history, and gives the focus back to the account
   // button when it closes; opened from its own button, it opens on the lists and gives it back there.
   const [history, setHistory] = useState<{ patch: string | null } | undefined>(undefined);
@@ -87,8 +89,10 @@ export function CornerChip({ viewer, session, owner, fixture, previewAs, clock, 
   const chip = useRef<HTMLDivElement>(null);
   const toggle = useRef<HTMLButtonElement>(null);
   const messagesButton = useRef<HTMLButtonElement>(null);
+  const infoButton = useRef<HTMLButtonElement>(null);
   const menuId = useId();
   const messagesId = useId();
+  const infoId = useId();
   const staminaLineId = useId();
   const clockMode = useClockMode();
   const signedIn = !fixture && session.status === 'signed-in';
@@ -100,58 +104,79 @@ export function CornerChip({ viewer, session, owner, fixture, previewAs, clock, 
   // a modal dialog is open (the creation dialog can open over this menu), Escape is the dialog's (13.6 review I1). Escape and
   // the panel's own Close give the focus back to the button that opened it; a press elsewhere takes it where it went.
   const closeMessages = () => { setPopover(null); (history ? toggle : messagesButton).current?.focus(); };
+  const allowDiscard = () => !infoDirty || window.confirm('Discard unsaved Game Info edits?');
+  const closeInfo = () => { if (allowDiscard()) { setPopover(null); infoButton.current?.focus(); } };
+  useEffect(() => {
+    if (!infoDirty) return;
+    const warn = (event: BeforeUnloadEvent) => { event.preventDefault(); event.returnValue = ''; };
+    window.addEventListener('beforeunload', warn);
+    return () => window.removeEventListener('beforeunload', warn);
+  }, [infoDirty]);
   useEffect(() => {
     if (popover === null) return;
     const onKey = (event: KeyboardEvent) => {
       if (event.key !== 'Escape' || document.querySelector('dialog:modal')) return;
       event.preventDefault();
+      if (infoDirty) return;
       setPopover(null);
-      (popover === 'messages' && !history ? messagesButton : toggle).current?.focus();
+      const trigger = popover === 'game-info' ? infoButton : popover === 'messages' && !history ? messagesButton : toggle;
+      trigger.current?.focus();
     };
-    const onPress = (event: PointerEvent) => { if (!chip.current?.contains(event.target as Node)) setPopover(null); };
+    const onPress = (event: PointerEvent) => { if (!infoDirty && !chip.current?.contains(event.target as Node)) setPopover(null); };
     document.addEventListener('keydown', onKey, true);
     document.addEventListener('pointerdown', onPress, true);
     return () => { document.removeEventListener('keydown', onKey, true); document.removeEventListener('pointerdown', onPress, true); };
-  }, [popover, history]);
+  }, [popover, history, infoDirty]);
   // The messages button belongs to a player with a gladiator whose owner read carries an inbox.
   const inbox = owner?.inbox;
   const showMessages = !!(messaging && inbox);
-  useEffect(() => { if (!account || (popover === 'messages' && !showMessages)) setPopover(null); }, [account, popover, showMessages]);
+  useEffect(() => {
+    if ((popover === 'account' && !account) || (popover === 'messages' && (!account || !showMessages))) setPopover(null);
+  }, [account, popover, showMessages]);
 
   // Do not consume Back while the owner's inbox is still loading. The shell scopes requests to its owner lifecycle.
   useEffect(() => {
-    if (!messagesRequest || handledRequest.current === messagesRequest.n || !account || !showMessages) return;
+    if (infoDirty || !messagesRequest || handledRequest.current === messagesRequest.n || !account || !showMessages) return;
     handledRequest.current = messagesRequest.n;
     setHistory(undefined);
     setRequestedTab(messagesRequest);
     setPopover('messages');
-  }, [messagesRequest, account, showMessages]);
+  }, [messagesRequest, account, showMessages, infoDirty]);
+
+  const infoToggle = <button ref={infoButton} type="button" className={styles.infoToggle}
+    aria-expanded={popover === 'game-info'} aria-controls={popover === 'game-info' ? infoId : undefined} aria-haspopup="dialog"
+    onClick={() => { if (popover === 'game-info') closeInfo(); else setPopover('game-info'); }}>Game Info</button>;
+  const editorAccount = signedIn ? session.userId : null;
+  const infoPanel = popover === 'game-info' && <GameInfoPanel key={editorAccount ?? 'reader'} id={infoId} onClose={closeInfo} fixture={fixture} editorAccount={editorAccount}
+    onDirty={setInfoDirty} allowDiscard={allowDiscard}
+    update={latestPatch && isBehind(latestPatch) ? { number: latestPatch, reload: reloadPage } : undefined} />;
 
   if (!account) {
     const note = fixture ? (previewAs === 'visitor' ? null : viewer === 'unavailable' ? 'The fixture preview could not be loaded.' : 'Loading local preview…')
       : session.status === 'loading' ? 'Checking your session…' : null;
     // Where sign-in cannot start (the fixture preview, or a build without it configured), My gladiator says why.
     const live = !fixture && session.status === 'signed-out';
-    return <div ref={chip} className={styles.chip} data-testid="corner-chip">
-      {note ? <p className={styles.chipNote} role="status">{note}</p>
+    return <div ref={chip} className={styles.chip} data-testid="corner-chip" data-popover={popover ?? undefined}>
+      <div className={styles.chipRow}>{note ? <p className={styles.chipNote} role="status">{note}</p>
         : <button type="button" className={styles.join} disabled={google.busy} onClick={() => (live ? void google.begin() : onOpenMenu('gladiator'))}>
           <GoogleMark />
           {google.busy ? <span>Opening Google…</span>
             : <><span className={styles.wide}>Sign in with Google to join</span><span className={styles.narrow}>Sign in to join</span></>}
-        </button>}
+        </button>}{infoToggle}</div>
       {google.failed && <p className={styles.chipAlert} role="alert">{SIGN_IN_NOT_STARTED}</p>}
+      {infoPanel}
     </div>;
   }
   return (
     <div ref={chip} className={styles.chip} data-testid="corner-chip" data-popover={popover ?? undefined}>
       <div className={styles.chipRow}>
-        {viewer === 'no-gladiator' && <button type="button" className={styles.create} data-create-offer="" onClick={() => { setPopover(null); onCreate(); }}>Create your gladiator</button>}
+        {viewer === 'no-gladiator' && <button type="button" className={styles.create} data-create-offer="" onClick={() => { if (allowDiscard()) { setPopover(null); onCreate(); } }}>Create your gladiator</button>}
         {messaging && inbox && <MessagesButton key={requestedTab?.n ?? 'ordinary'} initialTab={requestedTab?.tab} inbox={inbox} {...messaging}
           watch={messaging.watch ? { kept: messaging.watch.kept, open: note => { setPopover(null); messaging.watch!.open(note); } } : undefined} changeLook={onChangeLook} open={popover === 'messages'} panelId={messagesId}
-          onToggle={() => { setRequestedTab(null); setHistory(undefined); setPopover(value => (value === 'messages' ? null : 'messages')); }} onClose={closeMessages} buttonRef={messagesButton}
+          onToggle={() => { if (allowDiscard()) { setRequestedTab(null); setHistory(undefined); setPopover(value => (value === 'messages' ? null : 'messages')); } }} onClose={closeMessages} buttonRef={messagesButton}
           history={history} latestPatch={latestPatch} titles={titles} />}
         <button ref={toggle} type="button" className={styles.chipButton} aria-expanded={open} aria-controls={menuId}
-          onClick={() => { setHistory(undefined); setPopover(value => (value === 'account' ? null : 'account')); }}>
+          onClick={() => { if (allowDiscard()) { setHistory(undefined); setPopover(value => (value === 'account' ? null : 'account')); } }}>
           {owner ? <>
             <b data-testid="chip-name">{owner.name}</b>
             <span className={`${styles.wide} ${styles.chipSep}`} aria-hidden="true">|</span>
@@ -162,7 +187,9 @@ export function CornerChip({ viewer, session, owner, fixture, previewAs, clock, 
             <Countdown seconds={seconds} />
           </> : <span>Signed in</span>}
         </button>
+        {infoToggle}
       </div>
+      {infoPanel}
       {open && (
         <div id={menuId} className={styles.chipMenu} role="group" aria-label="Account">
           {owner && <>

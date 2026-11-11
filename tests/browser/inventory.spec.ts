@@ -638,15 +638,19 @@ test('explains an invalid build change in words and reloads the latest inventory
   const { sword2 } = flow.pieces;
   await page.goto('/game/');
   await openMenu(page, 'My gladiator');
-  const weapon = page.getByRole('combobox', { name: 'weapon', exact: true });
-  await weapon.selectOption(sword2.id);
-  await expect(weapon.locator(`option[value="${sword2.id}"]`)).not.toHaveAttribute('disabled');
+  const weapon = page.locator('[data-equipment-slot="weapon"]');
+  const option = page.locator(`[data-equipment-option="${sword2.id}"]`);
+  await weapon.click();
+  await expect(option).toBeEnabled();
+  await option.click();
+  await page.getByRole('button', { name: 'Use Sword', exact: true }).click();
   // Another session lists the selected piece after this build draft was opened.
   sword2.reservation = { kind: 'listing', referenceId: randomUUID() };
   flow.reject('invalid');
   await page.getByRole('button', { name: 'Queue build', exact: true }).click();
   await expect(page.locator('.planning-form').getByRole('alert')).toHaveText('That build change is no longer possible. Your build has been reloaded.');
-  await expect(weapon.locator(`option[value="${sword2.id}"]`)).toHaveAttribute('disabled', '');
+  await weapon.click();
+  await expect(option).toBeDisabled();
   expect(flow.commands).toHaveLength(1);
   expect(flow.state.pendingBuild).toBeNull();
 });

@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useId, useRef, useState, type FormEvent, type MouseEvent } from 'react';
-import type { Attributes, EquipmentSlot, GameCommand, Stance } from '@contracts/commands';
+import type { Attributes, GameCommand, Stance } from '@contracts/commands';
 import type { BuildView, ItemInstance, OwnerState } from '@contracts/reads';
 import type { BuildInput } from '@domain/types';
 import { validateBuild } from '@domain/build';
@@ -19,10 +19,10 @@ import { slotTimeText } from '../schedule/slot-time';
 import { useMinuteNow } from '../schedule/use-minute-now';
 import { useOutcomeFocus } from '../shell/focus-lost';
 import { buildRefusal } from './build-refusal';
+import { BuildEquipment, equipmentSlots } from './EquipmentInspection';
 import { fixedClassAndPoints, fixedKey, refloored } from './fixed-build';
 
 const attributes = ['strength', 'agility', 'vitality', 'endurance', 'precision'] as const;
-const slots: EquipmentSlot[] = ['weapon', 'offHand', 'head', 'body', 'feet'];
 const input = (build: BuildView): BuildInput => ({ classId: build.classId, stance: build.stance, allocation: { ...build.allocations }, equipment: { ...build.equipment } });
 const title = (value: string) => value[0].toUpperCase() + value.slice(1);
 /**
@@ -49,7 +49,7 @@ const wholePoints = (value: number) => Number.isSafeInteger(value) && value >= 0
 type BuildCommand = Extract<GameCommand, { kind: 'queue-build' | 'cancel-build' }>;
 function BuildSummary({ build, inventory }: { build: BuildView; inventory: ItemInstance[] }) {
   return <><p>{build.classId} · {build.stance}</p><dl>{attributes.map(key => <div key={key}><dt>{key}</dt><dd>{build.allocations[key]}</dd></div>)}
-    {slots.map(slot => { const item = inventory.find(item => item.id === build.equipment[slot]); return <div key={slot}><dt>{slot}</dt><dd>{item ? CATALOG_V1.items[item.catalogId]?.name ?? item.catalogId : 'None'}</dd></div>; })}</dl></>;
+    {equipmentSlots.map(slot => { const item = inventory.find(item => item.id === build.equipment[slot]); return <div key={slot}><dt>{slot}</dt><dd>{item ? CATALOG_V1.items[item.catalogId]?.name ?? item.catalogId : 'None'}</dd></div>; })}</dl></>;
 }
 
 export function BuildPanel({ owner, gateway, refresh, clock }: { owner: OwnerState; gateway: GameGateway; refresh(): Promise<void>; clock: DisplayClock }) {
@@ -113,8 +113,6 @@ export function BuildPanel({ owner, gateway, refresh, clock }: { owner: OwnerSta
   const stats = valid.ok ? deriveStats(valid.snapshot, RULES_V1) : null;
   /** The points earned, how many are left of them, and the floor of each attribute: the current build's value (permanent). */
   const earned = owner.progression.earnedAttributePoints, left = pointsLeft(draft.allocation, earned);
-  const weapon = owner.inventory.find(item => item.id === draft.equipment.weapon);
-  const twoHands = weapon ? CATALOG_V1.items[weapon.catalogId]?.hands === 2 : false;
   /** The pending build's effective time, or '' when it cannot be shown: its line is then left out. */
   const effective = owner.pendingBuild ? slotTimeText(owner.pendingBuild.effectiveSlotIndex * RULES_V1.clock.slotMs, nowMs, clockMode) : '';
   function update(next: BuildInput, note = '', undo: Attributes | null = null) { attempt.current = null; setDraft(next); setError(''); setMessage(''); setPointsNote({ text: note, undo }); }
@@ -198,15 +196,7 @@ export function BuildPanel({ owner, gateway, refresh, clock }: { owner: OwnerSta
         {/* Respec, a paid option to come (Avi, change round 1): shown gray and aria-disabled with the line that says so; it does nothing. */}
         <div className="build-respec"><button type="button" aria-disabled="true" aria-describedby={respecId}>Respec</button><span id={respecId}>Coming later as a paid option</span></div>
       </fieldset>
-      <fieldset disabled={busy}><legend>Equipment</legend>
-        {slots.map(slot => <label key={slot}>{slot}<select value={draft.equipment[slot] ?? ''} disabled={slot === 'offHand' && twoHands} {...reviewed(equipmentInvalid)} onChange={e => {
-          const id = e.target.value || null;
-          const entry = owner.inventory.find(item => item.id === id);
-          const clearShield = slot === 'weapon' && entry && CATALOG_V1.items[entry.catalogId]?.hands === 2;
-          update({ ...draft, equipment: { ...draft.equipment, [slot]: id, ...(clearShield ? { offHand: null } : {}) } });
-        }}><option value="">None</option>{owner.inventory.filter(item => CATALOG_V1.items[item.catalogId]?.slot === slot).map(item => <option key={item.id} value={item.id} disabled={item.tier > owner.progression.level || item.reservation?.kind === 'listing'}>{CATALOG_V1.items[item.catalogId].name} · Level {item.tier}</option>)}</select></label>)}
-        {twoHands && <p>This two-handed weapon uses the off-hand slot.</p>}
-      </fieldset>
+      <BuildEquipment draft={draft} owner={owner} busy={busy} reviewId={equipmentInvalid ? reviewId : undefined} onChange={update} />
       {stats && <div className="creation-preview"><p>Maximum stamina: {stats.maxStamina} · Stamina after change: {preserveStamina(owner.stamina.current, stats.maxStamina)}</p>
         <p>Load: {stats.load} / {stats.loadCapacity} · Combat efficiency: {Math.round(stats.efficiency * 100)}%</p><p>Raising Endurance increases capacity without restoring current stamina.</p></div>}
       {!valid.ok && <p id={reviewId} role="status">Review your build: {valid.reason}.</p>}

@@ -13,6 +13,7 @@ import type { SessionState } from '../../lib/api/session';
 import type { DisplayClock } from '../../game/display-clock';
 import { SignIn } from '../auth/SignIn';
 import { BuildPanel } from '../build/BuildPanel';
+import { WornEquipment } from '../build/EquipmentInspection';
 import { useClockMode } from '../../lib/clock-setting';
 import { RestGainText } from '../schedule/RestGainText';
 import { restingGain, restingGainText } from '../schedule/rest-stamina';
@@ -116,6 +117,7 @@ export function CharacterPanel({ viewer, session, owner, ownerError, slotIndex, 
     return <>
       <OwnerSummary owner={owner} slotIndex={slotIndex} clock={clock} fixture={fixture} stale={ownerError !== null} resting={resting} onRetry={retry}
         titles={titles} />
+      <WornEquipment key={`worn-${owner.gladiatorId}`} owner={owner} />
       {fixture ? <p className="panel-notice">This preview cannot change the build.</p>
         : <BuildPanel key={owner.gladiatorId} owner={owner} gateway={gateway} refresh={refreshOwner} clock={clock} />}
     </>;

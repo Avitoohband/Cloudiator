@@ -48,6 +48,7 @@
     "node_modules",
     "supabase/functions/game-command/index.ts",
     "supabase/functions/game-worker/index.ts",
+    "supabase/functions/game-info/index.ts",
     "tests/backend/edge.deno.ts"
   ]
 }

@@ -6,7 +6,8 @@ import { createServer, get } from 'node:http';
 import { tmpdir } from 'node:os';
 import { basename, dirname, join, resolve } from 'node:path';
 
-const entrypoints = ['supabase/functions/game-command/index.ts', 'supabase/functions/game-worker/index.ts', 'tests/backend/edge.deno.ts'];
+const functions = ['supabase/functions/game-command/index.ts', 'supabase/functions/game-worker/index.ts', 'supabase/functions/game-info/index.ts'];
+const edgeTests = ['tests/backend/edge.deno.ts'];
 const script = JSON.parse(readFileSync('package.json', 'utf8')).scripts.typecheck as string;
 const commands = script.split(' && ').map(command => command.split(/\s+/));
 const deno = realpathSync(resolve('node_modules/deno', process.platform === 'win32' ? 'deno.exe' : 'deno'));
@@ -19,7 +20,7 @@ describe('Deno verification policy', () => {
     expect(args).toContain('--cached-only');
     expect(args).toContain('--frozen');
     expect(args.slice(args.indexOf('--config'), args.indexOf('--config') + 2)).toEqual(['--config', 'supabase/functions/deno.json']);
-    expect(args.filter(arg => arg.endsWith('.ts'))).toEqual(index === 1 ? entrypoints.slice(0, 2) : entrypoints.slice(2));
+    expect(args.filter(arg => arg.endsWith('.ts'))).toEqual(index === 1 ? functions : edgeTests);
     expect(args.includes('--no-run')).toBe(index === 1);
     expect(args.includes('--check')).toBe(index === 1);
     expect(commands.map(tokens => tokens.slice(0, 2))).toEqual([['tsc', '--noEmit'], ['deno', 'test'], ['deno', 'test']]);
@@ -30,7 +31,7 @@ describe('Deno verification policy', () => {
     const preparation = /^      - name: Prepare the locked Deno imports \(explicit dependency installation\)\r?\n        run: (.+)$/m.exec(ci);
     expect(preparation, 'cold CI must prepare imports separately from offline verification').not.toBeNull();
     const args = preparation![1].split(/\s+/);
-    expect(args).toEqual(['npx', '--no-install', 'deno', 'cache', '--frozen', '--config', 'supabase/functions/deno.json', ...entrypoints]);
+    expect(args).toEqual(['npx', '--no-install', 'deno', 'cache', '--frozen', '--config', 'supabase/functions/deno.json', ...functions, ...edgeTests]);
     expect(ci.indexOf('run: npm ci')).toBeLessThan(preparation!.index);
     expect(preparation!.index).toBeLessThan(ci.indexOf('- name: Start a fresh local Supabase stack'));
     expect(preparation!.index).toBeLessThan(ci.indexOf('- name: Serve the local Edge functions'));

@@ -42,3 +42,7 @@ verify_jwt = false
 # The handler checks an explicit server-only worker secret; JWTs and publishable keys are not authorization.
 [functions.game-worker]
 verify_jwt = false
+
+# This handler verifies Google owner sessions or a scoped draft-only MCP credential.
+[functions.game-info]
+verify_jwt = false

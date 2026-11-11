@@ -190,6 +190,8 @@
     inset -2px -2px 0 0 #dcc9a0, 0 6px 0 0 rgba(0, 0, 0, 0.28);
   transition: opacity 0.4s;
   user-select: none;
+  /* Drawn for the eyes only (no controls): a click on it reaches the camp underneath, such as a stall's awning. */
+  pointer-events: none;
 }
 
 .bubble[data-fading='true'] {

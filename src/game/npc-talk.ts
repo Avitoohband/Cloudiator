@@ -120,17 +120,21 @@ export class TalkLines {
 export type TalkAnchor = { x: number; top: number; feet: number };
 export type TalkPlace = { left: number; top: number; below: boolean; tail: number };
 
+/** How far the bubble keeps from each edge of the view (CSS px): the bar along the top, a pinned menu rail at a side or the bottom. */
+export type TalkMargin = { top: number; left: number; right: number; bottom: number };
+
 /**
- * The bubble's top-left corner: centred over the name or head with its tail pointing at the NPC, kept `margin.side` inside
- * the view's sides; under the feet when it would reach into `margin.top` (the bar along the top). `tail` is the tail's left
- * edge inside the bubble.
+ * The bubble's top-left corner: centred over the name or head with its tail pointing at the NPC, kept inside the view's
+ * margins at the sides; under the feet when it would reach into the top margin, and never into the bottom one (it rests
+ * above a bottom menu bar). `tail` is the tail's left edge inside the bubble.
  */
 export function placeTalkBubble(anchor: TalkAnchor, size: { width: number; height: number }, view: { width: number; height: number },
-  margin: { top: number; side: number }): TalkPlace {
-  const left = Math.max(margin.side, Math.min(anchor.x - size.width / 2, view.width - margin.side - size.width));
+  margin: TalkMargin): TalkPlace {
+  const left = Math.max(margin.left, Math.min(anchor.x - size.width / 2, view.width - margin.right - size.width));
   let top = anchor.top - TALK_TAIL_PX - size.height;
   let below = false;
   if (top < margin.top) { top = anchor.feet + 10; below = true; }
+  top = Math.max(margin.top, Math.min(top, view.height - margin.bottom - size.height));
   const tail = Math.max(6, Math.min(anchor.x - left - 7, size.width - 20));
   return { left, top, below, tail };
 }

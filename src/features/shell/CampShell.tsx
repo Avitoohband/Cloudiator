@@ -75,6 +75,7 @@ import { replayKept } from '../../lib/replay-retention';
 import { messagesRequestFor, type MessagesRequest, type MessagingActions } from '../messages/messages';
 import type { NoticeTitles } from '../messages/TitleNotices';
 import { GameViewport } from '../../game/GameViewport';
+import type { TalkInsets } from '../../game/TalkBubble';
 import type { DisplayClock } from '../../game/display-clock';
 import { appearancesOf } from '../../game/replay-looks';
 import { useClockMode } from '../../lib/clock-setting';
@@ -511,6 +512,25 @@ export function CampShell({ fixture, previewAs, previewResting = false, previewB
   const prefs = compact ? DEFAULT_MENU_PREFS : savedPrefs;
   // When the camp shows names and titles (Settings, Task 11): the same on phones, applied to the camp at once.
   const [labels, setLabels] = useLabelPrefs();
+  // An NPC's speech bubble keeps clear of the pinned menu rail: its laid-out box (offsets leave out the slide transform) and
+  // 8 px more, at the side or along the bottom it sits on; measured again when the window resizes (Task 11 review).
+  const [talkInsets, setTalkInsets] = useState<TalkInsets | undefined>(undefined);
+  useEffect(() => {
+    if (!prefs.pinned) { setTalkInsets(undefined); return; }
+    const measure = () => {
+      const shell = shellRef.current;
+      const rail = shell?.querySelector<HTMLElement>('[data-testid="menu-rail"]');
+      if (!shell || !rail) return;
+      const next: TalkInsets = { left: 8, right: 8, bottom: 8 };
+      if (prefs.place === 'left') next.left = rail.offsetLeft + rail.offsetWidth + 8;
+      else if (prefs.place === 'right') next.right = shell.clientWidth - rail.offsetLeft + 8;
+      else next.bottom = shell.clientHeight - rail.offsetTop + 8;
+      setTalkInsets(current => (current && current.left === next.left && current.right === next.right && current.bottom === next.bottom ? current : next));
+    };
+    measure();
+    window.addEventListener('resize', measure);
+    return () => window.removeEventListener('resize', measure);
+  }, [prefs.pinned, prefs.place]);
   const railShown = railVisible(rail, prefs.pinned);
   const [patchLater, setPatchLater] = useState<string | null>(null);
   const patchNotice = noticeFor({ latest: game.latestPatch, build: PATCH, blocked: scene !== null || modal || joining.creating || lookOpen || titleOpen,
@@ -617,7 +637,7 @@ export function CampShell({ fixture, previewAs, previewResting = false, previewB
           if (start && isClick(event.clientX - start.x, event.clientY - start.y)) { send('camp-click'); closeCard(false); }
         }}>
         <GameViewport chrome="none" world={world} bridge={bridge} focusGladiatorId={ownerId} clock={clock} timelines={reads} tournaments={reads}
-          onStatus={game.setSceneStatus} paused={scene !== null} labels={labels} />
+          onStatus={game.setSceneStatus} paused={scene !== null} labels={labels} talkInsets={talkInsets} />
       </main>
       {scene && <SceneOverlay view={scene} gateway={reads} state={game} fixture={fixture} bouts={bouts} tournamentSamples={samples.tournaments} onReplace={replaceScene}
         onClose={() => bridge.emit('return-camp', {})} onWatch={openScene} />}

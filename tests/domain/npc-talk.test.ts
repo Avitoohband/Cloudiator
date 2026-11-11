@@ -66,7 +66,7 @@ describe('talking to an NPC', () => {
 
 describe('where the bubble sits', () => {
   const view = { width: 1280, height: 800 };
-  const margin = { top: 60, side: 8 };
+  const margin = { top: 60, left: 8, right: 8, bottom: 8 };
   const size = { width: 200, height: 60 };
 
   it('centres over the head, its tail at the NPC, 8 px clear of the name or head', () => {
@@ -86,5 +86,23 @@ describe('where the bubble sits', () => {
   it('goes under the feet when there is no room above, clear of the top bar', () => {
     const at = placeTalkBubble({ x: 400, top: 100, feet: 150 }, size, view, margin);
     expect(at).toMatchObject({ top: 160, below: true });
+  });
+
+  it('keeps clear of a pinned rail at the left or right edge, the tail still at the NPC where it can', () => {
+    const leftRail = placeTalkBubble({ x: 40, top: 300, feet: 350 }, size, view, { ...margin, left: 72 });
+    expect(leftRail.left).toBe(72);
+    expect(leftRail.tail).toBe(6);
+    const near = placeTalkBubble({ x: 200, top: 300, feet: 350 }, size, view, { ...margin, left: 72 });
+    expect(near).toMatchObject({ left: 100, tail: 93 });
+    const rightRail = placeTalkBubble({ x: 1250, top: 300, feet: 350 }, size, view, { ...margin, right: 72 });
+    expect(rightRail.left).toBe(1280 - 72 - 200);
+  });
+
+  it('rests above a bottom menu bar when the NPC stands behind it', () => {
+    const at = placeTalkBubble({ x: 400, top: 760, feet: 790 }, size, view, { ...margin, bottom: 72 });
+    expect(at.top + size.height).toBe(800 - 72);
+    expect(at.below).toBe(false);
+    // Clear of the bar, nothing moves.
+    expect(placeTalkBubble({ x: 400, top: 500, feet: 550 }, size, view, { ...margin, bottom: 72 }).top).toBe(500 - 8 - 60);
   });
 });

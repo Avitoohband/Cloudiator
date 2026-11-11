@@ -30,7 +30,7 @@ import type { Point } from './iso';
 import type { ArenaFightSummary, SceneBridge, SceneEventName, SceneEvents } from './bridge';
 import type { CampDebugState, CampSceneHandle, PropDebug, TalkFrame } from './camp-scene';
 import { DEFAULT_LABEL_PREFS, type LabelPrefs } from './labels';
-import { TalkBubble } from './TalkBubble';
+import { TalkBubble, type TalkInsets } from './TalkBubble';
 import { arenaFightButton, arenaPartnersShown, arenaReadsDue, type ArenaRead } from './arena-layout';
 import {
   TOURNAMENT_LOG_WINDOW_MS, campTournamentIds, recordTournamentRead, ringLogRetryDelay, tournamentLogsDue, tournamentReadsDue, type TournamentRead,
@@ -123,7 +123,7 @@ declare global {
 }
 
 export function GameViewport({ world, bridge, focusGladiatorId = null, clock: sharedClock, timelines = null, tournaments = null, onStatus, chrome = 'framed', paused = false,
-  labels = DEFAULT_LABEL_PREFS }: {
+  labels = DEFAULT_LABEL_PREFS, talkInsets }: {
   world: WorldSnapshot | null;
   bridge: SceneBridge;
   focusGladiatorId?: string | null;
@@ -154,6 +154,8 @@ export function GameViewport({ world, bridge, focusGladiatorId = null, clock: sh
   paused?: boolean;
   /** When names and titles show over the camp (the Settings choices, Task 11); When zoomed in for both by default. */
   labels?: LabelPrefs;
+  /** What a speech bubble keeps clear of at the view's sides and bottom: the page's pinned menu rail (Task 11). */
+  talkInsets?: TalkInsets;
 }) {
   const host = useRef<HTMLDivElement>(null);
   const handle = useRef<CampSceneHandle | null>(null);
@@ -531,7 +533,7 @@ export function GameViewport({ world, bridge, focusGladiatorId = null, clock: sh
             <button type="button" className={styles.reload} onClick={reload}>Reload</button>
           </div>
           : <p id={statusId} className={styles.status} role="status">{status.kind === 'loading' ? 'Opening the camp…' : ''}</p>}
-        {!unavailable && <TalkBubble sink={talkSink} hud={!framed} />}
+        {!unavailable && <TalkBubble sink={talkSink} hud={!framed} insets={talkInsets} />}
       </div>
       {/* Keyboard and touch equivalents of clicking a fighting pair, below the view so they never cover it. */}
       {framed && !unavailable && fights.length > 0 && (

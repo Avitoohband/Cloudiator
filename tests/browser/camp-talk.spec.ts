@@ -4,7 +4,9 @@ import { worldToScreen } from '../../src/game/iso';
 import { NPC_ROUTINES, planNpcPosition } from '../../src/game/npcs';
 import type { MapData } from '../../src/game/assets';
 import { TALK_FADE_MS, talkHoldMs } from '../../src/game/npc-talk';
-import { expectOwnerShown, menuDialog, openMenu, quietArrivals, touchLayout } from './shell-helpers';
+import { MENU_PREFS_KEY } from '../../src/features/shell/menu-prefs';
+import { decodePng } from '../../assets/source/tools/png.mjs';
+import { closeMenu, cornerChip, expectOwnerShown, menuDialog, openMenu, quietArrivals, touchLayout } from './shell-helpers';
 
 // Patch 1.9, Task 11 (Avi approved the mockups 2026-11-11): camp NPCs talk in a pixel speech bubble, and the Settings panel
 // chooses when names and titles show over the camp (Off, When zoomed in, Always), with "Tidy" overlaps.
@@ -15,6 +17,15 @@ const shotDir = process.env.TASK11_SHOT_DIR;
 const LABELS_KEY = 'cloudiator.labels.v1';
 type Prop = { id: string; frame: string; x: number; y: number; w: number; d: number };
 const campMap = JSON.parse(readFileSync('public/assets/camp/map.json', 'utf8')) as MapData & { props: Prop[] };
+const readJson = (path: string) => JSON.parse(readFileSync(path, 'utf8'));
+const propFrames: Record<string, { frame: { x: number; y: number; w: number; h: number }; anchorPx: { x: number; y: number } }> = readJson('public/assets/camp/props.json').frames;
+const propsImage: { width: number; rgba: Uint8Array } = decodePng(readFileSync(`public/assets/${readJson('public/assets/manifest.json').atlases['camp-props'].image}`));
+/** Whether a prop frame's pixel (frame-relative) is drawn. */
+const opaque = (frame: string, fx: number, fy: number) => {
+  const f = propFrames[frame];
+  const x = Math.floor(fx), y = Math.floor(fy);
+  return x >= 0 && y >= 0 && x < f.frame.w && y < f.frame.h && propsImage.rgba[((f.frame.y + y) * propsImage.width + f.frame.x + x) * 4 + 3] > 0;
+};
 const LINES = {
   trainer: [
     'I am Cassius. In this yard you call me Doctore.',
@@ -96,6 +107,31 @@ async function clickStall(page: Page, frame: 'stall-weapons' | 'stall-armor') {
   const at = { x: box.x + (anchor.x + 14 - camera.worldView.x) * camera.zoom, y: box.y + (anchor.y - 23 - camera.worldView.y) * camera.zoom };
   expect(await page.evaluate(p => document.elementFromPoint(p.x, p.y) instanceof HTMLCanvasElement, at)).toBe(true);
   await tapAt(page, at);
+}
+/**
+ * A point (page px) on a stall's drawn pixels under the speech bubble, clear of everyone's body: where a click must reach the
+ * stall through the bubble.
+ */
+async function stallUnderBubble(page: Page, frame: 'stall-weapons' | 'stall-armor') {
+  const prop = campMap.props.find(p => p.frame === frame)!;
+  const f = propFrames[frame];
+  const { actors, camera } = await campState(page);
+  const z = camera.zoom, view = camera.worldView;
+  const box = await canvasBox(page);
+  const b = (await bubble(page).boundingBox())!;
+  const anchor = worldToScreen(prop.x, prop.y);
+  const bodies = actors.filter(a => a.visible).map(a => worldToScreen(a.x, a.y));
+  for (let y = b.y + 4; y < b.y + b.height - 4; y += 4) {
+    for (let x = b.x + 4; x < b.x + b.width - 4; x += 4) {
+      const wx = view.x + (x - box.x) / z, wy = view.y + (y - box.y) / z;
+      const fx = wx - (anchor.x - f.anchorPx.x), fy = wy - (anchor.y - f.anchorPx.y);
+      // Solid stall around the point, not its 1 px outline, where a sub-pixel difference decides.
+      if ([[0, 0], [-3, -3], [3, -3], [-3, 3], [3, 3]].some(([dx, dy]) => !opaque(frame, fx + dx, fy + dy))) continue;
+      if (bodies.some(p => Math.abs(p.x - wx) < 16 && wy > p.y - 50 && wy < p.y + 4)) continue;
+      return { x, y };
+    }
+  }
+  throw new Error(`no ${frame} pixel under the bubble`);
 }
 const expectLine = async (page: Page, name: string, line: string, index: number) => {
   await expect(bubble(page)).toBeVisible();
@@ -193,6 +229,45 @@ test.describe('talking camp NPCs', () => {
     expect(Math.abs((b1.y - b0.y) - (after.y - before.y))).toBeLessThanOrEqual(2);
   });
 
+  test('the bubble keeps clear of a pinned menu rail at the left, the right and the bottom', async ({ page }) => {
+    await openCamp(page);
+    test.skip(await touchLayout(page), "The pinned rail is the pointer layout's.");
+    const rail = page.getByTestId('menu-rail');
+    const size = page.viewportSize()!;
+    for (const place of ['left', 'right', 'bottom'] as const) {
+      await page.evaluate(([key, value]) => localStorage.setItem(key, value), [MENU_PREFS_KEY, JSON.stringify({ pinned: true, place })]);
+      await page.reload();
+      await page.waitForFunction(() => window.__cloudiatorCamp?.state()?.ready === true, null, { timeout: 45_000 });
+      await page.evaluate(() => window.__cloudiatorCamp!.freezeClock(window.__cloudiatorShell!.clock.now()));
+      await expect(rail).toHaveAttribute('data-place', place);
+      await expect(rail).toHaveAttribute('data-revealed', 'true');
+      const r = (await (await settled(rail)).boundingBox())!;
+      // Old Marta at the kitchen stands low enough on the map to be walked under a bottom bar.
+      const npc = place === 'bottom' ? 'npc:cook' : 'npc:trainer';
+      const zoom = place === 'bottom' ? 1 : 2;
+      const at = await clickBody(page, npc, { zoom });
+      await expect(bubble(page)).toBeVisible();
+      // The camera moves the NPC to the rail's edge of the view (behind the rail, or under the bar).
+      const shift = place === 'left' ? { dx: 12 - at.x, dy: 0 } : place === 'right' ? { dx: size.width - 12 - at.x, dy: 0 } : { dx: 0, dy: size.height - 6 - (at.y + 20 * zoom) };
+      await page.evaluate(d => window.__cloudiatorCamp!.emit('camera-pan', d), shift);
+      await nextFrames(page);
+      const now = await bodyAt(page, npc, { keep: true });
+      const b = (await bubble(page).boundingBox())!;
+      if (place === 'left') {
+        expect(now.x, 'the trainer stands behind the rail').toBeLessThan(r.x + r.width);
+        expect(b.x, 'the bubble starts right of the rail').toBeGreaterThanOrEqual(r.x + r.width + 7);
+      } else if (place === 'right') {
+        expect(now.x, 'the trainer stands behind the rail').toBeGreaterThan(r.x);
+        expect(b.x + b.width, 'the bubble ends left of the rail').toBeLessThanOrEqual(r.x - 7);
+      } else {
+        expect(now.y + 20 * zoom, 'Old Marta stands under the bar').toBeGreaterThan(r.y);
+        expect(b.y + b.height, 'the bubble rests above the bar').toBeLessThanOrEqual(r.y - 7);
+      }
+      await page.keyboard.press('Escape');
+      await expect(bubble(page)).toHaveCount(0);
+    }
+  });
+
   test('NPCs show a pointer and a gold ring on hover; gladiators do not', async ({ page }) => {
     await openCamp(page);
     test.skip(await touchLayout(page), 'Hover is the pointer layout\'s.');
@@ -200,6 +275,17 @@ test.describe('talking camp NPCs', () => {
     await page.mouse.move(at.x, at.y - 6);
     await nextFrames(page);
     await expect.poll(() => page.locator('canvas').evaluate(c => (c as HTMLCanvasElement).style.cursor)).toBe('pointer');
+    expect((await campState(page)).hoverRing).toBe('npc:trainer');
+    // Straight off him onto the page's own controls (the corner chip, one move, so the canvas hears no move without him):
+    // nobody is hovered, no ring stays behind.
+    const chip = (await cornerChip(page).boundingBox())!;
+    await page.mouse.move(chip.x + chip.width / 2, chip.y + chip.height / 2);
+    await nextFrames(page);
+    expect((await campState(page)).hover).toBeNull();
+    expect((await campState(page)).hoverRing).toBeNull();
+    // Back on him: the ring again.
+    await page.mouse.move(at.x, at.y - 6);
+    await nextFrames(page);
     expect((await campState(page)).hoverRing).toBe('npc:trainer');
     const aster = (await campState(page)).actors.find(a => a.kind === 'player' && a.name === 'Aster')!;
     const g = await bodyAt(page, aster.id);
@@ -209,19 +295,76 @@ test.describe('talking camp NPCs', () => {
     expect((await campState(page)).hoverRing).toBeNull();
   });
 
-  test('Brutus and Livia talk and open no shop; their stalls open Inventory and shops as before', async ({ page }) => {
+  test('an NPC who walks out from under a still pointer takes its ring with it', async ({ page }) => {
+    await openCamp(page, { still: false });
+    test.skip(await touchLayout(page), 'Hover is the pointer layout\'s.');
+    const routine = NPC_ROUTINES.find(r => r.npcId === 'trainer')!;
+    const base = await page.evaluate(() => window.__cloudiatorShell!.clock.now());
+    const start = base - (base % routine.periodMs) + routine.periodMs;
+    let t = 0;
+    for (; t < routine.periodMs; t += 250) {
+      const [a, b] = [planNpcPosition(routine, campMap, start + t), planNpcPosition(routine, campMap, start + t + 2_000)];
+      if (a.action === 'walk' && b.action === 'walk' && Math.hypot(b.x - a.x, b.y - a.y) > 1.6) break;
+    }
+    await page.evaluate(ms => window.__cloudiatorCamp!.freezeClock(ms), start + t);
+    const at = await bodyAt(page, 'npc:trainer');
+    await page.mouse.move(at.x, at.y - 6);
+    await nextFrames(page);
+    expect((await campState(page)).hoverRing).toBe('npc:trainer');
+    // The pointer stays put; two seconds on he has walked on.
+    await page.evaluate(ms => window.__cloudiatorCamp!.freezeClock(ms), start + t + 2_000);
+    await nextFrames(page);
+    await nextFrames(page);
+    const state = await campState(page);
+    expect(state.hover).not.toBe('npc:trainer');
+    expect(state.hoverRing).not.toBe('npc:trainer');
+  });
+
+  test('the bubble takes no clicks, and a press released off the camp is no click', async ({ page }) => {
+    await openCamp(page);
+    await clickBody(page, 'npc:trainer');
+    await expect(bubble(page)).toBeVisible();
+    const b = (await bubble(page).boundingBox())!;
+    expect(await page.evaluate(p => document.elementFromPoint(p.x, p.y) instanceof HTMLCanvasElement, { x: b.x + b.width / 2, y: b.y + b.height / 2 })).toBe(true);
+    if (await touchLayout(page)) return;
+    // A press on the ground released over the corner chip: no click, the bubble stays; the next click on the ground closes it.
+    const ground = await emptyGround(page);
+    const chip = (await cornerChip(page).boundingBox())!;
+    await page.mouse.move(ground.x, ground.y);
+    await page.mouse.down();
+    await page.mouse.move(chip.x + chip.width / 2, chip.y + chip.height / 2, { steps: 6 });
+    await page.mouse.up();
+    await nextFrames(page);
+    await expect(bubble(page)).toBeVisible();
+    await tapAt(page, await emptyGround(page));
+    await expect(bubble(page)).toHaveCount(0);
+  });
+
+  test('Brutus and Livia talk and open no shop; their stalls open Inventory and shops as before, through the bubble too', async ({ page }) => {
     await openCamp(page);
     await expectOwnerShown(page, 'Aster');
     const inventory = menuDialog(page, 'Inventory and shops');
-    await clickBody(page, 'npc:smith');
-    await expectLine(page, 'Brutus the Smith', LINES.smith, 0);
-    await expect(inventory).toHaveCount(0);
-    await clickBody(page, 'npc:armorer');
-    await expectLine(page, 'Livia the Armorer', LINES.armorer, 0);
-    await expect(inventory).toHaveCount(0);
+    const pressed = () => inventory.getByRole('group', { name: 'Shop filters', exact: true }).getByRole('button', { pressed: true });
+    for (const [id, frame, name, line, filter] of [
+      ['npc:smith', 'stall-weapons', 'Brutus the Smith', LINES.smith, 'Weapons'],
+      ['npc:armorer', 'stall-armor', 'Livia the Armorer', LINES.armorer, 'Armor'],
+    ] as const) {
+      await clickBody(page, id);
+      await expectLine(page, name, line, 0);
+      await expect(inventory).toHaveCount(0);
+      // The stall's awning under the bubble: the click reaches the stall, which opens its shop (and closes the bubble).
+      const at = await stallUnderBubble(page, frame);
+      expect(await page.evaluate(p => document.elementFromPoint(p.x, p.y) instanceof HTMLCanvasElement, at)).toBe(true);
+      await tapAt(page, at);
+      await expect(inventory).toBeVisible();
+      await expect(pressed()).toHaveText([filter]);
+      await expect(bubble(page)).toHaveCount(0);
+      await closeMenu(page);
+    }
+    // A stall clicked on its own, as before.
     await clickStall(page, 'stall-weapons');
     await expect(inventory).toBeVisible();
-    await expect(inventory.getByRole('group', { name: 'Shop filters', exact: true }).getByRole('button', { pressed: true })).toHaveText(['Weapons']);
+    await expect(pressed()).toHaveText(['Weapons']);
   });
 
   test('visitors talk too, and a stall still asks them to sign in', async ({ page }) => {
@@ -229,10 +372,8 @@ test.describe('talking camp NPCs', () => {
     await clickBody(page, 'npc:armorer');
     await expectLine(page, 'Livia the Armorer', LINES.armorer, 0);
     await expect(menuDialog(page, 'My gladiator')).toHaveCount(0);
-    // Livia's bubble sits over her stall's awning: a click on the ground closes it first.
-    await tapAt(page, await emptyGround(page));
-    await expect(bubble(page)).toHaveCount(0);
-    await clickStall(page, 'stall-armor');
+    // Her stall's awning under the bubble.
+    await tapAt(page, await stallUnderBubble(page, 'stall-armor'));
     const mine = menuDialog(page, 'My gladiator');
     await expect(mine).toBeVisible();
     await expect(mine.getByRole('button', { name: 'Sign in with Google to create your gladiator' })).toBeVisible();
@@ -355,11 +496,29 @@ test.describe('names and titles in Settings', () => {
     expect(faded.length, 'some names behind others fade').toBeGreaterThan(0);
     for (const a of inView(state)) expect([0.3, 1], a.name).toContain(a.nameplate!.alpha);
     expect(state.actors.find(a => a.id === aster.id)!.nameplate!.alpha).toBe(1);
-    // The talking NPC is never faded.
-    await clickBody(page, 'npc:trainer', { zoom: 0.7 });
+    // The talking NPC is never faded: an NPC whose name a nearer one fades is drawn full while it talks, faded again after.
+    const alphaOf = async (id: string) => (await campState(page)).actors.find(a => a.id === id)!.nameplate?.alpha;
+    let talker: string | null = null;
+    for (const r of NPC_ROUTINES) {
+      const id = `npc:${r.npcId}`;
+      for (const zoom of [0.7, 1]) {
+        const a = (await campState(page)).actors.find(x => x.id === id)!;
+        await page.evaluate(({ x, y, z }) => window.__cloudiatorCamp!.centerOn(x, y, z), { x: a.x, y: a.y, z: zoom });
+        await nextFrames(page);
+        if ((await alphaOf(id)) !== 0.3) continue;
+        await clickBody(page, id, { keep: true });
+        if ((await campState(page)).talk?.npcId === r.npcId) { talker = id; break; }
+        await tapAt(page, await emptyGround(page));
+      }
+      if (talker) break;
+    }
+    expect(talker, 'an NPC whose faded name talks').not.toBeNull();
     await expect(bubble(page)).toBeVisible();
+    expect(await alphaOf(talker!)).toBe(1);
+    await tapAt(page, await emptyGround(page));
+    await expect(bubble(page)).toHaveCount(0);
+    expect(await alphaOf(talker!), 'faded again once it stops talking').toBe(0.3);
     state = await campState(page);
-    expect(state.actors.find(a => a.id === 'npc:trainer')!.nameplate!.alpha).toBe(1);
     if (await touchLayout(page)) return;
     // Hover over a faded gladiator (one no nearer body covers): its name comes back.
     const targets = inView(state).filter(a => a.kind === 'player' && a.nameplate?.alpha === 0.3 && a.id !== aster.id);

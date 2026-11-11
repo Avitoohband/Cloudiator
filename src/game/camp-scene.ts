@@ -293,7 +293,11 @@ export function createCampScene(P: Phaser, deps: CampSceneDeps): { scene: Phaser
   // Task 11: the Settings choices for names and titles, the actor under the pointer and the gold ring under a hovered NPC,
   // and the NPC talking now (its line, when it began on the display clock, and how long it holds).
   let labelPrefs: LabelPrefs = deps.labels ?? DEFAULT_LABEL_PREFS;
-  let hovered: string | null = null;
+  /** The actor Phaser has the pointer over (its pointerover and pointerout), and whether the pointer is on the canvas at all. */
+  let overId: string | null = null;
+  let pointerInGame = true;
+  /** Whether the pointer is hit-tested every frame (while it rests on an actor, who may walk away from under it). */
+  let pollingHover = false;
   let hoverRing: PhaserNS.GameObjects.Ellipse | null = null;
   const talkLines = new TalkLines();
   let talk: { id: string; npcId: string; name: string; index: number; line: string; at: number; holdMs: number; seq: number } | null = null;
@@ -521,8 +525,8 @@ export function createCampScene(P: Phaser, deps: CampSceneDeps): { scene: Phaser
       // 13 px left to 13 px right of the feet and 46 px up: the drawn actor, not a box above and left of it.
       container.setInteractive({ hitArea: new P.Geom.Rectangle(0, -23, 26, 46), hitAreaCallback: P.Geom.Rectangle.Contains, useHandCursor: hand });
       // The actor under the pointer: its name comes back at full strength, on top (Tidy), and an NPC shows its gold ring.
-      container.on('pointerover', () => { hovered = id; });
-      container.on('pointerout', () => { if (hovered === id) hovered = null; });
+      container.on('pointerover', () => { overId = id; });
+      container.on('pointerout', () => { if (overId === id) overId = null; });
       return container;
     }
 
@@ -701,7 +705,7 @@ export function createCampScene(P: Phaser, deps: CampSceneDeps): { scene: Phaser
       for (const [battleId, npc] of npcFighters) if (npc === v) npcFighters.delete(battleId);
       if (selected === v.id) selected = null;
       if (following === v.id) stopFollowing();
-      if (hovered === v.id) hovered = null;
+      if (overId === v.id) overId = null;
     }
 
     setupInput() {
@@ -710,7 +714,11 @@ export function createCampScene(P: Phaser, deps: CampSceneDeps): { scene: Phaser
       let wheel = 0;
       let lastWheelAt = -Infinity;
       let dragging = false;
-      this.input.on(P.Input.Events.POINTER_DOWN, () => { dragging = false; });
+      this.input.on(P.Input.Events.POINTER_DOWN, () => { dragging = false; talkClicked = false; });
+      // The pointer left the canvas for the page's own controls over it (the rail, a panel, the chip): nobody is hovered then,
+      // so no ring or forced-full name stays behind; it counts again once the pointer is back on the canvas.
+      this.input.on(P.Input.Events.GAME_OUT, () => { pointerInGame = false; });
+      this.input.on(P.Input.Events.GAME_OVER, () => { pointerInGame = true; });
       this.input.on(P.Input.Events.POINTER_MOVE, (pointer: PhaserNS.Input.Pointer) => {
         const p1 = this.input.pointer1;
         const p2 = this.input.pointer2;
@@ -738,6 +746,8 @@ export function createCampScene(P: Phaser, deps: CampSceneDeps): { scene: Phaser
         if (talk && !talkClicked && !dragged(pointer)) endTalk();
         talkClicked = false;
       });
+      // A press released off the canvas is no click (nothing talked); nothing of it carries into the next press.
+      this.input.on(P.Input.Events.POINTER_UP_OUTSIDE, () => { pinch = null; dragging = false; talkClicked = false; });
       this.input.on(P.Input.Events.POINTER_WHEEL, (pointer: PhaserNS.Input.Pointer, _over: unknown, _dx: number, dy: number) => {
         if (!dy) return; // horizontal scroll never zooms
         const at = performance.now();
@@ -857,6 +867,7 @@ export function createCampScene(P: Phaser, deps: CampSceneDeps): { scene: Phaser
           else this.updateFrames(v, now);
         }
       }
+      this.pollHover();
       this.tidyNames(cam.zoom);
       this.updateHoverRing();
       this.updateTalk(now);
@@ -914,9 +925,10 @@ export function createCampScene(P: Phaser, deps: CampSceneDeps): { scene: Phaser
       tidyTolerance.x = 1 / zoom;
       tidyTolerance.y = 2 / zoom;
       tidyLabels(tidyItems, tidyFaded, tidyTolerance, tidyOrder);
+      const hover = hovered();
       for (let i = 0; i < n; i += 1) {
         const v = tidyViews[i];
-        const hot = v.id === hovered;
+        const hot = v.id === hover;
         const alpha = hot || !tidyFaded[i] ? 1 : FADED_LABEL_ALPHA;
         const depth = hot ? NAME_DEPTH_HOVER : tidyFaded[i] ? NAME_DEPTH_FADED : NAME_DEPTH;
         drawName(v.label, alpha, depth);
@@ -924,10 +936,23 @@ export function createCampScene(P: Phaser, deps: CampSceneDeps): { scene: Phaser
       }
     }
 
+    /**
+     * While the pointer rests on an actor, Phaser hit-tests it every frame, so an actor who walks out from under a still pointer
+     * is no longer hovered (its ring and full-strength name go with it); otherwise only a pointer move is tested.
+     */
+    pollHover() {
+      const poll = hovered() !== null;
+      if (poll === pollingHover) return;
+      pollingHover = poll;
+      if (poll) this.input.setPollAlways();
+      else this.input.setPollOnMove();
+    }
+
     /** The thin gold ring under the NPC the pointer is over, so players can tell NPCs talk. */
     updateHoverRing() {
       if (!hoverRing) return;
-      const v = hovered ? views.get(hovered) : undefined;
+      const id = hovered();
+      const v = id ? views.get(id) : undefined;
       const show = !!v && v.kind === 'npc' && v.container.visible;
       if (hoverRing.visible !== show) hoverRing.setVisible(show);
       if (!v || !show) return;
@@ -1273,6 +1298,11 @@ export function createCampScene(P: Phaser, deps: CampSceneDeps): { scene: Phaser
     }
   }
 
+  /** The actor under the pointer: the one Phaser has it over, while the pointer is on the canvas. */
+  function hovered(): string | null {
+    return pointerInGame ? overId : null;
+  }
+
   /** The touching allowance Tidy uses, in world px (reused each frame). */
   const tidyTolerance = { x: 1, y: 2 };
 
@@ -1523,8 +1553,8 @@ export function createCampScene(P: Phaser, deps: CampSceneDeps): { scene: Phaser
         },
         labels: labelPrefs,
         talk: talk ? { npcId: talk.npcId, index: talk.index, line: talk.line, fading: now - talk.at >= talk.holdMs } : null,
-        hover: hovered,
-        hoverRing: hoverRing?.visible ? hovered : null,
+        hover: hovered(),
+        hoverRing: hoverRing?.visible ? hovered() : null,
       };
     },
     props() {

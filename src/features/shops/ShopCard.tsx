@@ -33,17 +33,17 @@ export function OfferCard({ offer, quantity, setQuantity, owner, busy, preview, 
   const poor = total > spendable(owner, offer.currency);
   // Each message names what it explains (Task 23.5): the quantity field and Buy are described by it.
   const ids = useId();
-  const quantityId = `${ids}-quantity`, fullId = `${ids}-full`, levelId = `${ids}-level`, moneyId = `${ids}-money`;
+  const quantityId = `${ids}-quantity`, factsId = `${ids}-facts`, priceId = `${ids}-price`, fullId = `${ids}-full`, levelId = `${ids}-level`, moneyId = `${ids}-money`;
   const shared = [!validQuantity && quantityId, full && fullId].filter(Boolean).join(' ');
-  const described = [shared, levelLocked && levelId, poor && moneyId].filter(Boolean).join(' ');
+  const described = [factsId, priceId, shared, levelLocked && levelId, poor && moneyId].filter(Boolean).join(' ');
   return <article className={inventory.card} data-rarity={entry.rarity}>
     <div className={inventory.cardHead}>
       <ItemIcon catalogId={offer.catalogId} size={48} />
-      <div><h3>{entry.name}</h3><p>Level {entry.tier} · {entry.rarity} · {entry.binding === 'bound' ? 'Account-bound' : 'Tradable'}</p></div>
+      <div><h3>{entry.name}</h3><p id={factsId}>Level {entry.tier} · {entry.rarity} · {entry.binding === 'bound' ? 'Account-bound' : 'Tradable'}</p></div>
     </div>
     <ItemStats item={{ catalogId: offer.catalogId, stats: entry.stats }} />
     <p>{SLOT_LABELS[entry.slot]} · sold by the {MERCHANT_NAMES[offer.merchant]}</p>
-    <p className={styles.priceLine}><CurrencyIcon currency={offer.currency} size={16} />{offer.unitPrice} {word} each{quantity > 1 && ` · ${total} total`}</p>
+    <p id={priceId} className={styles.priceLine}><CurrencyIcon currency={offer.currency} size={16} />{offer.unitPrice} {word} each{quantity > 1 && ` · ${total} total`}</p>
     <p>{entry.npcSellValue === null ? 'Account-bound · Cannot sell' : `NPC sell value: ${entry.npcSellValue} gold each`}</p>
     {levelLocked && <p id={levelId} className={styles.warn}>Requires level {entry.tier}</p>}
     {poor && <p id={moneyId} className={styles.warn}>Not enough available {word}</p>}
@@ -53,7 +53,7 @@ export function OfferCard({ offer, quantity, setQuantity, owner, busy, preview, 
     {full && <p id={fullId} role="status">Inventory full for this purchase. Clear enough slots first.</p>}
     <div className={`item-actions ${inventory.actions}`}>
       <button type="button" className={styles.buy} disabled={!validQuantity || (!preview && (levelLocked || full || poor))} aria-disabled={busy || undefined}
-        aria-describedby={described || undefined} onClick={() => { if (!busy) buy(offer.catalogId, quantity); }}>Buy {entry.name}</button>
+        aria-describedby={described} onClick={() => { if (!busy) buy(offer.catalogId, quantity); }}>Buy {entry.name}</button>
     </div>
   </article>;
 }

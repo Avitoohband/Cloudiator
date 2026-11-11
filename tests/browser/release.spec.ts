@@ -791,7 +791,7 @@ test.describe('release accessibility in the fixture preview', () => {
     expect(await contrastIssues(arena), 'the archived season').toEqual([]);
     await arena.getByRole('button', { name: /^Arena: Aster beats Varro/ }).click();
     expect(await contrastIssues(arena), 'an Arena card').toEqual([]);
-    // A focused field and a focused button inside a panel, and the merchants' pressed button.
+    // A focused field and a focused button inside a panel, and the shop's filter buttons and first cell.
     const roster = await settled(await openMenu(page, 'Gladiators'));
     await roster.getByRole('searchbox', { name: 'Filter by name' }).focus();
     expect(await contrastIssues(roster, { focusRing: true }), 'the roster filter focused').toEqual([]);

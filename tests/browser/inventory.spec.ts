@@ -463,6 +463,28 @@ test('shows the shop offers as an icon grid by level, locks pieces above the lev
   await shops.screenshot({ path: info.outputPath(`shop-grid-${info.project.name}.png`) });
 });
 
+test('after a filter or currency change the chosen shop cell is inside the grid, with no empty rows below a short list', async ({ page, context }, info) => {
+  await inventoryFlow(context);
+  if (info.project.name === 'mobile') await page.setViewportSize({ width: 360, height: 740 });
+  await page.goto('/game/');
+  const menu = await openMenu(page, 'Inventory and shops');
+  const shops = shopsRegion(menu);
+  const scroll = shops.getByRole('group', { name: 'Shop items', exact: true });
+  const inside = async (testId: string) => {
+    const box = (await scroll.boundingBox())!, cell = (await shops.getByTestId(testId).boundingBox())!;
+    return cell.y >= box.y - 1 && cell.y + cell.height <= box.y + box.height + 1;
+  };
+  await scroll.evaluate(node => { node.scrollTop = node.scrollHeight; });
+  await shopButton(shops, 'Shop filters', 'Weapons').click();
+  await expect.poll(() => inside('offer-sword:1:common')).toBe(true);
+  // A short list adds no empty rows below its last cell: the grid is no taller than its cells plus one row.
+  const cells = await shops.locator('[data-testid^="offer-"]').count();
+  const slots = await scroll.locator(':scope > div > *').count();
+  expect(slots).toBeLessThanOrEqual(Math.max(cells, 6));
+  await shopButton(shops, 'Shop currency', 'Renown').click();
+  await expect.poll(() => inside('offer-sword:1:renown')).toBe(true);
+});
+
 test('keeps the shop card, the keyboard choice and Buy on the same one of two same-name offers', async ({ page, context }, info) => {
   const mobile = info.project.name === 'mobile';
   const flow = await inventoryFlow(context);

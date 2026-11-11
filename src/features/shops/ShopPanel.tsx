@@ -29,7 +29,7 @@ const EXPLAINERS: Record<ShopCurrency, string> = {
 export function ShopPanel({ owner, busy, preview, buy, initialMerchant }: {
   owner: OwnerState; busy: boolean; preview: boolean; buy(catalogId: string, quantity: number): void; initialMerchant?: Merchant;
 }) {
-  const section = useRef<HTMLElement>(null), grid = useRef<HTMLDivElement>(null);
+  const section = useRef<HTMLElement>(null), grid = useRef<HTMLDivElement>(null), scroller = useRef<HTMLDivElement>(null);
   useEffect(() => { if (initialMerchant) scrollToTop(section.current); }, [initialMerchant]);
   const [filter, setFilter] = useState<ShopFilter>(merchantFilter(initialMerchant));
   const [currency, setCurrency] = useState<ShopCurrency>('money');
@@ -39,16 +39,26 @@ export function ShopPanel({ owner, busy, preview, buy, initialMerchant }: {
   const [quantity, setQuantity] = useState(1);
   const choices = shopChoices(filter, currency);
   // The first visible cell when nothing visible is chosen; remembered, so Buy never sends an offer the grid hides.
-  const chosen = choices.find(choice => choice.id === chosenId) ?? choices[0];
-  if (chosenId !== chosen.id) setChosenId(chosen.id);
-  const tabStop = choices.some(choice => choice.id === stopId) ? stopId : chosen.id;
+  const chosen: ShopChoice | undefined = choices.find(choice => choice.id === chosenId) ?? choices[0];
+  if (chosen && chosenId !== chosen.id) setChosenId(chosen.id);
+  const tabStop = choices.some(choice => choice.id === stopId) ? stopId : chosen?.id;
+  // After a filter or currency change the chosen cell is brought into view inside the grid only (never the page or the menu).
+  const latest = useRef(chosen?.id);
+  latest.current = chosen?.id;
+  useEffect(() => {
+    const box = scroller.current, cell = box?.querySelector<HTMLElement>(`[data-testid="offer-${latest.current}"]`);
+    if (!box || !cell) return;
+    const top = cell.getBoundingClientRect().top - box.getBoundingClientRect().top, bottom = top + cell.offsetHeight - box.clientHeight;
+    if (top < 0) box.scrollTop += top;
+    else if (bottom > 0) box.scrollTop += bottom;
+  }, [filter, currency]);
   const ids = useId(), detailsId = `${ids}-details`;
   const word = currencyWord(currency);
 
   /** A currency switch keeps the chosen piece when the other currency sells it (the same kind and level). */
   function switchCurrency(next: ShopCurrency) {
     if (next === currency) return;
-    const counterpart = counterpartId(chosen.id, next);
+    const counterpart = chosen ? counterpartId(chosen.id, next) : null;
     setCurrency(next);
     if (counterpart) setChosenId(counterpart);
   }
@@ -75,7 +85,7 @@ export function ShopPanel({ owner, busy, preview, buy, initialMerchant }: {
     const description = locked && offer ? `Requires level ${offer.requiredLevel}` : poor ? `Not enough available ${word}` : undefined;
     return <button key={choice.id} type="button" className={`${inventory.tile} ${styles.cell}`} data-shop-cell="" data-testid={`offer-${choice.id}`}
       data-locked={locked ? '' : undefined} data-poor={poor ? '' : undefined}
-      aria-label={name.filter(Boolean).join(', ')} aria-description={description} aria-controls={detailsId} aria-pressed={choice.id === chosen.id}
+      aria-label={name.filter(Boolean).join(', ')} aria-description={description} aria-controls={detailsId} aria-pressed={choice.id === chosen?.id}
       tabIndex={choice.id === tabStop ? 0 : -1} onFocus={() => setStopId(choice.id)} onClick={() => setChosenId(choice.id)}>
       {offer ? <ItemIcon catalogId={offer.catalogId} /> : <BannerArt />}
       {offer ? <span className={styles.level} data-shop-level="" aria-hidden="true">L{offer.requiredLevel}</span>
@@ -105,16 +115,16 @@ export function ShopPanel({ owner, busy, preview, buy, initialMerchant }: {
             {CURRENCIES.map(([value, label]) => <button key={value} type="button" aria-pressed={value === currency} onClick={() => switchCurrency(value)}>{label}</button>)}
           </div>
         </div>
-        <div className={`${inventory.gridScroll} ${styles.scroll}`} role="group" aria-label="Shop items" onKeyDown={move}>
+        <div ref={scroller} className={`${inventory.gridScroll} ${styles.scroll}`} role="group" aria-label="Shop items" onKeyDown={move}>
           <div ref={grid} className={inventory.grid}>
             {choices.map(cell)}
-            {Array.from({ length: Math.max(0, 30 - choices.length) }, (_, index) => <span key={index} className={inventory.emptyCell} aria-hidden="true" />)}
+            {Array.from({ length: Math.max(0, (filter === 'All' ? 30 : 6) - choices.length) }, (_, index) => <span key={index} className={inventory.emptyCell} aria-hidden="true" />)}
           </div>
         </div>
         <p className={`muted ${styles.foot}`}>{EXPLAINERS[currency]} L = level needed; pieces with a lock are above your level. {choices.length} items.</p>
       </div>
       <section id={detailsId} aria-label="Offer details" className={inventory.details}>
-        {chosen.kind === 'offer' ? <OfferCard offer={chosen.offer} quantity={quantity} setQuantity={setQuantity} {...purchase} /> : <BannerCard {...purchase} />}
+        {!chosen ? <p>Nothing here.</p> : chosen.kind === 'offer' ? <OfferCard offer={chosen.offer} quantity={quantity} setQuantity={setQuantity} {...purchase} /> : <BannerCard {...purchase} />}
       </section>
     </div>
   </section>;

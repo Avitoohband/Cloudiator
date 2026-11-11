@@ -103,7 +103,6 @@
   margin-bottom: 12px;
   padding: 4px;
   overflow-y: auto;
-  overscroll-behavior: contain;
   border: 1px solid var(--accent);
   border-radius: 10px;
   background: #282131;

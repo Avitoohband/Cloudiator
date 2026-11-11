@@ -49,7 +49,7 @@ export function GameInfoPanel({ id, onClose, update, fixture, editorAccount, onD
     if (option.offsetTop < list.scrollTop) list.scrollTop = option.offsetTop;
     else if (option.offsetTop + option.offsetHeight > list.scrollTop + list.clientHeight) list.scrollTop = option.offsetTop + option.offsetHeight - list.clientHeight;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [article?.id, active, pages.wiki]);
+  }, [article?.id, active, pages.wiki, editing]);
 
   function moveTopic(event: KeyboardEvent<HTMLDivElement>) {
     const at = Math.max(0, wiki.findIndex(item => item.id === article?.id));
@@ -142,7 +142,7 @@ export function GameInfoPanel({ id, onClose, update, fixture, editorAccount, onD
         aria-controls={panelId(tab.id)} tabIndex={active === index ? 0 : -1} ref={button => { tabButtons.current[index] = button; }}
         disabled={editing !== null} onClick={() => changeTab(index)} onKeyDown={event => moveTab(event, index)}>{tab.label}</button>)}
     </div>
-    <section id={panelId('wiki')} role="tabpanel" aria-labelledby={tabId('wiki')} className={styles.body} hidden={active !== 0 || editing !== null}>
+    <section id={panelId('wiki')} role="tabpanel" aria-labelledby={tabId('wiki')} className={styles.body} hidden={active !== 0 || editing !== null} tabIndex={0}>
       <div ref={topics} role="listbox" aria-label="Wiki topics" tabIndex={0} className={styles.topics}
         aria-activedescendant={article ? optionId(article.id) : undefined} onKeyDown={moveTopic}>
         {wiki.map(item => {

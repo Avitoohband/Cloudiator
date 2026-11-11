@@ -55,7 +55,44 @@
 - [ ] **Step 4: Update the existing journeys** that used the merchant buttons, `Shop tier` or `Shop currency` to choose cells instead. Run `inventory.spec.ts`, `management.spec.ts`, the shop cases in `release.spec.ts`, the profile-card unit test, `npm test` and `npm run typecheck`; all pass.
 - [ ] **Step 5: Commit** `feat: shops as an icon grid with the inventory's detail card`.
 
-### Task 3: Combined candidate
+### Task 3: Final-review fixes and the demo bag
 
-- [ ] Final review of both tasks' diff. Add Wiki menu and shop grid lines to the 1.9 changelog section. Commit.
+Avi added four features after Tasks 1-2 (2026-11-11, mockups approved): search and sort, menu pin and position, equipping from My gladiator, and a new renown laurel. Tasks 3-7 build them; Task 8 is the combined candidate.
+
+**Files:** `src/lib/api/fixture-gateway.ts`, `src/features/shops/*`, `src/features/game-info/*`, tests.
+
+- [ ] **Demo bag first.** Replace the uncommitted preview-only demo bag in `fixture-gateway.ts` with an opt-in fixture query: `/game/?mode=fixture&bag=demo` gives Aster 18 extra catalog items with duplicates (the list in the uncommitted edit); the default fixture is unchanged. Unit test both. Commit before any browser run.
+- [ ] **Shop grid on phones (Important).** Pad the shop grid like the inventory (no extra empty rows outside the full view). After a filter, currency, search or sort change, scroll the chosen cell into view inside the grid only. Mobile case: scroll All to the bottom, tap Weapons, the chosen cell is inside the grid's visible area.
+- [ ] **Wiki list on short screens (Important).** Remove `overscroll-behavior: contain` from `.topics`. Make the Wiki tabpanel focusable (`tabIndex={0}`) like Future Updates; add `editing` to the topic-scroll effect's dependencies.
+- [ ] **Polish.** Buy's `aria-describedby` also names the chosen offer's level and price; a `shop-offers.ts` Vitest (pair counts, non-empty pairs, a counterpart for every offer, the banner only in Renown under All or Armor); an empty-result guard; fix the stale comment at `release.spec.ts` ~794.
+- [ ] Run the touched specs on both projects, `npm test`, `npm run typecheck`. Commit.
+
+### Task 4: Search and sort (Inventory and Shops)
+
+**Spec:** `.superpowers/design/2026-11-11-search/` (`search-mockup.html`, `search-desktop.png`, `search-sort-desktop.png`, `search-phone.png`, `search-inventory-desktop.png`, `search-empty-desktop.png`).
+
+- [ ] Failing cases first, both projects: a "Search items" field with a clear (×) button above each grid; case-insensitive part-of-name match combined with the filters and currency; "N items match "<text>"" line; no-match state `No items match "<text>"` with Clear search; Escape clears; a chosen item that stops matching gives way to the first match. A "Sort" select: Shops Level (default) / Price / Name / Damage / Armor / Weight; Inventory Newest (default) / Level / Name / Damage / Armor / Weight / Sell value. Level, Price and Name ascend; Damage, Armor, Weight and Sell value descend; ties keep the default order. Phone: search and sort share a row.
+- [ ] Implement with one shared pure helper for matching and sorting (unit-tested), used by both panels. Keep every Wear/Sell/Discard/Buy rule. Run the inventory, management and release specs, `npm test`, `npm run typecheck`. Commit.
+
+### Task 5: Menu pin and position
+
+**Spec:** `.superpowers/design/2026-11-11-menu-pin/` (`menu-pin-mockup.html`, `menu-left-pinned.png`, `menu-right-pinned.png`, `menu-bottom-pinned.png`, `menu-controls-zoom.png`).
+
+- [ ] Failing cases first (desktop project; phone unchanged): after the zoom buttons, a Pin button ("Pin menu" / "Unpin menu", pressed when pinned) and a "Menu position" button opening Left / Right / Bottom ("Menu on the left/right/bottom"); pinned keeps the rail shown; unpinned keeps today's reveal and 300 ms hide at the chosen edge; Right sits clear of the corner chip and arrival banner; Bottom is a centred horizontal bar with tooltips above; panels open beside the rail (right of it, left of it, above it). Saved in this browser (`localStorage`, read in try/catch; a bad or missing value means Left, unpinned) and restored on reload. The phone ☰ layout is unchanged.
+- [ ] Implement in `src/features/shell/` (`MenuRail.tsx`, `rail-reveal.ts` reducer events, `shell.module.css`, panel placement in `CampShell.tsx`). Run the shell, camp and menu specs on both projects, `npm test`, `npm run typecheck`. Commit.
+
+### Task 6: Equip from My gladiator
+
+**Spec:** `.superpowers/design/2026-11-11-equip-from-gladiator/` (`equip-mockup.html`, `equip-desktop-picker.png`, `equip-desktop-queued.png`, `equip-phone.png`, `equip-desktop-twohanded.png`, `equip-desktop-overload.png`).
+
+- [ ] Failing cases first, both projects (use `&bag=demo`): a Worn equipment slot opens a picker of fitting inventory items (inventory tile look, level tag, copy number, lock above level or when listed, ✓ worn, → next, a Remove tile when filled); choosing shows Worn / New / difference rows (Damage, Attack interval, Hands for two-handed, Armor for armour, Weight, Load against capacity, bonuses when any) and "Wear <name> · Item <n>"; Wear queues the same `queue-build` change as the Inventory and the slot shows Next with Undo; a two-handed weapon names the off-hand piece that comes off and blocks the off-hand picker; overload turns Load red with "This would overload your gladiator" and Wear stays enabled. Duplicates: the AGENTS.md detail-card rule (two same-name instances; comparison and Wear agree as focus and hover change). Desktop popover under the slots; phone sheet with Back and a sticky Wear bar; Escape closes and returns focus to the slot.
+- [ ] Implement in `src/features/character/` with `src/features/inventory/gear.ts` (add only the Remove helper, same command). The build planner's own picker stays unchanged (Avi: keep both). Run the character, planning, inventory specs on both projects, `npm test`, `npm run typecheck`. Commit.
+
+### Task 7: Renown laurel
+
+- [ ] After Avi picks a candidate from `.superpowers/design/2026-11-11-renown-icon/`, replace `ICONS.renown` in `assets/source/generators/effects.mjs`, rebuild the assets (`node assets/source/build-assets.mjs`, then `--check`), and show the laurel in the corner chip and its phone bar instead of ★ (accessible text "Renown" unchanged). Update provenance if the build requires it. Run the shell specs on both projects, `npm test`. Commit.
+
+### Task 8: Combined candidate
+
+- [ ] Final review of Tasks 3-7. Add 1.9 changelog lines for the Wiki list, shop grid, search and sort, menu pin, equipping from My gladiator and the laurel. Commit.
 - [ ] Run the complete offline 12-stage gate (native32, `pw-design-tcp.config.mjs`, 32 browser shards) on the exact committed candidate. Record the result and gate.json SHA-256 in HANDOFF and here. Stop at local readiness.

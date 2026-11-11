@@ -94,6 +94,8 @@ const ownerOf = (s: Server): OwnerState => ({ ...structuredClone(ownerFixture), 
 type Setup = { messages?: GameMessage[]; notifications?: LiveNotification[]; readIds?: number[]; seenMs?: number; sinceMs?: number; level?: Server['level'];
   /** Answers a read mark with this refusal instead of marking it (the message text must still show). */
   refuseRead?: 'rate-limited' | 'not-found';
+  /** Patch 1.9: read marks for these message ids are refused once each (then taken); `readDelayMs` holds every read mark that long; `refuseSee` refuses that many see-notifications. */
+  failReadOnce?: number[]; readDelayMs?: number; refuseSee?: number;
   /** The look the owner's gladiator has (null, the default, is the legacy look). */
   appearance?: Appearance | null;
   /**
@@ -125,6 +127,9 @@ async function player(page: Page, setup: Setup = {}) {
     const cors = { 'access-control-allow-origin': '*' };
     const answer = (status: number, body: unknown) => route.fulfill({ status, headers: cors, contentType: 'application/json', body: JSON.stringify(body) });
     if (command.kind === 'read-message') {
+      if (setup.readDelayMs) await new Promise(resolve => setTimeout(resolve, setup.readDelayMs));
+      const once = setup.failReadOnce?.indexOf(command.messageId) ?? -1;
+      if (once >= 0) { setup.failReadOnce!.splice(once, 1); return answer(429, { ok: false, code: 'rate-limited' }); }
       if (setup.refuseRead) return answer(setup.refuseRead === 'rate-limited' ? 429 : 404, { ok: false, code: setup.refuseRead });
       if (!server.messages.some(m => m.id === command.messageId)) return answer(404, { ok: false, code: 'not-found' });
       if (!server.readIds.includes(command.messageId)) server.readIds.push(command.messageId);
@@ -132,6 +137,7 @@ async function player(page: Page, setup: Setup = {}) {
       return answer(200, { ok: true, value: { messageId: command.messageId } });
     }
     if (command.kind === 'see-notifications') {
+      if (setup.refuseSee) { setup.refuseSee -= 1; return answer(429, { ok: false, code: 'rate-limited' }); }
       server.seenMs = Math.max(server.seenMs, Math.min(command.upToMs, live.serverNowMs()));
       sync();
       return answer(200, { ok: true, value: { seenMs: server.seenMs } });
@@ -535,6 +541,115 @@ test.describe('Watch from Notifications', () => {
     await expect.poll(() => sent(commands, 'read-message').length).toBe(2);
   });
 
+  // Patch 1.9: Mark as read. A round check on each unread row, Mark all as read in the summary line, and the same on Notifications.
+  test('a round check marks one message read without opening it and moves the focus to the next unread row', async ({ page }) => {
+    const { commands } = await player(page, { messages: [AVI, ...MESSAGES], readIds: [EVENING.id] });
+    await openLive(page);
+    const panel = await openPanel(page);
+    await expect(badge(page)).toHaveText('3');
+    await expect(panel.getByRole('button', { name: /^Mark .* as read$/ })).toHaveCount(3);
+    await expect(panel.getByRole('button', { name: 'Mark Evening Arena and clearer menus as read' })).toHaveCount(0);
+    const first = panel.getByRole('button', { name: 'Mark A note from Avi as read' });
+    expect((await first.boundingBox())!.width).toBeGreaterThanOrEqual(44);
+    await first.focus();
+    await page.keyboard.press('Enter');
+    await expect.poll(() => sent(commands, 'read-message')).toEqual([{ kind: 'read-message', operationId: expect.stringMatching(/^[0-9a-f-]{36}$/), messageId: AVI.id }]);
+    await expect(badge(page)).toHaveText('2');
+    await expect(panel.getByRole('button', { name: 'Mark A note from Avi as read' })).toHaveCount(0);
+    // The message was not opened, and the focus went to the next unread row's check.
+    await expect(panel.getByRole('heading')).toHaveCount(0);
+    await expect(panel.getByRole('button', { name: /^Mark Messages, gold.* as read$/ })).toBeFocused();
+    await expect(panel.locator('[data-mark-status]')).toHaveText('Marked as read. 2 unread.');
+  });
+
+  test('Mark all as read sends one read-message per unread message in order, says its progress and ends in a status line', async ({ page }) => {
+    const { commands } = await player(page, { messages: [AVI, ...MESSAGES], readIds: [EVENING.id], readDelayMs: 400 });
+    await openLive(page);
+    const panel = await openPanel(page);
+    const all = panel.locator('[data-mark-all]');
+    await expect(all).toHaveText('Mark all as read (3)');
+    await expect(all).toBeEnabled();
+    await all.click();
+    await expect(all).toHaveText(/Marking [1-3] of 3…/);
+    await expect(panel.locator('[data-mark-banner]')).toHaveText('All 3 marked as read.', { timeout: 10_000 });
+    expect(sent(commands, 'read-message').map(c => (c as { messageId: number }).messageId)).toEqual([AVI.id, RELEASE.id, LOOK.id]);
+    await expect(badge(page)).toHaveCount(0);
+    await expect(all).toHaveText('Mark all as read');
+    await expect(all).toBeDisabled();
+    await expect(panel.getByRole('button', { name: /^Mark (?!all).* as read$/ })).toHaveCount(0);
+    await expect(panel.locator('[data-mark-status]')).toHaveText('All 3 marked as read.');
+  });
+
+  test('Mark all as read goes on after a failure, says how many were marked, and Try again sends only the failed one', async ({ page }) => {
+    const { commands } = await player(page, { messages: [AVI, ...MESSAGES], readIds: [EVENING.id], failReadOnce: [RELEASE.id] });
+    await openLive(page);
+    const panel = await openPanel(page);
+    await panel.locator('[data-mark-all]').click();
+    const banner = panel.locator('[data-mark-banner]');
+    await expect(banner).toContainText('Marked 2 of 3. 1 could not be marked.');
+    expect(sent(commands, 'read-message').map(c => (c as { messageId: number }).messageId)).toEqual([AVI.id, RELEASE.id, LOOK.id]);
+    await expect(badge(page)).toHaveText('1');
+    await expect(row(panel, /Messages, gold/).locator('[data-mark-error]')).toHaveText('Could not mark. Try again.');
+    await expect(banner.getByRole('button', { name: 'Try again' })).toBeFocused();
+    await banner.getByRole('button', { name: 'Try again' }).click();
+    await expect(banner).toHaveText('All marked as read.');
+    expect(sent(commands, 'read-message').map(c => (c as { messageId: number }).messageId)).toEqual([AVI.id, RELEASE.id, LOOK.id, RELEASE.id]);
+    await expect(badge(page)).toHaveCount(0);
+  });
+
+  test('a row whose mark failed says so, keeps its check, and the check works again', async ({ page }) => {
+    const { commands } = await player(page, { failReadOnce: [LOOK.id] });
+    await openLive(page);
+    const panel = await openPanel(page);
+    await panel.getByRole('button', { name: /^Mark New: choose your gladiator.* as read$/ }).click();
+    await expect(row(panel, /New: choose your gladiator/).locator('[data-mark-error]')).toHaveText('Could not mark. Try again.');
+    await expect(badge(page)).toHaveText('2');
+    await panel.getByRole('button', { name: /^Mark New: choose your gladiator.* as read$/ }).click();
+    await expect(badge(page)).toHaveText('1');
+    expect(sent(commands, 'read-message')).toHaveLength(2);
+  });
+
+  test('Mark all as read is disabled when nothing is unread', async ({ page }) => {
+    await player(page, { readIds: [EVENING.id, LOOK.id, RELEASE.id] });
+    await openLive(page);
+    const panel = await openPanel(page);
+    await expect(panel.locator('[data-mark-all]')).toBeDisabled();
+    await expect(panel.locator('[data-mark-all]')).toHaveText('Mark all as read');
+  });
+
+  test('Notifications Mark all as read clears the gold dots; showing the tab still marks them seen once', async ({ page }) => {
+    const { commands } = await player(page, { notifications: RESULTS });
+    await openLive(page);
+    const panel = await openPanel(page);
+    await tab(panel, /^Notifications/).click();
+    const list = panel.getByRole('tabpanel');
+    await expect(list.locator('[data-unread-dot]')).toHaveCount(3);
+    await expect.poll(() => sent(commands, 'see-notifications').length).toBe(1);
+    await list.locator('[data-mark-notes]').click();
+    await expect(list.locator('[data-unread-dot]')).toHaveCount(0);
+    await expect(list.locator('[data-mark-notes]')).toBeDisabled();
+    await expect(panel.locator('[data-mark-status]')).toHaveText('Notifications marked as read.');
+    await page.waitForTimeout(300);
+    expect(sent(commands, 'see-notifications')).toHaveLength(1);
+  });
+
+  test('Notifications Mark all as read says when the mark failed and Try again sends it', async ({ page }) => {
+    const { commands } = await player(page, { notifications: RESULTS, refuseSee: 2 });
+    await openLive(page);
+    const panel = await openPanel(page);
+    await tab(panel, /^Notifications/).click();
+    const list = panel.getByRole('tabpanel');
+    await expect.poll(() => sent(commands, 'see-notifications').length).toBe(1);
+    await expect(list.locator('[data-unread-dot]')).toHaveCount(3);
+    await list.locator('[data-mark-notes]').click();
+    await expect(list.locator('[data-mark-banner]')).toContainText('Could not mark notifications. Try again.');
+    await expect(list.locator('[data-unread-dot]')).toHaveCount(3);
+    await list.locator('[data-mark-banner]').getByRole('button', { name: 'Try again' }).click();
+    await expect(list.locator('[data-unread-dot]')).toHaveCount(0);
+    await expect(list.locator('[data-mark-banner]')).toHaveCount(0);
+    expect(sent(commands, 'see-notifications')).toHaveLength(3);
+  });
+
   test('shows a bulleted body as a list and the look note with its Change look button and disclaimer', async ({ page }, testInfo) => {
     await player(page);
     await openLive(page);
@@ -919,6 +1034,9 @@ test.describe('Watch from Notifications', () => {
     await page.keyboard.press('Tab');
     await expect(panel.getByRole('button', { name: 'Close messages' })).toBeFocused();
     expect(await contrastIssues(panel, { focusRing: true }), 'the focused Close button').toEqual([]);
+    await page.keyboard.press('Tab');
+    await expect(panel.locator('[data-mark-all]')).toBeFocused();
+    expect(await contrastIssues(panel, { focusRing: true }), 'the focused Mark all as read button').toEqual([]);
     await page.keyboard.press('Tab');
     await expect(rows(panel).first()).toBeFocused();
     expect(await contrastIssues(panel, { focusRing: true }), 'the focused row').toEqual([]);

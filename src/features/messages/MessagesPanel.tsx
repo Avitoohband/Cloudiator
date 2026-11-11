@@ -49,6 +49,8 @@ function Body({ blocks }: { blocks: readonly MessageBlock[] }) {
 }
 
 const Chevron = () => <svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round"><path d="M15 6l-6 6 6 6" /></svg>;
+const Tick = () => <svg aria-hidden="true" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round"><path d="M5 12.5l4.5 4.5L19 7.5" /></svg>;
+const TickAll = () => <svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round"><path d="M1.5 12.5L6 17l7-8.5M10 15.5l1.5 1.5L22 6.5" /></svg>;
 const Cross = () => <svg aria-hidden="true" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M6 6l12 12M18 6L6 18" /></svg>;
 
 function Failed({ what, retry }: { what: string; retry(): void }) {
@@ -100,7 +102,8 @@ export function MessagesPanel({ id, inbox, load, loadNotifications, loadPatches,
   // Patch history over the list: the patch it opens at, and the note whose number opened it (Back to messages returns to its row).
   const [patches, setPatches] = useState<{ patch: string | null; from: number | null } | null>(history ? { patch: history.patch, from: null } : null);
   // The time the account had seen results up to when the panel opened: the rows after it are marked new for as long as the panel is open.
-  const [seenAtOpen] = useState(inbox.notificationsSeenMs);
+  // Mark all as read on the Notifications tab raises it, which clears the gold dots.
+  const [seenAtOpen, setSeenAtOpen] = useState(inbox.notificationsSeenMs);
 
   const messages = useLoadedList<ShownMessage>(load, true);
   const notes = useLoaded(loadNotifications, visitedNotifications);
@@ -140,6 +143,62 @@ export function MessagesPanel({ id, inbox, load, loadNotifications, loadPatches,
       readAsked.current.add(message.id);
       read(message.id).catch(() => { readAsked.current.delete(message.id); });
     }
+  };
+  // Mark as read (patch 1.9): the round check on an unread row, and Mark all as read in the summary line. Each is one `read-message`
+  // (the same command opening a message sends, and the same once-per-message guard), sent in list order; one that fails does not stop
+  // the rest, and Try again sends only the ones that failed. Progress and results are said in a status region.
+  const [marking, setMarking] = useState<ReadonlySet<number>>(() => new Set());
+  const [failedIds, setFailedIds] = useState<ReadonlySet<number>>(() => new Set());
+  const [bulk, setBulk] = useState<{ done: number; total: number } | null>(null);
+  const [banner, setBanner] = useState<{ kind: 'ok' | 'err'; text: string; retry: boolean } | null>(null);
+  const [announce, setAnnounce] = useState('');
+  const bulkTotal = useRef(0);
+  const list = useRef<HTMLUListElement>(null);
+  const markOne = async (id: number): Promise<boolean> => {
+    if (readAsked.current.has(id)) return true;
+    readAsked.current.add(id);
+    setMarking(previous => new Set(previous).add(id));
+    setFailedIds(previous => { const next = new Set(previous); next.delete(id); return next; });
+    try { await read(id); return true; } catch {
+      readAsked.current.delete(id);
+      setFailedIds(previous => new Set(previous).add(id));
+      return false;
+    } finally { setMarking(previous => { const next = new Set(previous); next.delete(id); return next; }); }
+  };
+  const unreadIds = (messages.items ?? []).filter(m => isUnread(m, inbox)).map(m => m.id);
+  const focusMark = (id: number | undefined) => window.setTimeout(() => {
+    const target = id === undefined ? list.current : root.current?.querySelector<HTMLElement>(`[data-mark-button="${id}"]`);
+    target?.focus();
+  }, 0);
+  const markRow = async (id: number) => {
+    if (bulk) return;
+    const next = unreadIds.find(other => other !== id && !marking.has(other));
+    const ok = await markOne(id);
+    if (!ok) { setAnnounce('Could not mark the message as read.'); focusMark(id); return; }
+    setBanner(null);
+    setAnnounce(`Marked as read. ${Math.max(0, unreadIds.length - 1)} unread.`);
+    focusMark(next);
+  };
+  const markAll = async (retry: boolean) => {
+    if (bulk) return;
+    const ids = unreadIds.filter(id => !retry || failedIds.has(id));
+    if (ids.length === 0) return;
+    if (!retry) { bulkTotal.current = ids.length; setFailedIds(new Set()); }
+    setBanner(null);
+    let bad = 0;
+    for (let n = 0; n < ids.length; n++) {
+      setBulk({ done: n, total: ids.length });
+      setAnnounce(`Marking ${n + 1} of ${ids.length}…`);
+      if (!(await markOne(ids[n]))) bad++;
+    }
+    setBulk(null);
+    const total = bulkTotal.current;
+    const text = bad > 0 ? `Marked ${total - bad} of ${total}. ${bad} could not be marked.` : retry ? 'All marked as read.' : `All ${total} marked as read.`;
+    setBanner({ kind: bad > 0 ? 'err' : 'ok', text, retry: bad > 0 });
+    setAnnounce(text);
+    window.setTimeout(() => {
+      (bad > 0 ? root.current?.querySelector<HTMLElement>('[data-mark-retry]') : list.current)?.focus();
+    }, 0);
   };
   // Opening a message moves the focus to Back (the row it came from is gone); Back returns it to that row.
   useEffect(() => {
@@ -183,6 +242,29 @@ export function MessagesPanel({ id, inbox, load, loadNotifications, loadPatches,
     seenUpTo.current = mark;
     seeNotifications(mark).catch(() => { if (seenUpTo.current === mark) seenUpTo.current = before; });
   }, [tab, notes.value, mark]);
+  // Mark all as read (patch 1.9, Notifications): clears the gold dots. The mark itself went out when the tab was shown (no second command
+  // then); if that one failed or has not been sent, this sends it (one `see-notifications`) and says so when it fails.
+  const [notesMarking, setNotesMarking] = useState(false);
+  const [notesError, setNotesError] = useState(false);
+  const markNotes = async () => {
+    if (notesMarking || mark === null) return;
+    setNotesError(false);
+    if (mark > inbox.notificationsSeenMs && mark > seenUpTo.current) {
+      const before = seenUpTo.current;
+      seenUpTo.current = mark;
+      setNotesMarking(true);
+      setAnnounce('Marking notifications…');
+      try { await seeNotifications(mark); } catch {
+        if (seenUpTo.current === mark) seenUpTo.current = before;
+        setNotesMarking(false); setNotesError(true); setAnnounce('Could not mark notifications. Try again.');
+        return;
+      }
+      setNotesMarking(false);
+    }
+    setSeenAtOpen(previous => Math.max(previous, mark));
+    setAnnounce('Notifications marked as read.');
+    window.setTimeout(() => root.current?.querySelector<HTMLElement>('[role="tab"][aria-selected="true"]')?.focus(), 0);
+  };
 
   const select = (next: Tab) => {
     setTab(next);
@@ -247,8 +329,18 @@ export function MessagesPanel({ id, inbox, load, loadNotifications, loadPatches,
               : <>
                 {messages.failed && <Failed what="Messages" retry={messages.reload} />}
                 {messageCount === 0 ? <p className={styles.state}>No messages yet.</p> : <>
-                  <p className={styles.summary}>{messageCount} message{messageCount === 1 ? '' : 's'} · {inbox.unread > 0 ? `${inbox.unread} new` : 'all read'}</p>
-                  <ul className={styles.list}>
+                  <div className={styles.summary}>
+                    <span className={styles.summaryText}>{messageCount} message{messageCount === 1 ? '' : 's'} · {inbox.unread > 0 ? `${inbox.unread} new` : 'all read'}</span>
+                    <button type="button" className={styles.markAll} data-mark-all disabled={unreadIds.length === 0} aria-disabled={bulk ? true : undefined} aria-busy={bulk ? true : undefined}
+                      onClick={() => markAll(false)}>
+                      {bulk ? <><span className={styles.spin} aria-hidden="true" />Marking {bulk.done + 1} of {bulk.total}…</> : <><TickAll />Mark all as read{unreadIds.length > 0 ? ` (${unreadIds.length})` : ''}</>}
+                    </button>
+                  </div>
+                  {banner && <p className={`${styles.banner} ${banner.kind === 'err' ? styles.bannerErr : styles.bannerOk}`} data-mark-banner>
+                    <span>{banner.text}</span>
+                    {banner.retry && <button type="button" className={styles.bannerRetry} data-mark-retry onClick={() => markAll(true)}>Try again</button>}
+                  </p>}
+                  <ul className={styles.list} ref={list} tabIndex={-1} aria-label="Messages">
                     {messages.items.map(message => {
                       const unread = isUnread(message, inbox);
                       return <li key={message.id} className={styles.item}>
@@ -264,7 +356,13 @@ export function MessagesPanel({ id, inbox, load, loadNotifications, loadPatches,
                             <span className={unread ? styles.titleNew : styles.title} data-message-title>{message.title}</span>
                           </span>
                           <span className={styles.preview}>{message.preview}</span>
+                          {unread && failedIds.has(message.id) && <span className={styles.rowError} data-mark-error>Could not mark. Try again.</span>}
                         </button>
+                        {unread && <button type="button" className={styles.mark} data-mark-button={message.id} title="Mark as read" aria-label={`Mark ${message.title} as read`}
+                          data-state={marking.has(message.id) ? 'busy' : failedIds.has(message.id) ? 'failed' : undefined} aria-disabled={marking.has(message.id) || bulk ? true : undefined}
+                          aria-busy={marking.has(message.id) ? true : undefined} onClick={() => markRow(message.id)}>
+                          {marking.has(message.id) ? <span className={styles.spin} aria-hidden="true" /> : <Tick />}
+                        </button>}
                         {message.patch !== null && <span className={styles.numberLine}>
                           <span className={`${styles.tag} ${styles.patch} ${styles.room}`} aria-hidden="true">{tagName(message.kind)}</span>
                           <PatchNumber patch={message.patch} onOpen={() => showHistory(message.patch!, message.id)} />
@@ -281,7 +379,16 @@ export function MessagesPanel({ id, inbox, load, loadNotifications, loadPatches,
               : <>
                 {notes.failed && <Failed what="Notifications" retry={notes.reload} />}
                 {entries.length === 0 ? <p className={styles.state}>No results yet. What your training and expeditions earn shows here.</p> : <>
-                  <p className={styles.summary}>{notificationsSummary(noteItems.length, listedNotices.length, freshNotes)}</p>
+                  <div className={styles.summary}>
+                    <span className={styles.summaryText}>{notificationsSummary(noteItems.length, listedNotices.length, freshNotes)}</span>
+                    <button type="button" className={styles.markAll} data-mark-notes disabled={freshNotes === 0} aria-busy={notesMarking ? true : undefined} onClick={markNotes}>
+                      {notesMarking ? <><span className={styles.spin} aria-hidden="true" />Marking…</> : <><TickAll />Mark all as read</>}
+                    </button>
+                  </div>
+                  {notesError && <p className={`${styles.banner} ${styles.bannerErr}`} data-mark-banner>
+                    <span>Could not mark notifications. Try again.</span>
+                    <button type="button" className={styles.bannerRetry} data-mark-retry onClick={markNotes}>Try again</button>
+                  </p>}
                   <ul className={styles.list}>
                     {entries.map(entry => {
                       if (entry.kind === 'notice') {
@@ -317,6 +424,7 @@ export function MessagesPanel({ id, inbox, load, loadNotifications, loadPatches,
           </div>
         )}
       </div>
+      <div className={styles.sr} role="status" aria-live="polite" data-mark-status>{announce}</div>
     </section>
   );
 }

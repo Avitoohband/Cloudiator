@@ -79,6 +79,8 @@ export type LiveData = {
   messages?: readonly GameMessage[];
   /** The server's patches with their features (the public `patches` and `patch_features` tables, M26), in any order; none by default. */
   patches?: readonly PatchEntry[];
+  /** The published Game Info pages (the `game_info_reads` rows: `tab`, `version`, `document`); none by default, so the client's built-in text shows. */
+  gameInfo?: readonly Record<string, unknown>[];
   /** The revision read's newest patch (`latest_patch`, M26); null (no patch recorded) by default. */
   latestPatch?: string | null;
   /**
@@ -387,7 +389,7 @@ export type LiveState = { world: WorldSnapshot; owner: OwnerState | null; now: n
  * (`anon` has no grant). The routes use this, and unit tests run the app's real reads over it (tests/api/bouts-live-routes.test.ts).
  */
 export function liveRows(table: string, params: URLSearchParams, state: LiveState): Row[] | 'refused' {
-  if (table === 'game_info_reads') return [];
+  if (table === 'game_info_reads') return [...(state.data.gameInfo ?? [])];
   const source = tables(state)[table];
   if (!source) throw new Error(`Unexpected live transport table ${table}`);
   return source.private && state.reader === null ? 'refused' : query(source.rows, params);

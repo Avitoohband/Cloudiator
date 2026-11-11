@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import { PATCH } from '../../src/lib/patch';
 import { ownerFixture, worldFixture } from '../fixtures/domain';
 import { expect, test } from './fixtures';
@@ -42,7 +43,7 @@ test('signed-in fixture players can open Game Info beside their account controls
   await chip.getByRole('button', { name: 'Game Info', exact: true }).click();
 
   const panel = page.getByRole('dialog', { name: 'Game Info' });
-  await panel.getByRole('button', { name: 'Dungeons', exact: true }).click();
+  await panel.getByRole('option', { name: 'Dungeons', exact: true }).click();
   await expect(panel.getByRole('article', { name: 'Dungeons' })).toContainText('Wolf Den');
   await panel.getByRole('button', { name: 'Close Game Info' }).click();
   await expect(chip.getByRole('button', { name: 'Game Info', exact: true })).toBeFocused();
@@ -97,4 +98,57 @@ test('a short phone can scroll the full reader below wrapped signed-in controls'
   const lastEntry = panel.getByRole('heading', { name: 'Seasonal camp themes' });
   await lastEntry.scrollIntoViewIfNeeded();
   await expect(lastEntry).toBeInViewport();
+});
+
+test('Wiki topics are one short scrolling list', async ({ page }) => {
+  test.skip(process.env.PLAYWRIGHT_STATIC === 'true', 'The published Wiki uses the development-only intercepted transport.');
+  const wiki = JSON.parse(readFileSync('docs/game-info/wiki.draft.json', 'utf8')) as { entries: { id: string; title: string; body: string }[] };
+  await quietArrivals(page.context());
+  await routeLiveReads(page.context(), { world: worldFixture, gameInfo: [{ tab: 'wiki', version: 1, document: wiki }] });
+  await page.setViewportSize({ width: 360, height: 700 });
+  await page.goto('/game/');
+  await cornerChip(page).getByRole('button', { name: 'Game Info', exact: true }).click();
+  const panel = page.getByRole('dialog', { name: 'Game Info' });
+  const list = panel.getByRole('listbox', { name: 'Wiki topics' });
+  const options = list.getByRole('option');
+  await expect(options).toHaveCount(wiki.entries.length);
+  await expect(panel.getByRole('navigation', { name: 'Wiki topics' })).toHaveCount(0);
+  expect(wiki.entries.length).toBeGreaterThan(4);
+  const rowHeight = (await options.first().boundingBox())!.height;
+  const sizes = await list.evaluate(element => ({ client: element.clientHeight, scroll: element.scrollHeight }));
+  expect(sizes.client).toBeLessThan(rowHeight * 5);
+  expect(sizes.scroll).toBeGreaterThan(sizes.client);
+
+  const inView = async (option: ReturnType<typeof options.nth>) => {
+    const [o, l] = [(await option.boundingBox())!, (await list.boundingBox())!];
+    return o.y >= l.y - 1 && o.y + o.height <= l.y + l.height + 1;
+  };
+  const chosen = list.getByRole('option', { selected: true });
+  await expect(chosen).toHaveCount(1);
+  await expect(chosen).toHaveText(/✓\s*Combat, dodge, and critical hits/);
+  await expect(chosen).toBeVisible();
+  await expect.poll(() => inView(chosen)).toBe(true);
+  await expect(panel.getByRole('article', { name: 'Combat, dodge, and critical hits' })).toBeVisible();
+
+  const heading = (title: string) => expect(panel.getByRole('article')).toHaveAccessibleName(title);
+  await list.focus();
+  await expect(list).toBeFocused();
+  await page.keyboard.press('ArrowDown');
+  await heading('Gear and builds');
+  await expect(list.getByRole('option', { selected: true })).toHaveText(/Gear and builds/);
+  await page.keyboard.press('ArrowUp');
+  await heading('Combat, dodge, and critical hits');
+  await page.keyboard.press('End');
+  await heading(wiki.entries.at(-1)!.title);
+  await expect.poll(() => inView(options.last())).toBe(true);
+  await page.keyboard.press('Home');
+  await heading(wiki.entries[0].title);
+  await expect.poll(() => inView(options.first())).toBe(true);
+
+  await list.getByRole('option', { name: 'Arena and renown' }).click();
+  await heading('Arena and renown');
+  await expect(list.getByRole('option', { selected: true })).toHaveText(/✓\s*Arena and renown/);
+  expect(await inView(list.getByRole('option', { selected: true }))).toBe(true);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+  expect(await panel.evaluate(element => element.scrollWidth <= element.clientWidth)).toBe(true);
 });

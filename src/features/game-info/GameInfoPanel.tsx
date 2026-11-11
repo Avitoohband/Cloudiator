@@ -25,6 +25,7 @@ export function GameInfoPanel({ id, onClose, update, fixture, editorAccount, onD
   const [active, setActive] = useState(0);
   const [topic, setTopic] = useState('combat');
   const panel = useRef<HTMLElement>(null);
+  const topics = useRef<HTMLDivElement>(null);
   const tabButtons = useRef<(HTMLButtonElement | null)[]>([]);
   const [pages, setPages] = useState<GameInfoPages>({});
   const [canEdit, setCanEdit] = useState(false);
@@ -38,6 +39,26 @@ export function GameInfoPanel({ id, onClose, update, fixture, editorAccount, onD
   const currentTab = tabs[active];
   const tabId = (key: string) => `${id}-${key}-tab`;
   const panelId = (key: string) => `${id}-${key}-panel`;
+  const optionId = (key: string) => `${id}-topic-${key}`;
+
+  useEffect(() => {
+    // Scroll only the list (not the panel) so the chosen row is inside its visible area.
+    const list = topics.current;
+    const option = article && list?.querySelector<HTMLElement>(`[id="${optionId(article.id)}"]`);
+    if (!list || !option) return;
+    if (option.offsetTop < list.scrollTop) list.scrollTop = option.offsetTop;
+    else if (option.offsetTop + option.offsetHeight > list.scrollTop + list.clientHeight) list.scrollTop = option.offsetTop + option.offsetHeight - list.clientHeight;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [article?.id, active, pages.wiki]);
+
+  function moveTopic(event: KeyboardEvent<HTMLDivElement>) {
+    const at = Math.max(0, wiki.findIndex(item => item.id === article?.id));
+    const next = event.key === 'ArrowDown' ? Math.min(at + 1, wiki.length - 1) : event.key === 'ArrowUp' ? Math.max(at - 1, 0)
+      : event.key === 'Home' ? 0 : event.key === 'End' ? wiki.length - 1 : null;
+    if (next === null || !wiki[next]) return;
+    event.preventDefault();
+    setTopic(wiki[next].id);
+  }
 
   useEffect(() => {
     if (fixture) return;
@@ -122,10 +143,16 @@ export function GameInfoPanel({ id, onClose, update, fixture, editorAccount, onD
         disabled={editing !== null} onClick={() => changeTab(index)} onKeyDown={event => moveTab(event, index)}>{tab.label}</button>)}
     </div>
     <section id={panelId('wiki')} role="tabpanel" aria-labelledby={tabId('wiki')} className={styles.body} hidden={active !== 0 || editing !== null}>
-      <nav aria-label="Wiki topics" className={styles.topics}>
-        {wiki.map(item => <button key={item.id} type="button" aria-current={item.id === article?.id ? 'true' : undefined}
-          onClick={() => setTopic(item.id)}>{item.title}</button>)}
-      </nav>
+      <div ref={topics} role="listbox" aria-label="Wiki topics" tabIndex={0} className={styles.topics}
+        aria-activedescendant={article ? optionId(article.id) : undefined} onKeyDown={moveTopic}>
+        {wiki.map(item => {
+          const chosen = item.id === article?.id;
+          return <div key={item.id} id={optionId(item.id)} role="option" aria-selected={chosen} className={styles.topic}
+            onClick={() => setTopic(item.id)}>
+            <span aria-hidden="true" className={styles.mark}>{chosen ? '✓' : ''}</span>{item.title}
+          </div>;
+        })}
+      </div>
       {article && <article className={`${styles.entry} ${styles.readText}`} onCopy={stopCopy} aria-labelledby={`${id}-article`}>
         <h3 id={`${id}-article`}>{article.title}</h3>
         <p>{article.body}</p>

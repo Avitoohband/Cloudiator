@@ -119,7 +119,11 @@ More from Avi, 2026-10-30 (collected for the plans, not yet designed):
     how agility, precision affect the game, and fights, why someone miss or dodge." Covers: stamina costs per activity and
     overload; what each attribute does (Strength, Agility, Vitality, Endurance, Precision) in numbers; class bonuses; how a
     fight resolves (hit, miss, dodge, critical, armour, attack speed); Rest and the Training cap. The numbers must be read from
-    the active rules (v1 now, v2 after 1.6), never typed by hand. A players' explainer clip follows its release.
+    the active rules, never typed by hand.
+    On 2026-11-11 Avi confirmed two tabs. **Wiki** explains all game systems and will link to two planned YouTube videos.
+    Both videos still need to be produced and linked. **Future Updates** shows the player-facing plan for future patches,
+    with patch numbers when decided and a place for unassigned ideas if needed. Avi wants to edit pages inside the game
+    and give Codex MCP access to edit the same wiki. The editing and publishing workflow still needs design.
 
 35. **Class quests that raise the class bonus (Avi, 2026-10-31, future).** "quest per class, that improve their class
     bonuses, should be very hard to achieve. for example, Berserker has more % STR and Guardian have 10% endurance instead of 5."
@@ -129,7 +133,7 @@ More from Avi, 2026-10-30 (collected for the plans, not yet designed):
 More from Avi, 2026-10-31 (a pasted list; items already listed are folded into 30-34):
 
 36. **Videos in the guide.** "In the wiki your links to YouTube videos and explanation and links to the patch notes videos on
-    YouTube": the in-game guide (idea 34) links the explainer videos and each patch's video on YouTube (Indigo Labs).
+    YouTube": earlier idea for a broader video archive. The confirmed Wiki scope in idea 34 is two planned YouTube links.
 37. **A better inventory with item pictures, and in the shops too.** "Better inventory setup with items appearance. Also in
     shop": each item shown with its picture, in Inventory and in the shops.
     Avi reiterated on 2026-11-01 that inventory item appearance is still wanted later; coordinate this with idea 45.

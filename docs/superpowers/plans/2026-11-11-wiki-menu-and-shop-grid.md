@@ -92,7 +92,35 @@ Avi added four features after Tasks 1-2 (2026-11-11, mockups approved): search a
 
 - [ ] After Avi picks a candidate from `.superpowers/design/2026-11-11-renown-icon/`, replace `ICONS.renown` in `assets/source/generators/effects.mjs`, rebuild the assets (`node assets/source/build-assets.mjs`, then `--check`), and show the laurel in the corner chip and its phone bar instead of ★ (accessible text "Renown" unchanged). Update provenance if the build requires it. Run the shell specs on both projects, `npm test`. Commit.
 
-### Task 8: Combined candidate
+### Task 8: Stacked duplicates and a Sell quantity
 
-- [ ] Final review of Tasks 3-7. Add 1.9 changelog lines for the Wiki list, shop grid, search and sort, menu pin, equipping from My gladiator and the laurel. Commit.
+**Spec:** `.superpowers/design/2026-11-11-stacks/` (`stacks-mockup.html`, `stacks-inventory-desktop.png`, `stacks-sell-result.png`, `stacks-picker-desktop.png`, `stacks-phone.png`, plus the progress, partial and queued renders).
+
+- [ ] Failing cases first, both projects (`&bag=demo`): identical items (same catalog id, not worn, listed or queued) show as one tile with a layered edge and "×N"; every tile shows its level tag; worn, listed and queued copies keep their own tile with a Worn / Next / Listed tag; the "N / 60 slots" count is unchanged. The card says "N owned"; Wear and Discard take one item; Sell has a "Sell to the NPC" box with "Quantity [n] of N" and Max and a "Sell n × <name> · <total> gold" button that sends one `sell-item` per instance in a row, showing progress ("1 of 2 sold") and the result ("Sold 2 × Light boots for 20 gold." / partial: "Sold 1 of 3 Light boots for 10 gold. Sale 2 was refused: …"). Wear on a stack leaves ×N-1 plus a queued tile; Undo merges back. The My gladiator equip picker (Task 6) stacks the same way and its Wear button reads "Wear <name>". Duplicates of different rarity or level never stack.
+- [ ] Implement with a pure, unit-tested grouping helper shared by the Inventory and the picker. Run the inventory, character and release specs on both projects, `npm test`, `npm run typecheck`. Commit.
+
+### Task 9: Mark as read
+
+**Spec:** `.superpowers/design/2026-11-11-mark-read/` (`mark-read-mockup.html`, `mark-read-desktop.png`, `mark-read-notifications-desktop.png`, `mark-read-phone.png`, progress/failure renders).
+
+- [ ] Failing cases first, both projects: each unread message row has a ✓ button ("Mark <subject> as read", keyboard reachable; focus moves to the next unread row's button); "Mark all as read (N)" in the messages summary line, disabled at 0, sends one `read-message` per unread message in order with "Marking 2 of 3…" and a partial result with Try again for the failed ones; Notifications get "Mark all as read" (one `see-notifications`), which clears the gold dots. Opening the Notifications tab still marks them seen as today (Avi). The mail badge and tab counts update after every mark.
+- [ ] Implement in `src/features/messages/` and `CampShell.tsx` using the existing commands only. Run the messages and shell specs on both projects, `npm test`, `npm run typecheck`. Commit.
+
+### Task 10: XP bar, next-expedition hint and stat help
+
+**Spec:** `.superpowers/design/2026-11-11-xp-help/` (`xp-help-mockup.html`, `xp-desktop.png`, `xp-levelup-desktop.png`, `help-stat-desktop.png`, `help-attribute-desktop.png`, `xp-help-phone.png`).
+
+- [ ] Failing cases first, both projects: in My gladiator an XP bar under Stamina ("Level N", "X / Y XP", "Z XP to Level N+1", "Each level costs 100 × your level"; "Max level" at the cap) with the next expedition's XP as a hatched segment (gold when it crosses the end) and the line "Your next expedition (up to +30 XP) can level you up to Level 2" or "Next expedition: up to +75 XP · 195 more to Level 6" (XP only on a win; live v2 rewards via `expeditionReward`; the next expedition is the first in the saved schedule, else the highest the level allows — "Next <name> expedition"; a running one is "your current expedition"); a thin XP line with the same segment under the name in the corner chip and its phone bar; new Attributes and Stats blocks with hover/focus/tap help reusing `statHelp`/`attributeHelp` from `profile-card.ts` plus the real-number second line.
+- [ ] Implement in `src/features/character/` and `CornerChip.tsx`. Run the character, profile and shell specs on both projects, `npm test`, `npm run typecheck`. Commit.
+
+### Task 11: Talking NPCs and Names/Titles toggles
+
+**Spec:** `.superpowers/design/2026-11-11-camp-talk/` (`camp-mockup.html`, `npc-lines.md` — the 56 approved lines, `npc-talk-desktop.png`, `names-titles-on-desktop.png`, `names-titles-zoomed-out-desktop.png`, `camp-phone.png`).
+
+- [ ] Failing cases first: clicking a camp NPC shows a pixel speech bubble (name, one line, 4 progress dots) that follows the NPC; the next click shows the next line; one bubble at a time; it fades after 4-6 s, on a click elsewhere or on Esc; lines announced to screen readers; NPCs get a pointer cursor and a gold hover ring. Merchants (Avi): clicking the stall opens the shop as today; clicking Brutus or Livia themselves talks and does not open the shop. Names and Titles toggles on the rail after the zoom buttons and before Pin/Position (phone: a "Show: Names · Titles" row in the ☰ menu); Titles on turns Names on, Names off turns Titles off; names cover NPCs; zoomed out, names keep zoom-1 size; overlaps "Tidy" (the nearer name wins, names behind fade to 30%, hover restores; your gladiator and the talking NPC always full); both off is exactly today; saved in this browser.
+- [ ] Implement in `src/game/` (Phaser camp, `npcs.ts`) and `src/features/shell/`. Run the camp, arrivals and shell specs on both projects, `npm test`, `npm run typecheck`. Commit.
+
+### Task 12: Combined candidate
+
+- [ ] Final review of Tasks 3-11. Reconcile the 1.9 changelog lines, `docs/game-info/wiki-1.9-pending.md` and the Future Updates draft with what shipped. Commit.
 - [ ] Run the complete offline 12-stage gate (native32, `pw-design-tcp.config.mjs`, 32 browser shards) on the exact committed candidate. Record the result and gate.json SHA-256 in HANDOFF and here. Stop at local readiness.

@@ -34,6 +34,16 @@ Project folders under `D:\Avi\Projects\Animation\Cloudiator\`.
 - The Future Updates tab shows the public plans for upcoming patches.
 - Open Inventory and shops to browse your inventory in a square grid of pixel-art items. Select a tile to check its details, wear it, or manage it.
 - In My gladiator, hover, focus, or tap worn gear and replacements to see stats, attribute bonuses, and weight.
+- Wiki topics are one short scrolling list.
+- Shops are an icon grid with the same detail card as your inventory.
+- Search and sort your Inventory and the shops.
+- Pin the menu to the left, right or bottom of the screen on desktop. It is remembered in this browser.
+- Wear or replace gear straight from the Worn equipment slots in My gladiator.
+- A new gold laurel marks renown, including in the corner chip.
+- Identical items show as one stack with a count. Sell lets you choose how many.
+- Mark messages and notifications as read, one by one or all at once.
+- An XP bar shows your progress and whether your next expedition can level you up.
+- My gladiator explains each attribute and stat when you hover, focus or tap it.
 
 ## 1.8.1 — Clearer gladiator stats (2026-11-11)
 

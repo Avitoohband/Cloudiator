@@ -13,7 +13,8 @@
     {
       "id": "menus",
       "title": "More room in menus",
-      "body": "Give menus more space on desktop and add small previous and next arrows to move between sections. Keep the controls usable on phones."
+      "body": "Pin the menu to the left, right, or bottom of the screen on desktop, remembered in this browser. Wider menus and small previous and next arrows between sections are still planned. Controls stay usable on phones.",
+      "patch": "1.9"
     },
     {
       "id": "progression-cap",
@@ -22,8 +23,9 @@
     },
     {
       "id": "forge",
-      "title": "Weapon upgrades",
-      "body": "Use salvage and materials such as copper, iron, and gold to upgrade weapons at a forge. Recipes and material sources are still in design."
+      "title": "Salvage and the forge",
+      "body": "Turn unused gear into salvage, then use salvage and materials such as copper, iron, and gold to upgrade weapons at a forge. Recipes and material sources are still in design.",
+      "patch": "1.10"
     },
     {
       "id": "gear-balance",
@@ -37,8 +39,8 @@
     },
     {
       "id": "expedition-xp",
-      "title": "XP progress and tougher expeditions",
-      "body": "Show an XP progress bar and the XP paid by each expedition in the game. Explore harder high-level expeditions and party challenges, plus The Deep, a planned solo delve."
+      "title": "Tougher expeditions",
+      "body": "Higher-level expeditions are coming with 1.11, along with harder party challenges and The Deep, a planned solo delve. The XP bar arrives with 1.9."
     },
     {
       "id": "rotations",
@@ -48,7 +50,7 @@
     {
       "id": "camp-life",
       "title": "More life in camp",
-      "body": "Meet more NPCs and select them to open a card with their details. A small rotating crowd is planned behind the Arena spectators every evening. We also plan to add pettable cats, dogs, rabbits, and birds."
+      "body": "Click an NPC to hear a line about themselves, planned for 1.9. More NPCs, a small rotating crowd behind the Arena spectators every evening, and pettable cats, dogs, rabbits, and birds are also planned."
     },
     {
       "id": "seasonal",
@@ -64,6 +66,106 @@
       "id": "cosmetics",
       "title": "Cosmetic companions and gear looks",
       "body": "The first paid cosmetics planned are a Supporter Banner and an optional pet follower. Later options include weapon and armor dyes and skins. These are appearance items with no combat or progression bonuses."
+    },
+    {
+      "id": "shops-grid",
+      "title": "Shops as an icon grid",
+      "body": "Shops show their goods as icons and use the same detail card as your inventory.",
+      "patch": "1.9"
+    },
+    {
+      "id": "search-sort",
+      "title": "Search and sort items",
+      "body": "Search and sort what you carry and what the shops sell.",
+      "patch": "1.9"
+    },
+    {
+      "id": "equip-from-gladiator",
+      "title": "Equip from My gladiator",
+      "body": "Choose replacement gear straight from your Worn equipment slots.",
+      "patch": "1.9"
+    },
+    {
+      "id": "gold-laurel",
+      "title": "A gold laurel for renown",
+      "body": "Renown gets a new gold laurel icon, also shown in the corner chip.",
+      "patch": "1.9"
+    },
+    {
+      "id": "item-stacks",
+      "title": "Stacked items and Sell quantity",
+      "body": "Identical items show as one stack with a count, and you choose how many to sell.",
+      "patch": "1.9"
+    },
+    {
+      "id": "mark-read",
+      "title": "Mark as read",
+      "body": "Mark messages and notifications as read, one by one or all at once.",
+      "patch": "1.9"
+    },
+    {
+      "id": "xp-bar",
+      "title": "XP bar and level-up hint",
+      "body": "See your XP progress and whether your next expedition can level you up.",
+      "patch": "1.9"
+    },
+    {
+      "id": "stat-help",
+      "title": "Help on stats and attributes",
+      "body": "Hover, focus, or tap any attribute or stat in My gladiator to see what it means.",
+      "patch": "1.9"
+    },
+    {
+      "id": "name-toggles",
+      "title": "Names and titles in camp",
+      "body": "Turn on always-visible names and titles above gladiators in camp.",
+      "patch": "1.9"
+    },
+    {
+      "id": "talking-npcs",
+      "title": "Talking NPCs",
+      "body": "Click an NPC in camp to hear a line about themselves.",
+      "patch": "1.9"
+    },
+    {
+      "id": "buy-back",
+      "title": "Buy back sold items",
+      "body": "Changed your mind? Buy back your last 10 sold items until the next game day, for the price you sold them at.",
+      "patch": "1.10"
+    },
+    {
+      "id": "daily-reward",
+      "title": "Daily login reward",
+      "body": "Claim a reward once per game day. Seven days in a row ends with a bigger prize, and a missed day starts the streak again.",
+      "patch": "1.10"
+    },
+    {
+      "id": "potions",
+      "title": "Stamina and health potions",
+      "body": "Stamina potions restore stamina, with a daily limit. Health potions can be set to be drunk automatically in fights or by you. Details are still being decided.",
+      "patch": "1.10"
+    },
+    {
+      "id": "harder-bosses",
+      "title": "Much harder dungeon bosses",
+      "body": "Dungeon bosses become a real challenge: a full party at the dungeon level should win only about one time in four.",
+      "patch": "1.10"
+    },
+    {
+      "id": "more-content",
+      "title": "Higher levels and more content",
+      "body": "New expeditions at levels 15, 20, 25, and 30, dungeons at levels 17, 22, and 27, gear for levels 15 to 30, and much more.",
+      "patch": "1.11"
+    },
+    {
+      "id": "raids",
+      "title": "Raids",
+      "body": "Gladiators go together on big raids, in solo and guild versions. Details are still open."
+    },
+    {
+      "id": "season-pass",
+      "title": "Seasonal pass",
+      "body": "A seasonal pass with a free daily-reward track and cosmetic rewards is planned once payments open."
     }
   ]
 }

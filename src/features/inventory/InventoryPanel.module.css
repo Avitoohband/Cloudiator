@@ -135,11 +135,11 @@
 
 .sellBox { margin-top: 10px; padding: 9px 10px 10px; border: 1px solid #4a4030; border-radius: 8px; background: #1a1914; }
 .sellBox h4 { margin: 0 0 6px; font-size: .7rem; letter-spacing: .08em; text-transform: uppercase; color: var(--gold); }
-.qtyRow { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 8px; font-size: .85rem; }
-.qtyRow label { display: flex; align-items: center; gap: 8px; margin: 0; }
-.qtyRow input { width: 64px; min-height: 38px; padding: 5px 8px; text-align: center; }
+.qtyRow { display: flex; flex-wrap: nowrap; align-items: center; gap: 6px; margin-bottom: 8px; font-size: .85rem; }
+.qtyRow label { display: flex; flex: none; align-items: center; gap: 6px; margin: 0; }
+.qtyRow input { width: 56px; min-height: 38px; padding: 5px 8px; text-align: center; }
 .of { color: var(--muted); }
-.max { min-height: 34px; padding: 2px 10px; font-size: .8rem; }
+.max { flex: none; min-height: 34px; padding: 2px 10px; font-size: .8rem; }
 .sellButton { width: 100%; min-height: 44px; padding: 8px 12px; border: 1px solid #ae864a; border-radius: 6px; background: #4b3726; color: var(--gold); font-weight: 700; text-align: center; text-wrap: balance; }
 .sellButton:hover:not(:disabled) { background: #5a4430; }
 .sellButton:disabled { background: #292526; color: #cbbfae; border-color: #655847; }

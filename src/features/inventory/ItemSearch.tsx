@@ -36,7 +36,7 @@ export function NoMatch({ query, clear }: { query: string; clear(): void }) {
   return <div className={styles.noMatch} role="status"><span>No items match &ldquo;<b>{query.trim()}</b>&rdquo;</span><button type="button" onClick={clear}>Clear search</button></div>;
 }
 
-/** The line under the grid: how many items match the typed text (empty while nothing is typed). */
-export function MatchCount({ count, query }: { count: number; query: string }) {
-  return <p className={styles.matchCount} role="status">{query.trim() ? `${count} item${count === 1 ? '' : 's'} match “${query.trim()}”` : ''}</p>;
+/** The line under the grid: how many items match the typed text; `idle` is what it says while nothing is typed. It stays mounted so the first count is announced. */
+export function MatchCount({ count, query, idle = '' }: { count: number; query: string; idle?: string }) {
+  return <p className={styles.matchCount} role="status">{query.trim() ? `${count} item${count === 1 ? '' : 's'} match “${query.trim()}”` : idle}</p>;
 }

@@ -35,7 +35,7 @@ const itemBinding = (item: ItemInstance) => item.binding === 'bound' ? 'Account-
 /** A material (salvage) is one piece with its own quantity; every other piece is one item. */
 const isMaterial = (item: ItemInstance) => item.catalogId === CATALOG_V1.salvage.id || item.quantity > 1;
 /** Why a refused sale was refused, as one clause of the partial result ("Sale 2 was refused: <reason>"). */
-const saleReason = (code: string) => code === 'conflict' ? 'your inventory changed' : code === 'not-found' ? 'that item is no longer in your inventory'
+const saleReason = (code: string) => code === 'invalid' ? 'that piece is reserved' : code === 'conflict' ? 'your inventory changed' : code === 'not-found' ? 'that item is no longer in your inventory'
   : code === 'processing' ? 'the world is processing previous results' : code === 'unavailable' ? 'the request could not be confirmed'
     : code === 'rate-limited' ? 'too many requests, try again shortly' : code === 'sold' ? 'it was sold on the Marketplace'
       : code === 'expired' ? 'its Marketplace listing expired' : `the server answered ${code}`;
@@ -135,7 +135,7 @@ export function InventoryPanel({ owner, gateway, refresh, clock, preview = false
     const command = again && attempt.current ? attempt.current : { ...intent, operationId: crypto.randomUUID() } as InventoryCommand | GearCommand;
     if (done !== undefined) success.current = done; else if (!again) success.current = '';
     const gear = command.kind === 'queue-build' || command.kind === 'cancel-build';
-    begin();
+    if (!quiet) begin();
     attempt.current = command; sending.current = true; setBusy(true); if (!quiet) { setError(''); setMessage(''); setRetry(false); }
     if (place) setWhere(place); else if (!gear) setWhere('trade');
     try {
@@ -161,27 +161,32 @@ export function InventoryPanel({ owner, gateway, refresh, clock, preview = false
                       : `Request rejected: ${result.code}.`);
         if (!transient) attempt.current = null;
         // A gear change the server finds `invalid` no longer fits the build or the bag (`gearRefusal`): reload them.
-        if (['conflict', 'not-found', 'inventory-full', 'sold', 'expired'].includes(result.code) || (gear && result.code === 'invalid')) await refresh();
+        if (['conflict', 'not-found', 'inventory-full', 'sold', 'expired'].includes(result.code) || result.code === 'invalid' || (quiet && result.code === 'unavailable')) await refresh();
         return { ok: false, code: result.code };
       }
     } catch {
       if (mounted.current && !quiet) { setError('This request could not be confirmed. Retry the same request.'); setRetry(true); }
+      // A sale in a run whose answer was lost may or may not have happened: read the bag again before the run reports.
+      if (quiet) try { await refresh(); } catch { /* the report says the result is unknown */ }
       return { ok: false, code: 'unavailable' };
-    } finally { sending.current = false; end(); if (mounted.current) setBusy(false); }
+    } finally { sending.current = false; if (!quiet) end(); if (mounted.current) setBusy(false); }
   }
   // The gear view: what is worn now, what the queued build changes, and the commands that queue, undo and cancel a swap.
   const worn = wornNow(owner), next = nextEquipment(owner), changed = changedSlots(owner);
   const pieceOf = (id: string | null) => owner.inventory.find(item => item.id === id);
   /** The queued build's effective time ('' when it cannot be shown: the words then say "the next slot"). */
   const effective = owner.pendingBuild ? slotTimeText(owner.pendingBuild.effectiveSlotIndex * RULES_V1.clock.slotMs, nowMs, clockMode) : '';
-  const wearItem = (item: ItemInstance) => {
+  const wearItem = (item: ItemInstance, left = 0) => {
     const command = wearCommand(owner, item.id), state = wearState(owner, item);
     void send(command, command.kind === 'cancel-build' ? 'Back to your current gear. No gear change is queued.'
-      : state === 'leaving' ? `${itemName(item)} stays worn.` : `${itemName(item)} will be worn from the next slot.`, item.id);
+      : state === 'leaving' ? `${itemName(item)} stays worn.` : `${itemName(item)} will be worn from the next slot.${left > 0 ? ` ${left} left in the stack.` : ''}`, item.id);
   };
   const undoItem = (item: ItemInstance, slot: EquipmentSlot) => {
     const back = pieceOf(worn[slot]);
-    void send(undoCommand(owner, slot), `Swap undone. ${back ? `${itemName(back)} stays worn` : `${SLOT_LABELS[slot]} stays empty`}.`, item.id);
+    // A piece that goes back to a stack says so (the approved wording); a single piece says what stays worn.
+    const stacked = owner.inventory.some(other => other.id !== item.id && other.catalogId === item.catalogId && other.binding === item.binding && isStackable(owner, other));
+    void send(undoCommand(owner, slot), stacked ? `Swap undone. ${itemName(item)} is back in the stack.`
+      : `Swap undone. ${back ? `${itemName(back)} stays worn` : `${SLOT_LABELS[slot]} stays empty`}.`, item.id);
   };
   const cancelGear = () => void send(cancelGearCommand(owner), keepsOtherChanges(owner) ? 'Gear changes canceled. Your other queued build changes are kept.' : 'Gear changes canceled.', 'gear');
   // Command buttons stay focusable while sending (aria-disabled, guarded against activation): a keyboard player keeps the
@@ -214,9 +219,9 @@ export function InventoryPanel({ owner, gateway, refresh, clock, preview = false
       if (result?.ok && mounted.current) reset();
       return;
     }
-    sellLock.current = true;
+    sellLock.current = true; begin();
     setSelling({ key: tile.key, name, done: 0, total: list.length }); setMessage(''); setError(''); setRetry(false); setWhere('sale');
-    let done = 0, refusal = '';
+    let done = 0, refusal = '', unknown = false;
     try {
       for (const piece of list) {
         const current = ownerNow.current.inventory.find(other => other.id === piece.id);
@@ -224,16 +229,18 @@ export function InventoryPanel({ owner, gateway, refresh, clock, preview = false
         const before = ownerNow.current;
         const result = await send({ kind: 'sell-item', itemId: piece.id, quantity: 1 }, undefined, 'sale', true);
         if (!mounted.current) return;
-        if (!result || !result.ok) { refusal = saleReason(result ? result.code : 'unavailable'); break; }
+        if (!result || !result.ok) { refusal = saleReason(result ? result.code : 'unavailable'); unknown = !result || result.code === 'unavailable'; break; }
         done++;
         setSelling(progress => progress && { ...progress, done });
-        if (done < list.length) await bagUpdated(before);
+        if (done < list.length) { await bagUpdated(before); if (!mounted.current) return; }
       }
       const gold = done * value;
-      if (refusal) setError(`${done ? `Sold ${done} of ${list.length} ${name} for ${gold} gold. ` : 'Nothing was sold. '}Sale ${done + 1} was refused: ${refusal}. Review the updated items and sell the rest again.`);
+      const sold = done ? `Sold ${done} of ${list.length} ${name} for ${gold} gold. ` : '';
+      if (unknown) setError(`${sold}The result of sale ${done + 1} is unknown; check your gold. Review the updated items and sell the rest again.`);
+      else if (refusal) setError(`${sold || 'Nothing was sold. '}Sale ${done + 1} was refused: ${refusal}. Review the updated items and sell the rest again.`);
       else setMessage(`Sold ${list.length} × ${name} for ${gold} gold.`);
       reset();
-    } finally { sellLock.current = false; if (mounted.current) setSelling(null); }
+    } finally { sellLock.current = false; end(); if (mounted.current) setSelling(null); }
   }
   /** The card of a tile: its first piece's details, "N owned", and Wear, Discard and Sell acting on pieces of exactly this tile. */
   function itemCard(tile: StackTile) {
@@ -246,16 +253,18 @@ export function InventoryPanel({ owner, gateway, refresh, clock, preview = false
     const valid = Number.isSafeInteger(quantity) && quantity >= 1 && quantity <= (material ? item.quantity : count);
     const value = npcSaleValue(item, CATALOG_V1, rules);
     const state = isWearable(item) ? wearState(owner, item) : null, badge = wearBadge(owner, item);
-    const blocked = state ? blockedText(state, item) : null, blockedId = `${panelId}-${item.id}-blocked`;
+    const blocked = state ? blockedText(state, item) : null, blockedId = `${panelId}-${item.id}-blocked`, listingId = `${blockedId}-listing`;
     const wearName = itemLabel(item), slot = CATALOG_V1.items[item.catalogId]?.slot;
     const here = selling?.key === tile.key ? selling : null;
+    /** While a run is going the stack shrinks under the quantity asked for: the run, not the stack, decides then. */
+    const askable = valid || here !== null;
     const sellable = !material && loose && value !== null;
     const sellNote = material ? '' : item.reservation?.kind === 'listing' ? 'Listed for sale' : badge === 'wearing' || badge === 'off-at' ? 'Worn: change it first to sell it'
       : !loose ? `Reserved: ${item.reservation && item.reservation.kind !== 'equipment' ? item.reservation.kind : 'pending-build'}`
-        : value === null ? 'Account-bound: cannot sell to NPCs' : !valid ? `Enter a quantity from 1 to ${count}` : '';
+        : value === null ? 'Account-bound: cannot sell to NPCs' : !askable ? `Enter a quantity from 1 to ${count}` : '';
     /** "Listed for sale" is already said by the availability line (and heard there once): the Sell box repeats it for the eye only. */
     const listedNote = !material && item.reservation?.kind === 'listing';
-    const sellLabel = here ? `Selling ${itemName(item)}…` : sellable && valid ? `Sell ${quantity > 1 ? `${quantity} × ` : ''}${itemName(item)} · ${(value ?? 0) * quantity} gold` : `Sell ${itemName(item)}`;
+    const sellLabel = here ? `Selling ${itemName(item)}…` : sellable && askable ? `Sell ${quantity > 1 ? `${quantity} × ` : ''}${itemName(item)} · ${(value ?? 0) * quantity} gold` : `Sell ${itemName(item)}`;
     return <article key={item.id} className={styles.card} data-testid={`item-${item.id}`} data-rarity={item.rarity}>
       <div className={styles.cardHead}>
         <ItemIcon catalogId={item.catalogId} size={48} />
@@ -263,7 +272,7 @@ export function InventoryPanel({ owner, gateway, refresh, clock, preview = false
         {badge && <span className="gear-badge" data-badge={badge}>{wearBadgeText(badge, effective)}</span>}
       </div>
       <ItemStats item={item} />
-      <p>{owned} owned · {item.reservation?.kind === 'listing' ? <span id={state === 'listed' ? blockedId : undefined}>Listed for sale</span> : reserved ? `Reserved: ${item.reservation?.kind ?? 'pending-build'}` : 'Available'}</p>
+      <p>{owned} owned · {item.reservation?.kind === 'listing' ? <span id={state === 'listed' ? blockedId : listingId}>Listed for sale</span> : reserved ? `Reserved: ${item.reservation?.kind ?? 'pending-build'}` : 'Available'}</p>
       <p>{value === null ? 'Cannot sell to NPCs' : `NPC sell value: ${value} gold each`}</p>
       {material && item.quantity > 1 && <label>Quantity for {itemName(item)}<input type="number" min="1" max={item.quantity} step="1" value={quantity || ''} onChange={event => setQuantities(values => ({ ...values, [item.id]: Number(event.target.value) }))} /></label>}
       {blocked && state !== 'listed' && <p id={blockedId} className="gear-note">{blocked}</p>}
@@ -271,8 +280,8 @@ export function InventoryPanel({ owner, gateway, refresh, clock, preview = false
       <div className={`item-actions ${styles.actions}`}>
         {state === 'queued' && slot ? <button type="button" className="gear-undo" disabled={preview} {...busyProps} aria-label={`Undo wearing ${wearName}`} aria-describedby={preview ? previewNote : undefined} onClick={() => undoItem(item, slot)}>Undo</button>
           : state === 'wearing' ? <button type="button" disabled aria-label={`Wearing ${wearName}`}>Wearing</button>
-            : state ? <button type="button" className="gear-wear" disabled={preview || blocked !== null} {...busyProps} aria-label={`Wear ${wearName}`}
-              aria-describedby={[blocked ? blockedId : '', preview ? previewNote : ''].filter(Boolean).join(' ') || undefined} onClick={() => wearItem(item)}>Wear</button> : null}
+            : state ? <button type="button" className="gear-wear" disabled={preview || blocked !== null} {...busyProps} aria-label={`Wear ${wearName}${count > 1 ? ` (one of ${count})` : ''}`}
+              aria-describedby={[blocked ? blockedId : '', preview ? previewNote : ''].filter(Boolean).join(' ') || undefined} onClick={() => wearItem(item, count - 1)}>Wear</button> : null}
         {material && <button type="button" disabled={reserved || value === null || !valid} {...busyProps} onClick={() => void send({ kind: 'sell-item', itemId: item.id, quantity })}>Sell</button>}
         <button type="button" disabled={reserved || (material && !valid)} {...busyProps} onClick={() => {
           if (sending.current || sellLock.current) return;
@@ -283,14 +292,14 @@ export function InventoryPanel({ owner, gateway, refresh, clock, preview = false
       {!material && <div className={styles.sellBox}>
         <h4>Sell to the NPC</h4>
         {count > 1 && sellable && <div className={styles.qtyRow}>
-          <label>Quantity <input type="number" min="1" max={count} step="1" value={quantity || ''} disabled={locked} aria-label={`Quantity of ${itemName(item)} to sell`}
+          <label>Quantity <input type="number" min="1" max={count} step="1" value={quantity || ''} readOnly={locked} aria-label={`Quantity of ${itemName(item)} to sell`}
             onChange={event => setQuantities(values => ({ ...values, [tile.key]: Number(event.target.value) }))} /></label>
           <span className={styles.of}>of {count}</span>
-          <button type="button" className={styles.max} disabled={locked} onClick={() => setQuantities(values => ({ ...values, [tile.key]: count }))}>Max</button>
+          <button type="button" className={styles.max} {...busyProps} onClick={() => { if (!locked) setQuantities(values => ({ ...values, [tile.key]: count })); }}>Max</button>
         </div>}
-        <button type="button" className={styles.sellButton} disabled={!sellable || !valid} {...busyProps} aria-describedby={listedNote ? blockedId : undefined} onClick={() => void sellTile(tile, quantity)}>{sellLabel}</button>
-        <p className={styles.sellNote} aria-live={listedNote ? undefined : 'polite'} aria-hidden={listedNote ? true : undefined}>{here ? '' : sellNote}</p>
-        {here && <div className={styles.progress}>
+        <button type="button" className={styles.sellButton} disabled={!here && (!sellable || !valid)} {...busyProps} aria-describedby={listedNote ? (state === 'listed' ? blockedId : listingId) : undefined} onClick={() => void sellTile(tile, quantity)}>{sellLabel}</button>
+        <p className={styles.sellNote} aria-live={listedNote ? undefined : 'polite'} aria-hidden={listedNote ? true : undefined}>{sellNote}</p>
+        {here && <div className={styles.progress} role="status">
           <span>Selling {here.name}: {here.done} of {here.total} sold</span>
           <div className={styles.track} role="progressbar" aria-label="Sales completed" aria-valuemin={0} aria-valuemax={here.total} aria-valuenow={here.done}><i style={{ width: `${Math.round(100 * here.done / here.total)}%` }} /></div>
         </div>}
@@ -327,8 +336,7 @@ export function InventoryPanel({ owner, gateway, refresh, clock, preview = false
             {Array.from({ length: Math.max(0, emptyCells) }, (_, index) => <span key={index} className={styles.emptyCell} aria-hidden="true" />)}
           </div>}
         </div>
-        {query.trim() || visibleTiles.length === 0 ? <MatchCount count={visibleCount} query={query} />
-          : <p className={styles.matchCount}>{visibleTiles.length} tile{visibleTiles.length === 1 ? '' : 's'} · {visibleCount} item{visibleCount === 1 ? '' : 's'} · each item still uses a slot</p>}
+        <MatchCount count={visibleCount} query={query} idle={visibleTiles.length > 0 ? `${visibleTiles.length} tile${visibleTiles.length === 1 ? '' : 's'} · ${visibleCount} item${visibleCount === 1 ? '' : 's'} · each item still uses a slot` : ''} />
       </div>
       <section id={detailsId} aria-label="Item details" className={styles.details}>
         {confirmation === 'stale' && <p ref={staleDiscardNotice} role="alert" tabIndex={-1}>Your inventory changed. Review the updated inventory before discarding.</p>}
@@ -357,7 +365,7 @@ export function InventoryPanel({ owner, gateway, refresh, clock, preview = false
       {place === 'gear' && outcomes}
     </section>
     {place === 'trade' && outcomes}
-    <ShopPanel key={merchantRequest} initialMerchant={initialMerchant} owner={owner} busy={busy} preview={preview} buy={(catalogId, quantity) => void send({ kind: 'buy-shop', catalogId, catalogVersion: CATALOG_V1.version, quantity })} />
+    <ShopPanel key={merchantRequest} initialMerchant={initialMerchant} owner={owner} busy={busy || selling !== null} preview={preview} buy={(catalogId, quantity) => void send({ kind: 'buy-shop', catalogId, catalogVersion: CATALOG_V1.version, quantity })} />
     <dialog ref={dialog} aria-labelledby="discard-heading" onCancel={() => setConfirmation(null)} onClose={() => {
       if (!dialog.current?.open) setConfirmation(current => current === 'stale' ? current : null);
     }}>

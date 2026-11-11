@@ -68,9 +68,10 @@ async function inventoryFlow(context: BrowserContext, options: { gear?: boolean;
           }
         } else if (command.kind === 'sell-item' || command.kind === 'discard-item') {
           const sold = state.inventory.find(item => item.id === command.itemId);
+          const unit = sold ? (CATALOG_V1.items[sold.catalogId] ?? CATALOG_V1.salvage).npcSellValue ?? 0 : 0;
           if (sold && sold.quantity > command.quantity) sold.quantity -= command.quantity;
           else state.inventory = state.inventory.filter(item => item.id !== command.itemId);
-          if (command.kind === 'sell-item') state.wallets.money += 10;
+          if (command.kind === 'sell-item' && sold) state.wallets.money += unit * command.quantity;
         } else if (command.kind === 'queue-build' || command.kind === 'cancel-build') {
           // As the server does: a stale version is a conflict, a queue replaces the pending build, a cancel clears it.
           if (command.expectedVersion !== state.buildVersion) return json({ ok: false, code: 'conflict' }, 409);
@@ -1491,6 +1492,8 @@ test('shows identical pieces as one tile with a layered edge and a count, every 
   await expect(sellButton(inv)).toHaveText(`Sell Light boots · ${bootsValue} gold`);
   await quantityField(inv).fill('2');
   await expect(sellButton(inv)).toHaveText(`Sell 2 × Light boots · ${bootsValue * 2} gold`);
+  const [field, max] = await Promise.all([quantityField(inv).boundingBox(), card.getByRole('button', { name: 'Max', exact: true }).boundingBox()]);
+  expect(Math.abs((field!.y + field!.height / 2) - (max!.y + max!.height / 2))).toBeLessThan(8);
   await card.getByRole('button', { name: 'Max', exact: true }).click();
   await expect(quantityField(inv)).toHaveValue('3');
   await expect(sellButton(inv)).toHaveText(`Sell 3 × Light boots · ${bootsValue * 3} gold`);
@@ -1506,7 +1509,11 @@ test('stacks work with search and every sort: a stack sorts by its pieces\' shar
   if (info.project.name === 'mobile') await page.setViewportSize({ width: 360, height: 740 });
   const menu = await demoBag(page);
   const inv = inventoryRegion(menu), sort = sortSelect(inv).first();
+  // The count line is one live region that stays mounted: the first search count is announced there.
+  const count = inv.locator('p[role="status"]').filter({ hasText: 'each item still uses a slot' });
+  await count.evaluate(node => node.setAttribute('data-kept', ''));
   await searchField(inv).first().fill('sword');
+  await expect(inv.locator('p[role="status"][data-kept]')).toHaveText('4 items match “sword”');
   await expect(inv.getByTestId('inventory-grid').locator('[data-testid^="tile-"]')).toHaveCount(3);
   await expect(matchLine(inv, '4 items match “sword”')).toBeVisible();
   const common1 = 'Sword, level 1 common', uncommon1 = 'Sword, level 1 uncommon', common5 = 'Sword, level 5 common';
@@ -1550,9 +1557,9 @@ test('one tile per worn, queued and listed copy, each with its tag; Sell says wh
   // Wear takes one piece of the stack: it leaves with a Next tile; Undo puts it back.
   await selectItem(inv, free1);
   const wearBoots = details(inv).getByRole('button', { name: /^Wear Light boots/ });
-  await expect(wearBoots).toHaveAccessibleName('Wear Light boots, level 1 common');
+  await expect(wearBoots).toHaveAccessibleName('Wear Light boots, level 1 common (one of 3)');
   await wearBoots.click();
-  await expect(details(inv).getByRole('status').first()).toHaveText('Light boots will be worn from the next slot.');
+  await expect(details(inv).getByRole('status').first()).toHaveText('Light boots will be worn from the next slot. 2 left in the stack.');
   await expect(tile(inv, free1)).toContainText('Next');
   await expect(tile(inv, free1)).not.toContainText('×');
   await expect(tile(inv, free2)).toContainText('×2');
@@ -1564,7 +1571,7 @@ test('one tile per worn, queued and listed copy, each with its tag; Sell says wh
   await expect(tile(inv, free1)).toContainText('×3');
   await expect(tile(inv, free1)).toHaveAttribute('aria-pressed', 'true');
   await expect(details(inv)).toContainText('3 owned');
-  await expect(details(inv)).toContainText('Swap undone.');
+  await expect(details(inv).getByRole('status')).toHaveText('Swap undone. Light boots is back in the stack.');
   await expect(sellButton(inv)).toBeEnabled();
 });
 
@@ -1596,7 +1603,7 @@ test('sells several pieces one at a time, shows the progress and the result, and
   await expect(details(inv).getByText('Selling Light boots: 1 of 2 sold', { exact: true })).toBeVisible();
   await expect(details(inv).getByRole('progressbar')).toHaveAttribute('aria-valuenow', '1');
   await expect(tile(inv, boots[0])).toContainText('×2');
-  await expect(inv.getByText('Available gold: 110', { exact: true })).toBeVisible();
+  await expect(inv.getByText(`Available gold: ${100 + bootsValue}`, { exact: true })).toBeVisible();
   await settled(menu);
   await inv.screenshot({ path: info.outputPath(`stacks-progress-${info.project.name}.png`) });
   release();
@@ -1608,7 +1615,7 @@ test('sells several pieces one at a time, shows the progress and the result, and
   await expect(tile(inv, boots[0])).not.toContainText('×');
   await expect(tile(inv, boots[0])).toHaveAttribute('aria-pressed', 'true');
   await expect(details(inv)).toContainText('1 owned');
-  await expect(inv.getByText('Available gold: 120', { exact: true })).toBeVisible();
+  await expect(inv.getByText(`Available gold: ${100 + bootsValue * 2}`, { exact: true })).toBeVisible();
   await expect(details(inv).getByRole('progressbar')).toHaveCount(0);
   // A single piece sells with the plain button, and the last one leaves the grid.
   await expect(sellButton(inv)).toHaveText(`Sell Light boots · ${bootsValue} gold`);
@@ -1679,4 +1686,127 @@ test('a single piece keeps the plain Sell button and the existing refusal and re
   await details(inv).getByRole('button', { name: 'Retry request' }).click();
   await expect(details(inv).getByRole('status').filter({ hasText: `Sold Axe for ${value} gold.` })).toBeVisible();
   expect(new Set(flow.commands.map(command => command.operationId)).size).toBe(1);
+});
+
+test('keeps the keyboard on Sell through a multi-sale and gives the focus to its result', async ({ page, context }) => {
+  await watchFocus(page);
+  const flow = await inventoryFlow(context);
+  const boots = bootsPieces(3);
+  flow.state.inventory = [...boots];
+  let sells = 0;
+  let release!: () => void;
+  const second = new Promise<void>(resolve => { release = resolve; });
+  await context.route('http://127.0.0.1:54321/functions/v1/game-command', async route => {
+    if (route.request().method() !== 'POST' || route.request().postDataJSON().kind !== 'sell-item') return route.fallback();
+    if (++sells === 2) await second;
+    return route.fallback();
+  });
+  await page.goto('/game/');
+  const menu = await openMenu(page, 'Inventory and shops');
+  const inv = inventoryRegion(menu);
+  await settled(menu);
+  const max = details(inv).getByRole('button', { name: 'Max', exact: true });
+  await max.focus();
+  await page.keyboard.press('Enter');
+  await expect(quantityField(inv)).toHaveValue('3');
+  await page.keyboard.press('Tab');
+  await expect(sellButton(inv)).toBeFocused();
+  await page.keyboard.press('Enter');
+  // The first sale is done and the stack has shrunk below the quantity asked for: Sell stays the focused, aria-disabled button.
+  await expect(details(inv).getByRole('status').filter({ hasText: 'Selling Light boots: 1 of 3 sold' })).toBeVisible();
+  await expect(tile(inv, boots[0])).toContainText('×2');
+  await expect(sellButton(inv)).toBeFocused();
+  await expect(sellButton(inv)).toHaveAttribute('aria-disabled', 'true');
+  await expect(sellButton(inv)).not.toHaveAttribute('disabled');
+  await expect(sellButton(inv)).toHaveText('Selling Light boots…');
+  await expect(details(inv).getByText('Enter a quantity', { exact: false })).toHaveCount(0);
+  release();
+  const result = details(inv).getByRole('status').filter({ hasText: `Sold 3 × Light boots for ${bootsValue * 3} gold.` });
+  await expect(result).toBeVisible();
+  await expect(result).toBeFocused();
+  expect(await focusDrops(page)).toEqual([]);
+  expect(flow.commands).toHaveLength(3);
+});
+
+test('discards one piece of a stack, and the card and the sold or worn piece are the tile\'s own', async ({ page, context }, info) => {
+  if (info.project.name === 'mobile') await page.setViewportSize({ width: 360, height: 740 });
+  const flow = await inventoryFlow(context);
+  flow.state.progression.level = 5;
+  const boots = bootsPieces(3);
+  const [commonA, commonB] = ['sword:1:common', 'sword:1:common'].map(id => ({ ...itemFixture(CATALOG_V1.items[id]), id: randomUUID() }));
+  const high = { ...itemFixture(CATALOG_V1.items['sword:5:common']), id: randomUUID() };
+  flow.state.inventory = [...boots, commonA, high, commonB];
+  await page.goto('/game/');
+  const menu = await openMenu(page, 'Inventory and shops');
+  const inv = inventoryRegion(menu);
+  await settled(menu);
+  await details(inv).getByRole('button', { name: 'Discard', exact: true }).click();
+  const dialog = page.getByRole('dialog', { name: 'Confirm discard' });
+  await expect(dialog).toContainText('Discard 1 × Light boots?');
+  await dialog.getByRole('button', { name: 'Confirm discard' }).click();
+  expect(flow.commands).toMatchObject([{ kind: 'discard-item', itemId: boots[2].id, quantity: 1 }]);
+  await expect(tile(inv, boots[0])).toContainText('×2');
+  // The level 5 sword's card and its Sell act on that sword, not on a level 1 sword of the same name.
+  await tile(inv, high).click();
+  await expect(details(inv)).toContainText('Level 5 · common');
+  await expect(sellButton(inv)).toHaveText(`Sell Sword · ${CATALOG_V1.items['sword:5:common'].npcSellValue} gold`);
+  await sellButton(inv).click();
+  await expect(details(inv).getByRole('status').filter({ hasText: /^Sold Sword for/ })).toBeVisible();
+  expect(flow.commands.at(-1)).toMatchObject({ kind: 'sell-item', itemId: high.id, quantity: 1 });
+  expect(flow.state.wallets.money).toBe(300 + CATALOG_V1.items['sword:5:common'].npcSellValue!);
+  // Wear on the stack of two level 1 swords wears the piece the card shows (its first).
+  await tile(inv, commonA).click();
+  await details(inv).getByRole('button', { name: /^Wear Sword/ }).click();
+  await expect(details(inv).getByRole('status')).toHaveText('Sword will be worn from the next slot. 1 left in the stack.');
+  expect(flow.commands.at(-1)).toMatchObject({ kind: 'queue-build', equipment: { weapon: commonA.id } });
+});
+
+test('a transient refusal in the middle of a run stops it, and Sell again replays that piece with the same operation id', async ({ page, context }) => {
+  const flow = await inventoryFlow(context);
+  const boots = bootsPieces(3);
+  flow.state.inventory = [...boots];
+  flow.refuseSale(2, 'processing');
+  await page.goto('/game/');
+  const menu = await openMenu(page, 'Inventory and shops');
+  const inv = inventoryRegion(menu);
+  await quantityField(inv).fill('3');
+  await sellButton(inv).click();
+  await expect(details(inv).getByRole('alert')).toHaveText(`Sold 1 of 3 Light boots for ${bootsValue} gold. Sale 2 was refused: the world is processing previous results. Review the updated items and sell the rest again.`);
+  flow.refuseSale(0, '');
+  await expect(sellButton(inv)).toBeEnabled();
+  await sellButton(inv).click();
+  await expect(details(inv).getByRole('status').filter({ hasText: `Sold Light boots for ${bootsValue} gold.` })).toBeVisible();
+  expect(flow.commands.map(command => command.kind)).toEqual(['sell-item', 'sell-item', 'sell-item']);
+  expect(flow.commands[2].operationId).toBe(flow.commands[1].operationId);
+  expect(flow.commands[2]).toMatchObject({ itemId: boots[1].id });
+  expect(flow.state.wallets.money).toBe(300 + bootsValue * 2);
+  await expect(tile(inv, boots[0])).not.toContainText('×');
+});
+
+test('a sale whose answer is lost is reported as unknown, not refused, and the bag is read again', async ({ page, context }) => {
+  const flow = await inventoryFlow(context);
+  const boots = bootsPieces(3);
+  flow.state.inventory = [...boots];
+  flow.loseNext();
+  await page.goto('/game/');
+  const menu = await openMenu(page, 'Inventory and shops');
+  const inv = inventoryRegion(menu);
+  await quantityField(inv).fill('3');
+  await sellButton(inv).click();
+  await expect(details(inv).getByRole('alert')).toHaveText('The result of sale 1 is unknown; check your gold. Review the updated items and sell the rest again.');
+  expect(flow.commands).toHaveLength(1);
+  expect(flow.state.inventory).toHaveLength(2);
+  await expect(tile(inv, boots[0])).toContainText('×2');
+});
+
+test('describes Sell by the listing for a listed piece above the player\'s level', async ({ page, context }) => {
+  const flow = await inventoryFlow(context);
+  const listed = { ...itemFixture(CATALOG_V1.items['sword:5:common']), id: randomUUID(), reservation: { kind: 'listing' as const, referenceId: randomUUID() } };
+  flow.state.inventory = [listed];
+  await page.goto('/game/');
+  const menu = await openMenu(page, 'Inventory and shops');
+  const inv = inventoryRegion(menu);
+  await expect(sellButton(inv)).toBeDisabled();
+  await expect(sellButton(inv)).toHaveAccessibleDescription('Listed for sale');
+  await expect(details(inv).getByRole('button', { name: /^Wear / })).toHaveAccessibleDescription('Needs level 5');
 });

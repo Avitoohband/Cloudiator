@@ -26,9 +26,7 @@ Project folders under `D:\Avi\Projects\Animation\Cloudiator\`.
 
 **Last video's patch: 1.6.** The 5 Nov film covers all ten 1.6 bullets. Patches 1.7, 1.7.1 and 1.8 are new since.
 
-## 1.8.1 — Clearer gladiator stats (in progress, not yet released)
-
-### Built
+## 1.8.1 — Clearer gladiator stats (2026-11-11)
 
 - The profile calls attack speed by name. Hover, focus, or tap a stat or attribute to see what it means and what changes it.
 

@@ -453,3 +453,24 @@ the economy fixture tried to reapply its create-and-seed source. Tested fixes:
 fixed-storage projection and the explicit economy replay chain passed their
 focused regressions and the next 638-case database stage. This preflight is
 new guidance for future migrations.
+
+# Detail cards that apply an item - persistent project override
+
+Avi approved this supplement on 2026-11-11 for
+`superpowers:verification-before-completion`, **The Gate Function**. Keep vendor
+skill caches unchanged.
+
+When a detail card shows stats and can apply an item, test two same-name
+instances with different IDs and stats. Check that the displayed values and
+submitted instance agree as hover or keyboard focus changes, and that pointer
+movement preserves focus on an active keyboard action.
+
+Observed on 2026-11-11 (1.9 inventory): choosing one Spear and inspecting
+another could leave an action for the first beside the second's stats. The
+first correction still moved keyboard focus on hover. The tests reproduced both
+failures. Tested fix: the corrected desktop and 360px mobile runs passed,
+including the exact queued instance and two-handed off-hand behavior; see
+`equipment-choice-red.log`, `equipment-mixed-red.log` and
+`integration-recheck.log` in parent `logs/inventory-implementation-20261111/`.
+The combined gate on `2727cff` then passed 12/12. The rule as reusable guidance
+is approved for future runs.

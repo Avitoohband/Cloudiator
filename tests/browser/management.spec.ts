@@ -138,7 +138,7 @@ test.describe('profile cards and merchants in the fixture preview', () => {
     await expect(arena.getByRole('heading', { name: 'Bellator', exact: true })).toBeVisible();
     await expect(other).toBeHidden();
     // The own card's My gladiator shortcut opens that menu.
-    await page.mouse.click(page.viewportSize()!.width / 2, 20);
+    await closeMenu(page);
     await clickInCamp(page, ASTER);
     await own.getByRole('button', { name: 'My gladiator', exact: true }).click();
     await expect(menuDialog(page, 'My gladiator')).toBeVisible();

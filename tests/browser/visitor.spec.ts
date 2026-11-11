@@ -12,7 +12,7 @@ import {
 // running camp. A cancelled sign-in comes back to the visitor view with a short message (plan Decision 6), and a
 // session that ends closes any private menu and leaves no private value on screen (Review Focus 2).
 
-const PUBLIC_MENUS = ['My gladiator', 'Marketplace', 'Arena', 'Tournaments', 'Results', 'Gladiators'];
+const PUBLIC_MENUS = ['My gladiator', 'Marketplace', 'Arena', 'Tournaments', 'Results', 'Gladiators', 'Settings'];
 const VISITOR_PROMPT = 'Sign in with Google to create your gladiator';
 
 /** A live camp from fixture DTOs: the owner fixture's actor and a training and resting crowd (no Arena or tournament entrants). */

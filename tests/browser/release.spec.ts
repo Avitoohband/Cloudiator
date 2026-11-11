@@ -681,7 +681,7 @@ test.describe('release accessibility in the fixture preview', () => {
   });
 
   test('pins the rail, a menu frame, a scene and the profile card in accessibility snapshots', { tag: '@render' }, async ({ page }, testInfo) => {
-    // Plan Decision 8 (fix round 1, I3). The rail: the eight menus, and the camera controls on a pointer only.
+    // Plan Decision 8 (fix round 1, I3). The rail: the nine menus, and the camera controls on a pointer only.
     await openFixtureCamp(page);
     await revealRail(page);
     const rail = page.getByTestId('menu-rail');
@@ -696,6 +696,7 @@ test.describe('release accessibility in the fixture preview', () => {
         - button "Tournaments"
         - button "Results"
         - button "Gladiators"
+        - button "Settings"
     `);
     if (await touchLayout(page)) {
       await expect(page.getByRole('button', { name: 'Menus', exact: true })).toMatchAriaSnapshot('- button "Menus" [expanded]');

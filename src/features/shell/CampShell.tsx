@@ -83,12 +83,14 @@ import { createSceneBridge, type ArenaFightSummary } from '../../game/bridge';
 import { isClick } from '../../game/camera';
 import { CornerChip } from './CornerChip';
 import { MenuRail } from './MenuRail';
+import { SettingsPanel } from './SettingsPanel';
+import { DEFAULT_MENU_PREFS, useMenuPrefs } from './menu-prefs';
 import { MenuSurface } from './MenuSurface';
 import { PatchNotice, reloadPage } from './PatchNotice';
 import { modalOpen, useModalOpen } from './modal';
 import { PerfOverlay, perfPhaseOf } from './PerfOverlay';
 import { menusFor, originMenu, type MenuId } from './menus';
-import { COMPACT_QUERY, railReducer, type RailEvent, type RailState } from './rail-reveal';
+import { COMPACT_QUERY, railReducer, railVisible, type RailEvent, type RailState } from './rail-reveal';
 import { SceneOverlay } from './SceneOverlay';
 import { boutFilterOf, boutsFrom, sceneForResult, sceneFromOf, sceneKeyOf, type SceneAddress, type SceneFrom, type SceneView } from './scene-url';
 import { AwayButton } from './AwayButton';
@@ -504,6 +506,10 @@ export function CampShell({ fixture, previewAs, previewResting = false, previewB
   // before they open), and Later hides it for this page's life for that number; a newer number shows it again. Visitors see it too.
   const modal = useModalOpen();
   const compact = useSyncExternalStore(subscribeCompact, readCompact, () => false);
+  // The pin and the edge are the pointer layout's (Settings); the touch layout always has its ☰ button.
+  const [savedPrefs, setPrefs] = useMenuPrefs();
+  const prefs = compact ? DEFAULT_MENU_PREFS : savedPrefs;
+  const railShown = railVisible(rail, prefs.pinned);
   const [patchLater, setPatchLater] = useState<string | null>(null);
   const patchNotice = noticeFor({ latest: game.latestPatch, build: PATCH, blocked: scene !== null || modal || joining.creating || lookOpen || titleOpen,
     later: patchLater });
@@ -516,7 +522,7 @@ export function CampShell({ fixture, previewAs, previewResting = false, previewB
   // The arrival banner (Patch A item 2): not while the viewer is still loading (the owner's own welcome would flash as an announcement),
   // not while a scene covers the camp. Find is the Gladiators list's Find: the camp view's centre, the menu closed, the camp keyboard.
   const arrivals = useArrivals(world, ownerId);
-  const place = useBannerPlace(shellRef, game.viewer, open);
+  const place = useBannerPlace(shellRef, game.viewer, open, prefs.place);
   const arrival = arrivals.banner !== null && scene === null && game.viewer !== 'loading' && !(place.coversPanel && open !== null) ? arrivals.banner : null;
   const { dismiss: dismissArrival } = arrivals;
   const arrivalSlot = (
@@ -550,6 +556,7 @@ export function CampShell({ fixture, previewAs, previewResting = false, previewB
         onWatchBout={(tournamentId, boutId) => openScene({ kind: 'bout', tournamentId, boutId, from: 'tournaments' })} />;
       case 'results': return <ResultsMenu fixture={fixture} samples={samples} previewFailed={previewError} reads={reads} viewerId={ownerId} clock={clock}
         onWatch={watchResult} onOpen={openScene} bouts={bouts} choice={results} onChoose={chooseResults} onWatchBout={watchBout} />;
+      case 'settings': return <SettingsPanel prefs={savedPrefs} onChange={setPrefs} compact={compact} />;
       case 'gladiators': return <RosterPanel world={world} ownerId={ownerId} ownPlace={ownPlace} roster={roster} sceneStatus={game.sceneStatus}
         following={following} bridge={bridge} onDone={handBack}
         onProfile={gladiatorId => openRow(gladiatorId)} />;
@@ -557,12 +564,12 @@ export function CampShell({ fixture, previewAs, previewResting = false, previewB
   };
 
   return (
-    <div ref={shellRef} className={styles.shell} data-rail={rail.revealed ? 'shown' : 'hidden'} data-sheet={open ? 'open' : undefined}
+    <div ref={shellRef} className={styles.shell} data-rail={railShown ? 'shown' : 'hidden'} data-menu-place={prefs.place} data-sheet={open ? 'open' : undefined}
       data-card={card ? 'open' : undefined} data-owner-menu={owner ? '' : undefined} data-pill={fixture || fixtureRefused ? 'shown' : undefined}
       style={{ '--chip-w': `${place.chipWidth}px`, '--chip-bottom': `${place.chipBottom}px`,
-        '--panel-clear-left': `${place.panelClearLeft}px` } as CSSProperties}>
+        '--panel-clear-left': `${place.panelClearLeft}px`, '--panel-clear-right': `${place.panelClearRight}px` } as CSSProperties}>
       <h1 className={styles.sr}>Cloudiator — Hearthstone Camp</h1>
-      <MenuRail menus={menus} state={{ revealed: rail.revealed, open }} send={send} onToggle={id => send({ toggle: id })}
+      <MenuRail menus={menus} state={{ revealed: railShown, open }} place={prefs.place} send={send} onToggle={id => send({ toggle: id })}
         zoom={sceneUnavailable ? null : direction => bridge.emit('camera-zoom', { direction })} />
       <CornerChip viewer={viewer} session={game.session} owner={owner} fixture={fixture} previewAs={previewAs} clock={clock} messaging={messaging} messagesRequest={currentMessagesRequest}
         latestPatch={game.latestPatch} onChangeLook={openLook} onOpenMenu={show} onCreate={joining.offer} titles={noticeTitles} />

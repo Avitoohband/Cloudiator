@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { MENUS, menusFor } from '@/features/shell/menus';
 
 describe('the camp menus', () => {
-  it('lists the eight menus in rail order with their icons and exact labels, the Marketplace after Inventory and shops', () => {
+  it('lists the nine menus in rail order with their icons and exact labels, the Marketplace after Inventory and shops', () => {
     expect(MENUS.map(m => [m.id, m.icon, m.label, m.visitor])).toEqual([
       ['gladiator', '🛡', 'My gladiator', true],
       ['schedule', '🗓', 'Schedule', false],
@@ -12,13 +12,14 @@ describe('the camp menus', () => {
       ['tournaments', '🏆', 'Tournaments', true],
       ['results', '📜', 'Results', true],
       ['gladiators', '👥', 'Gladiators', true],
+      ['settings', '⚙', 'Settings', true],
     ]);
   });
 
-  it('gives a player all eight and every other viewer only the six visitor menus', () => {
+  it('gives a player all nine and every other viewer only the seven visitor menus', () => {
     expect(menusFor('player').map(m => m.label)).toEqual(MENUS.map(m => m.label));
     for (const viewer of ['visitor', 'no-gladiator', 'loading', 'unavailable'] as const) {
-      expect(menusFor(viewer).map(m => m.label), viewer).toEqual(['My gladiator', 'Marketplace', 'Arena', 'Tournaments', 'Results', 'Gladiators']);
+      expect(menusFor(viewer).map(m => m.label), viewer).toEqual(['My gladiator', 'Marketplace', 'Arena', 'Tournaments', 'Results', 'Gladiators', 'Settings']);
     }
   });
 });

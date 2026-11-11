@@ -1274,3 +1274,287 @@
     visibility: hidden;
   }
 }
+
+/*
+ * ---- Menu position (Patch 1.9, Settings > Menu): the rail on the right or bottom edge, pointer layout only (the touch layout has its
+ * ☰ button and ignores the choice). Right: centred in the space under the corner chip and the arrival banner (--menu-clear-top, 148 px at
+ * rest), panels open to its left and start at that line. Bottom: a horizontal bar centred 8 px from the bottom, tooltips above, panels
+ * above it. The reveal zone and the grip move to the same edge. The left rail is the base style above.
+ */
+@media (hover: hover) and (min-width: 481px) {
+  .shell {
+    --menu-clear-top: max(148px, calc(var(--chip-bottom, 0px) + 100px));
+  }
+
+  .edge[data-place='right'] {
+    left: auto;
+    right: 0;
+    top: var(--menu-clear-top);
+  }
+
+  .grip[data-place='right'] {
+    left: auto;
+    right: 0;
+    top: calc((100% + var(--menu-clear-top)) / 2 - 28px);
+    border-radius: 4px 0 0 4px;
+  }
+
+  .rail[data-place='right'] {
+    left: auto;
+    right: 8px;
+    top: calc((100% + var(--menu-clear-top)) / 2);
+    transform: translate(calc(100% + 12px), -50%);
+  }
+
+  .rail[data-place='right'][data-revealed='true'] {
+    transform: translate(0, -50%);
+  }
+
+  .edge[data-place='bottom'] {
+    top: auto;
+    bottom: 0;
+    width: auto;
+    height: 12px;
+    right: 0;
+  }
+
+  .grip[data-place='bottom'] {
+    left: calc(50% - 28px);
+    top: auto;
+    bottom: 0;
+    width: 56px;
+    height: 5px;
+    border-radius: 4px 4px 0 0;
+  }
+
+  .rail[data-place='bottom'] {
+    left: 50%;
+    top: auto;
+    bottom: 8px;
+    flex-direction: row;
+    align-items: center;
+    max-width: calc(100% - 16px);
+    transform: translate(-50%, calc(100% + 12px));
+  }
+
+  .rail[data-place='bottom'][data-revealed='true'] {
+    transform: translate(-50%, 0);
+  }
+
+  .rail[data-place='bottom'] .menus,
+  .rail[data-place='bottom'] .camera {
+    flex-direction: row;
+  }
+
+  .rail[data-place='bottom'] .sep {
+    width: 1px;
+    height: 28px;
+    margin: 0 3px;
+  }
+
+  .rail[data-place='right'] .tip {
+    left: auto;
+    right: calc(100% + 8px);
+  }
+
+  .rail[data-place='bottom'] .tip {
+    top: auto;
+    bottom: calc(100% + 12px);
+    transform: translateX(-50%);
+  }
+
+  .shell[data-menu-place='right'] .surface {
+    left: auto;
+    right: 78px;
+    top: var(--menu-clear-top);
+    max-height: calc(100% - var(--menu-clear-top) - 12px);
+  }
+
+  .shell[data-menu-place='bottom'] .surface {
+    left: 0;
+    right: 0;
+    margin-inline: auto;
+    top: auto;
+    bottom: 74px;
+    max-height: calc(100% - var(--menu-clear-top) - 74px);
+  }
+
+  /* The away pill steps beside a panel on the right, and above a bar at the bottom (hidden while a panel is open above it). */
+  .shell[data-menu-place='right'][data-sheet='open'] .away {
+    left: 12px;
+    transform: none;
+    width: min(540px, calc(100% - var(--panel-clear-right, 470px) - 12px));
+  }
+
+  .shell[data-menu-place='bottom'][data-rail='shown'] .away {
+    bottom: 78px;
+  }
+
+  .shell[data-menu-place='bottom'][data-sheet='open'] .away {
+    visibility: hidden;
+  }
+}
+
+/* ---- The Settings panel (the approved mockup): sections, a switch, and three-way segmented choices (gold = chosen). */
+.settings {
+  display: grid;
+  gap: 14px;
+}
+
+.settingsSection {
+  display: grid;
+  gap: 8px;
+}
+
+.settingsHeading {
+  margin: 0;
+  font: 600 11px/1 system-ui, sans-serif;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink-dim);
+}
+
+.settingsPlain {
+  margin: 0;
+  padding: 10px 12px;
+  border-radius: 9px;
+  background: var(--glass-2);
+  color: var(--ink-dim);
+  font-size: 13px;
+}
+
+.settingsRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 44px;
+}
+
+.settingsLabel {
+  display: block;
+  font-weight: 600;
+  font-size: 14px;
+}
+
+.settingsField .settingsLabel {
+  margin-bottom: 5px;
+}
+
+.settingsHelp {
+  margin: 2px 0 0;
+  color: var(--ink-dim);
+  font-size: 12.5px;
+  line-height: 1.4;
+}
+
+.settingsSwitch {
+  flex: none;
+  position: relative;
+  width: 46px;
+  height: 28px;
+  padding: 0;
+  border: 0;
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.16);
+  transition: background 0.15s;
+}
+
+.settingsSwitch::after {
+  content: '';
+  position: absolute;
+  left: 3px;
+  top: 3px;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: #e9e4d4;
+  transition: transform 0.15s;
+}
+
+.settingsSwitch[aria-checked='true'] {
+  background: var(--accent);
+}
+
+.settingsSwitch[aria-checked='true']::after {
+  transform: translateX(18px);
+  background: #fff8e4;
+}
+
+.settingsSwitch:focus-visible,
+.settingsSeg label:has(input:focus-visible) {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.settingsSeg {
+  display: flex;
+  padding: 3px;
+  gap: 3px;
+  background: var(--glass-2);
+  border: 1px solid var(--glass-line);
+  border-radius: 10px;
+}
+
+.settingsSeg label {
+  position: relative;
+  flex: 1 1 0;
+  display: grid;
+  place-items: center;
+  min-height: 36px;
+  padding: 4px 6px;
+  border-radius: 7px;
+  font: 500 13px/1.2 system-ui, sans-serif;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.settingsSeg label:hover {
+  background: rgba(255, 255, 255, 0.12);
+}
+
+.settingsSeg label:has(input:checked) {
+  background: var(--accent);
+  color: var(--accent-ink);
+  font-weight: 700;
+}
+
+.settingsSeg input {
+  position: absolute;
+  inset: 0;
+  margin: 0;
+  opacity: 0;
+  cursor: pointer;
+}
+
+.settingsFoot {
+  margin: 0;
+  padding-top: 10px;
+  border-top: 1px solid var(--glass-line);
+  color: var(--ink-dim);
+  font-size: 12.5px;
+}
+
+/* ---- The gear is last in the rail on a pointer window, after the zoom buttons: the menu group dissolves into the rail so the gear,
+   one of its buttons (and last in reading order), can be ordered after the camera group. On touch it simply ends the row. */
+@media (hover: hover) and (min-width: 481px) {
+  .menus {
+    display: contents;
+  }
+
+  .sep {
+    order: 1;
+  }
+
+  .camera {
+    order: 2;
+  }
+
+  .sep.sepEnd {
+    order: 3;
+  }
+
+  .railButton.railEnd {
+    order: 4;
+  }
+}

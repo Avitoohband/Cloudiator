@@ -15,6 +15,9 @@ export const COMPACT_QUERY = '(hover: none), (max-width: 480px)';
 export type RailState = { revealed: boolean; open: MenuId | null };
 export type RailEvent = 'edge-enter' | 'leave' | 'leave-timeout' | 'focus-in' | 'focus-out' | { toggle: MenuId } | 'escape' | 'camp-click';
 
+/** Whether the rail is shown: pinned (pointer layout), or revealed by the pointer, the focus or an open panel. */
+export const railVisible = (state: RailState, pinned: boolean): boolean => pinned || state.revealed;
+
 const same = (state: RailState, revealed: boolean, open: MenuId | null): RailState =>
   state.revealed === revealed && state.open === open ? state : { revealed, open };
 

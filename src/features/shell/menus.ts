@@ -4,7 +4,7 @@
 import type { Viewer } from '../character/useGameState';
 import type { SceneFrom } from './scene-url';
 
-export type MenuId = 'gladiator' | 'schedule' | 'inventory' | 'market' | 'arena' | 'tournaments' | 'results' | 'gladiators';
+export type MenuId = 'gladiator' | 'schedule' | 'inventory' | 'market' | 'arena' | 'tournaments' | 'results' | 'gladiators' | 'settings';
 export type MenuDef = { id: MenuId; icon: string; label: string; visitor: boolean };
 
 export const MENUS: readonly MenuDef[] = [
@@ -16,9 +16,10 @@ export const MENUS: readonly MenuDef[] = [
   { id: 'tournaments', icon: '🏆', label: 'Tournaments', visitor: true },
   { id: 'results', icon: '📜', label: 'Results', visitor: true },
   { id: 'gladiators', icon: '👥', label: 'Gladiators', visitor: true },
+  { id: 'settings', icon: '⚙', label: 'Settings', visitor: true },
 ];
 
-/** A player's menus: all eight. Every other viewer (a visitor, no gladiator yet, loading, unavailable): the six public ones. */
+/** A player's menus: all nine. Every other viewer (a visitor, no gladiator yet, loading, unavailable): the seven public ones. */
 export function menusFor(viewer: Viewer): MenuDef[] {
   return MENUS.filter(menu => viewer === 'player' || menu.visitor);
 }

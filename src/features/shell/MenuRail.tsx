@@ -1,27 +1,30 @@
 'use client';
 
-// The left-edge rail: a 12 px reveal zone and a 5 px grip at rest; the pointer near the edge, over the grip or the
+// The edge rail (left, or on the right or bottom edge by the Settings choice): a 12 px reveal zone and a 5 px grip at rest; the pointer near the edge, over the grip or the
 // rail (or keyboard focus) slides in the menu icons with the zoom buttons at the bottom; it slides away 300 ms after
 // the pointer leaves unless a panel is open. Hovering or focusing an icon names it. On touch (no hover) a ☰ button
 // shows the same buttons as a row. The state lives in `railReducer`; this component turns pointer, focus and timer
 // signals into its events.
 import { useEffect, useId, useRef, useState, type FocusEvent, type PointerEvent } from 'react';
 import type { MenuDef, MenuId } from './menus';
+import type { MenuPlace } from './menu-prefs';
 import { COMPACT_QUERY, RAIL_HIDE_MS, type RailEvent, type RailState } from './rail-reveal';
 import styles from './shell.module.css';
 
-export function MenuRail({ menus, state, send, onToggle, zoom }: {
+export function MenuRail({ menus, state, send, onToggle, zoom, place = 'left' }: {
   menus: readonly MenuDef[];
   state: RailState;
   send(event: RailEvent): void;
   onToggle(id: MenuId): void;
   /** The camera buttons, while the camp view is not unavailable. */
   zoom: ((direction: 'in' | 'out' | 'reset') => void) | null;
+  /** The edge the rail sits on (the pointer layout; the touch layout ignores it). `state.revealed` already counts a pinned menu. */
+  place?: MenuPlace;
 }) {
   const rail = useRef<HTMLDivElement>(null);
   const hovering = useRef(false);
   const timer = useRef<number | undefined>(undefined);
-  const [tip, setTip] = useState<{ label: string; top: number } | null>(null);
+  const [tip, setTip] = useState<{ label: string; top: number; left: number } | null>(null);
   const railId = useId();
   useEffect(() => () => window.clearTimeout(timer.current), []);
 
@@ -48,19 +51,19 @@ export function MenuRail({ menus, state, send, onToggle, zoom }: {
   };
   const name = (label: string) => (event: { currentTarget: HTMLElement }) => {
     const button = event.currentTarget;
-    setTip({ label, top: button.offsetTop + button.offsetHeight / 2 });
+    setTip({ label, top: button.offsetTop + button.offsetHeight / 2, left: button.offsetLeft + button.offsetWidth / 2 });
   };
 
   return <>
-    <div className={styles.edge} onPointerEnter={enter} onPointerLeave={leave} aria-hidden="true" />
-    <div className={styles.grip} onPointerEnter={enter} onPointerLeave={leave} data-testid="menu-grip" aria-hidden="true" />
+    <div className={styles.edge} data-place={place} onPointerEnter={enter} onPointerLeave={leave} aria-hidden="true" />
+    <div className={styles.grip} data-place={place} onPointerEnter={enter} onPointerLeave={leave} data-testid="menu-grip" aria-hidden="true" />
     <button type="button" className={styles.burger} aria-label="Menus" aria-expanded={state.revealed} aria-controls={railId} data-menu-burger=""
       onClick={() => send(state.revealed ? 'leave-timeout' : 'edge-enter')}><span aria-hidden="true">☰</span></button>
-    <div ref={rail} id={railId} className={styles.rail} data-revealed={state.revealed} data-testid="menu-rail"
+    <div ref={rail} id={railId} className={styles.rail} data-revealed={state.revealed} data-place={place} data-testid="menu-rail"
       onPointerEnter={enter} onPointerLeave={event => { setTip(null); leave(event); }} onFocus={() => send('focus-in')} onBlur={focusOut}>
       <nav className={styles.menus} aria-label="Game menus">
         {menus.map(menu => (
-          <button key={menu.id} type="button" className={styles.railButton} aria-label={menu.label} aria-expanded={state.open === menu.id}
+          <button key={menu.id} type="button" className={menu.id === 'settings' ? `${styles.railButton} ${styles.railEnd}` : styles.railButton} aria-label={menu.label} aria-expanded={state.open === menu.id}
             aria-controls={`menu-${menu.id}`} data-menu-icon={menu.id} onClick={() => onToggle(menu.id)}
             onPointerEnter={name(menu.label)} onFocus={name(menu.label)} onPointerLeave={() => setTip(null)}>
             <span aria-hidden="true">{menu.icon}</span>
@@ -74,8 +77,9 @@ export function MenuRail({ menus, state, send, onToggle, zoom }: {
           <button type="button" className={`${styles.railButton} ${styles.zoom}`} aria-label="Zoom out" onClick={() => zoom('out')}>−</button>
           <button type="button" className={`${styles.railButton} ${styles.zoom} ${styles.zoomReset}`} aria-label="Reset zoom" onClick={() => zoom('reset')}>1:1</button>
         </div>
+        <div className={`${styles.sep} ${styles.sepEnd}`} aria-hidden="true" />
       </>}
-      {tip && state.open === null && <span className={styles.tip} role="tooltip" style={{ top: tip.top }}>{tip.label}</span>}
+      {tip && state.open === null && <span className={styles.tip} role="tooltip" style={place === 'bottom' ? { left: tip.left } : { top: tip.top }}>{tip.label}</span>}
     </div>
   </>;
 }

@@ -260,6 +260,7 @@ test('buys a listing, shows the receipt and the item in inventory', { tag: '@ren
   await expect(row(market, SPEAR)).toHaveCount(0);
   await expect(market.getByText('Available gold: 1,550')).toBeVisible();
   const inventory = await openMenu(page, 'Inventory and shops');
+  await inventory.getByTestId(`tile-${flow.bought[0].id}`).click();
   await expect(inventory.getByTestId(`item-${flow.bought[0].id}`)).toContainText('Spear');
   await expect(inventory.getByTestId(`item-${flow.bought[0].id}`)).toContainText('Level 10 · rare · Tradable');
 });
@@ -325,6 +326,7 @@ test('lists an eligible item with the fee and NPC value shown, then cancels it',
   expect(flow.live.requests.filter(r => r.table === 'market_offers').some(r => r.query.get('seller_gladiator_id') === `eq.${flow.state.gladiatorId}`)).toBe(true);
   // Inventory says the axe is listed for sale.
   const inventory = await openMenu(page, 'Inventory and shops');
+  await inventory.getByTestId(`tile-${flow.listable.id}`).click();
   await expect(inventory.getByTestId(`item-${flow.listable.id}`)).toContainText('Listed for sale');
   await expect(inventory.getByTestId(`item-${flow.listable.id}`).getByRole('button', { name: 'Sell' })).toBeDisabled();
   const again = await openMenu(page, 'Marketplace');
@@ -335,6 +337,7 @@ test('lists an eligible item with the fee and NPC value shown, then cancels it',
   expect(flow.commands.map(c => c.kind)).toEqual(['create-listing', 'cancel-listing']);
   expect(flow.commands[1]).toMatchObject({ listingId });
   const back = await openMenu(page, 'Inventory and shops');
+  await back.getByTestId(`tile-${flow.listable.id}`).click();
   await expect(back.getByTestId(`item-${flow.listable.id}`)).toContainText('Available');
 });
 
@@ -402,7 +405,7 @@ test('reads the owner when the menu opens and on Refresh, after listings sold el
   expect(flow.commands).toEqual([]);
   // Inventory shows the same owner: the sold items are gone.
   const inventory = await openMenu(page, 'Inventory and shops');
-  for (const sold of [sword, boots, hood]) await expect(inventory.getByTestId(`item-${sold.item.id}`)).toHaveCount(0);
+  for (const sold of [sword, boots, hood]) await expect(inventory.getByTestId(`tile-${sold.item.id}`)).toHaveCount(0);
 });
 
 test('keeps a failed purchase input for a retry with the same operation', { tag: '@render' }, async ({ page, context }) => {

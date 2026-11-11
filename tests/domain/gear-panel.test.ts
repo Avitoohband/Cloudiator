@@ -33,9 +33,11 @@ function owner(next: { weapon?: ItemInstance; effectiveSlotIndex?: number } = {}
   }
   return state;
 }
-function render(state: OwnerState, preview = false): string {
+function render(state: OwnerState, preview = false, selected?: ItemInstance): string {
   const clock = createDisplayClock();
   clock.freeze(NOW);
+  // Static markup shows the first item. Put the piece whose controls we are checking first.
+  if (selected) state = { ...state, inventory: [...state.inventory].sort((a, b) => Number(b.id === selected.id) - Number(a.id === selected.id)) };
   // (React's static markup separates adjacent text with `<!-- -->`; it is read as nothing.)
   return renderToStaticMarkup(createElement(InventoryPanel, { owner: state, gateway: {} as GameGateway, refresh: async () => {}, clock, preview })).replaceAll('<!-- -->', '');
 }
@@ -53,21 +55,23 @@ describe('the gear view in a preview', () => {
   afterEach(() => { vi.restoreAllMocks(); });
 
   it('disables Wear, Undo and Cancel changes and says why in words', () => {
-    const html = render(owner({ weapon: sword2 }), true);
-    for (const name of [/^Wear Sword, level 1 common$/, /^Undo wearing Sword, level 1 uncommon$/, /^Wear Iron helmet/]) {
-      const tag = button(html, name);
+    const state = owner({ weapon: sword2 });
+    for (const [selected, name] of [[sword, /^Wear Sword, level 1 common$/], [sword2, /^Undo wearing Sword, level 1 uncommon$/], [helmet, /^Wear Iron helmet/]] as const) {
+      const tag = button(render(state, true, selected), name);
       expect(disabled(tag), String(name)).toBe(true);
       expect(tag, String(name)).toMatch(/aria-describedby="[^"]*-preview"/);
     }
+    const html = render(state, true);
     expect(/<button\b[^>]*>Cancel changes<\/button>/.exec(html)?.[0]).toMatch(/ disabled/);
     expect(html).toContain('Gear changes are unavailable in this preview.');
   });
 
   it('leaves them enabled outside a preview', () => {
-    const html = render(owner({ weapon: sword2 }));
+    const state = owner({ weapon: sword2 });
+    const html = render(state);
     expect(disabled(button(html, /^Wear Sword, level 1 common$/))).toBe(false);
-    expect(disabled(button(html, /^Undo wearing Sword, level 1 uncommon$/))).toBe(false);
-    expect(disabled(button(html, /^Wear Iron helmet/))).toBe(false);
+    expect(disabled(button(render(state, false, sword2), /^Undo wearing Sword, level 1 uncommon$/))).toBe(false);
+    expect(disabled(button(render(state, false, helmet), /^Wear Iron helmet/))).toBe(false);
     expect(/<button\b[^>]*>Cancel changes<\/button>/.exec(html)?.[0]).not.toMatch(/ disabled/);
     expect(html).not.toContain('unavailable in this preview');
   });
@@ -82,9 +86,13 @@ describe('the gear view', () => {
   });
 
   it('offers no Wear on salvage', () => {
-    const html = render(owner());
-    expect(html).not.toMatch(/aria-label="[^"]*[Ww]ear[^"]*Salvage/);
-    expect(html.match(/<button\b[^>]*aria-label="Wear /g)).toHaveLength(3);
+    const state = owner();
+    const html = render(state, false, salvage);
+    expect(html).toContain('Quantity for Salvage');
+    expect(html).not.toMatch(/<button\b[^>]*aria-label="Wear /);
+    for (const [selected, name] of [[sword2, /^Wear Sword, level 1 uncommon$/], [spear, /^Wear Spear/], [helmet, /^Wear Iron helmet/]] as const) {
+      expect(disabled(button(render(state, false, selected), name))).toBe(false);
+    }
   });
 
   it('shows the queued time on its badges and its note, against the shared clock', () => {
@@ -116,10 +124,11 @@ describe('the gear view', () => {
   });
 
   it('says a shield needs a free hand under a two-handed weapon and disables its Wear', () => {
-    const html = render(owner({ weapon: spear }));
+    const state = owner({ weapon: spear });
+    const html = render(state, false, shield);
     expect(disabled(button(html, /^Wear Round shield/))).toBe(true);
     expect(button(html, /^Wear Round shield/)).toMatch(/aria-describedby="[^"]*-blocked"/);
     expect(html).toContain('Needs a free hand');
-    expect(disabled(button(html, /^Wear Sword, level 1 common/))).toBe(false);
+    expect(disabled(button(render(state), /^Wear Sword, level 1 common/))).toBe(false);
   });
 });

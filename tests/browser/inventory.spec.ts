@@ -39,7 +39,7 @@ async function inventoryFlow(context: BrowserContext, options: { gear?: boolean;
     localStorage.setItem('sb-127-auth-token', JSON.stringify({ access_token: token, refresh_token: 'test-only', token_type: 'bearer', expires_at: exp, expires_in: 3600, user }));
   }, { user });
   // The live camp's public reads; this spec's own handler (registered next, so it runs first) hands it everything else.
-  await routeLiveReads(context, { world: emptyWorld(), rulesVersion: options.rulesVersion });
+  const live = await routeLiveReads(context, { world: emptyWorld(), rulesVersion: options.rulesVersion });
   await context.route('http://127.0.0.1:54321/**', async route => {
     const request = route.request(), path = new URL(request.url()).pathname;
     const headers = { 'access-control-allow-origin': '*', 'access-control-allow-headers': '*', 'access-control-allow-methods': '*' };
@@ -64,7 +64,9 @@ async function inventoryFlow(context: BrowserContext, options: { gear?: boolean;
             for (let i = 0; i < command.quantity; i++) state.inventory.push({ ...itemFixture(CATALOG_V1.items[command.catalogId]), id: randomUUID() });
           }
         } else if (command.kind === 'sell-item' || command.kind === 'discard-item') {
-          state.inventory = state.inventory.filter(item => item.id !== command.itemId);
+          const sold = state.inventory.find(item => item.id === command.itemId);
+          if (sold && sold.quantity > command.quantity) sold.quantity -= command.quantity;
+          else state.inventory = state.inventory.filter(item => item.id !== command.itemId);
           if (command.kind === 'sell-item') state.wallets.money += 10;
         } else if (command.kind === 'queue-build' || command.kind === 'cancel-build') {
           // As the server does: a stale version is a conflict, a queue replaces the pending build, a cancel clears it.
@@ -89,10 +91,160 @@ async function inventoryFlow(context: BrowserContext, options: { gear?: boolean;
     }
     return route.fallback();
   });
-  return { commands, state, pieces, loseNext: () => { lose = true; }, reject: (value: string) => { code = value; } };
+  return { commands, state, pieces, live, loseNext: () => { lose = true; }, reject: (value: string) => { code = value; } };
 }
 
 test.beforeEach(() => { test.skip(process.env.PLAYWRIGHT_STATIC === 'true', 'Live UI uses development-only intercepted identity transport.'); });
+
+const tile = (scope: Page | Locator, piece: ItemInstance) => scope.getByTestId(`tile-${piece.id}`);
+const card = (scope: Page | Locator, piece: ItemInstance) => scope.getByTestId(`item-${piece.id}`);
+async function selectItem(scope: Page | Locator, piece: ItemInstance) {
+  await tile(scope, piece).click();
+  return card(scope, piece);
+}
+
+/** The camp reads the owner again when its next sync sees a new world revision. */
+async function publishInventoryRefresh(page: Page, flow: Awaited<ReturnType<typeof inventoryFlow>>) {
+  await page.waitForFunction(() => window.__cloudiatorShell!.syncs() > 0);
+  const revision = randomUUID();
+  flow.live.setWorld({ ...emptyWorld(), revision });
+  await page.evaluate(() => window.dispatchEvent(new Event('focus')));
+  await page.waitForFunction(expected => window.__cloudiatorCamp?.world()?.revision === expected, revision);
+}
+
+test('shows a square pixel-art inventory and selected item details', async ({ page, context }, info) => {
+  const flow = await inventoryFlow(context);
+  const [axe, sword, armor] = flow.state.inventory;
+  sword.stats.damage = 12.08;
+  const salvage: ItemInstance = { id: randomUUID(), ownerId: flow.state.gladiatorId, catalogId: CATALOG_V1.salvage.id, catalogVersion: CATALOG_V1.version,
+    tier: 1, rarity: 'common', stats: structuredClone(CATALOG_V1.salvage.stats), quantity: 12, origin: 'expedition', binding: 'tradable', reservation: null };
+  flow.state.inventory.push(salvage);
+  if (info.project.name === 'mobile') await page.setViewportSize({ width: 360, height: 740 });
+  await page.goto('/game/');
+  await openMenu(page, 'Inventory and shops');
+
+  const grid = page.getByTestId('inventory-grid');
+  const tiles = grid.getByRole('button');
+  const detail = page.getByRole('region', { name: 'Item details' });
+  const filter = (name: string) => page.getByRole('button', { name, exact: true });
+  await expect(tiles).toHaveCount(4);
+  const geometry = await tiles.evaluateAll(nodes => nodes.map(node => {
+    const { width, height } = node.getBoundingClientRect();
+    const hasPixelArt = Array.from(node.querySelectorAll('*')).some(element => {
+      const style = getComputedStyle(element);
+      return style.imageRendering === 'pixelated' && (style.backgroundImage !== 'none' || element instanceof HTMLImageElement);
+    });
+    return { difference: Math.abs(width - height), hasPixelArt };
+  }));
+  for (const { difference, hasPixelArt } of geometry) {
+    expect(difference).toBeLessThanOrEqual(1);
+    expect(hasPixelArt).toBe(true);
+  }
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  await expect(tile(grid, axe)).toHaveAccessibleName(/Axe.*level 1.*common/i);
+  await expect(tile(grid, axe)).toHaveAccessibleDescription('Weight 6');
+  if (info.project.name === 'mobile') await tile(grid, sword).tap();
+  else await tile(grid, sword).click();
+  await expect(tile(grid, sword)).toHaveAttribute('aria-pressed', 'true');
+  await expect(detail.getByRole('heading', { name: 'Sword', exact: true })).toBeInViewport();
+  await expect(detail).toContainText(/Damage\s*12\.08/);
+  await expect(detail).toContainText(/Weight\s*4/);
+
+  await filter('Weapons').click();
+  await expect(tiles).toHaveCount(2);
+  await expect(tile(grid, sword)).toHaveAttribute('aria-pressed', 'true');
+  await filter('Armor').click();
+  await expect(tiles).toHaveCount(1);
+  await expect(tile(grid, armor)).toHaveAttribute('aria-pressed', 'true');
+  await expect(detail).toContainText('Light armor');
+  await filter('Materials').click();
+  await expect(tiles).toHaveCount(1);
+  await expect(tile(grid, salvage)).toContainText('×12');
+  await expect(detail).toContainText('NPC sell value: 10 gold each');
+  await filter('All').click();
+  await expect(tiles).toHaveCount(4);
+});
+
+test('explains a stale discard after an inventory refresh and recovers keyboard focus', async ({ page, context }) => {
+  await watchFocus(page);
+  const flow = await inventoryFlow(context);
+  const [axe] = flow.state.inventory;
+  await page.goto('/game/');
+  const menu = await openMenu(page, 'Inventory and shops');
+  const selected = await selectItem(menu, axe);
+  await selected.getByRole('button', { name: 'Discard', exact: true }).focus();
+  await page.keyboard.press('Enter');
+  const dialog = page.getByRole('dialog', { name: 'Confirm discard' });
+  await expect(dialog.getByRole('button', { name: 'Keep item' })).toBeFocused();
+
+  flow.state.inventory = flow.state.inventory.filter(item => item.id !== axe.id);
+  await publishInventoryRefresh(page, flow);
+  await expect(tile(menu, axe)).toHaveCount(0);
+  await expect(dialog).toBeHidden();
+  const notice = menu.getByRole('alert').filter({ hasText: /inventory changed.*discarding/i });
+  await expect(notice).toBeFocused();
+  expect(flow.commands).toEqual([]);
+  expect(await focusDrops(page)).toEqual([]);
+});
+
+test('keeps the default and filtered inventory selections through an ordered refresh', async ({ page, context }) => {
+  const flow = await inventoryFlow(context);
+  const [axe, , armor] = flow.state.inventory;
+  await page.goto('/game/');
+  const menu = await openMenu(page, 'Inventory and shops');
+  await expect(tile(menu, axe)).toHaveAttribute('aria-pressed', 'true');
+  const sell = card(menu, axe).getByRole('button', { name: 'Sell', exact: true });
+  await sell.focus();
+
+  const spear = { ...itemFixture(CATALOG_V1.items['spear:1:common']), id: randomUUID() };
+  flow.state.inventory.unshift(spear);
+  await publishInventoryRefresh(page, flow);
+  await expect(tile(menu, spear)).toBeVisible();
+  await expect(tile(menu, axe)).toHaveAttribute('aria-pressed', 'true');
+  await expect(sell).toBeFocused();
+
+  await menu.getByRole('button', { name: 'Armor', exact: true }).click();
+  await expect(tile(menu, armor)).toHaveAttribute('aria-pressed', 'true');
+  const boots = { ...itemFixture(CATALOG_V1.items['light-boots:1:common']), id: randomUUID() };
+  flow.state.inventory.unshift(boots);
+  await publishInventoryRefresh(page, flow);
+  await expect(tile(menu, boots)).toBeVisible();
+  await expect(tile(menu, armor)).toHaveAttribute('aria-pressed', 'true');
+});
+
+test('distinguishes same-name bound and tradable inventory pieces on tiles and details', async ({ page, context }) => {
+  const flow = await inventoryFlow(context);
+  const bound = flow.state.inventory[1];
+  const tradable = { ...itemFixture(CATALOG_V1.items['sword:1:common']), id: randomUUID() };
+  flow.state.inventory.push(tradable);
+  await page.goto('/game/');
+  const menu = await openMenu(page, 'Inventory and shops');
+  await expect(tile(menu, bound).getByText('#1', { exact: true })).toBeVisible();
+  await expect(tile(menu, tradable).getByText('#2', { exact: true })).toBeVisible();
+  await expect(await selectItem(menu, bound)).toContainText('Level 1 · common · Account-bound · Item 1');
+  await expect(await selectItem(menu, tradable)).toContainText('Level 1 · common · Tradable · Item 2');
+});
+
+test('can sell the last unit after partially selling a material stack', async ({ page, context }) => {
+  const flow = await inventoryFlow(context);
+  const salvage: ItemInstance = { id: randomUUID(), ownerId: flow.state.gladiatorId, catalogId: CATALOG_V1.salvage.id, catalogVersion: CATALOG_V1.version,
+    tier: 1, rarity: 'common', stats: structuredClone(CATALOG_V1.salvage.stats), quantity: 12, origin: 'expedition', binding: 'tradable', reservation: null };
+  flow.state.inventory.push(salvage);
+  await page.goto('/game/');
+  const menu = await openMenu(page, 'Inventory and shops');
+  const selected = await selectItem(menu, salvage);
+  const quantity = selected.getByRole('spinbutton', { name: 'Quantity for Salvage' });
+  const sell = selected.getByRole('button', { name: 'Sell', exact: true });
+  await quantity.fill('11');
+  await sell.click();
+  await expect(selected).toContainText('1 owned');
+  await expect(quantity).toHaveCount(0);
+  await expect(sell).toBeEnabled();
+  await expect(selected.getByRole('button', { name: 'Discard', exact: true })).toBeEnabled();
+  await sell.click();
+  await expect(tile(menu, salvage)).toHaveCount(0);
+  expect(flow.commands).toMatchObject([{ kind: 'sell-item', itemId: salvage.id, quantity: 11 }, { kind: 'sell-item', itemId: salvage.id, quantity: 1 }]);
+});
 
 test('buys through the live gateway, refreshes inventory, and confirms bound discard without a cash reward', async ({ page, context }, info) => {
   const flow = await inventoryFlow(context);
@@ -101,7 +253,8 @@ test('buys through the live gateway, refreshes inventory, and confirms bound dis
   await expect(page.getByText('3 / 60 slots')).toBeVisible();
   await page.getByRole('button', { name: 'Buy Sword', exact: true }).click();
   await expect(page.getByText('4 / 60 slots')).toBeVisible();
-  const bound = page.getByTestId(`item-${flow.state.inventory[1].id}`);
+  const boundItem = flow.state.inventory[1];
+  const bound = await selectItem(page, boundItem);
   await expect(bound.getByRole('button', { name: 'Sell' })).toBeDisabled();
   await bound.getByRole('button', { name: 'Discard' }).click();
   await expect(page.getByRole('dialog', { name: 'Confirm discard' })).toBeVisible();
@@ -109,7 +262,7 @@ test('buys through the live gateway, refreshes inventory, and confirms bound dis
   await page.getByRole('button', { name: 'Keep item' }).click();
   await bound.getByRole('button', { name: 'Discard' }).click();
   await page.getByRole('button', { name: 'Confirm discard', exact: true }).click();
-  await expect(bound).toHaveCount(0);
+  await expect(tile(page, boundItem)).toHaveCount(0);
   expect(flow.commands.map(command => command.kind)).toEqual(['buy-shop', 'discard-item']);
   await expect(page.getByText('Available gold: 260')).toBeVisible();
   await page.getByRole('button', { name: 'Armorer', exact: true }).click();
@@ -153,7 +306,7 @@ test('retries the same operation after a lost response and explains processing w
 test('shows level locks and reservation restrictions with both currencies', async ({ page, context }) => {
   const flow = await inventoryFlow(context);
   await page.goto('/game/'); await openMenu(page, 'Inventory and shops');
-  const equipped = page.getByTestId(`item-${flow.state.inventory[2].id}`);
+  const equipped = await selectItem(page, flow.state.inventory[2]);
   await expect(equipped.getByRole('button', { name: 'Sell' })).toBeDisabled();
   await expect(equipped.getByRole('button', { name: 'Discard' })).toBeDisabled();
   await page.getByLabel('Shop tier').selectOption('5');
@@ -168,7 +321,7 @@ test('explains Marketplace outcomes for an item in words, with nothing to retry'
   // Task 18.3: an item that a Marketplace sale or expiry changed is explained in words, never as a raw code.
   const flow = await inventoryFlow(context);
   await page.goto('/game/'); await openMenu(page, 'Inventory and shops');
-  const axe = page.getByTestId(`item-${flow.state.inventory[0].id}`);
+  const axe = await selectItem(page, flow.state.inventory[0]);
   const alert = page.locator('.inventory-panel').getByRole('alert');
   for (const [code, words] of [['sold', 'sold on the Marketplace'], ['expired', 'listing has expired']] as const) {
     flow.reject(code);
@@ -189,9 +342,10 @@ for (const [rulesVersion, unit] of [['v1', 10], ['v2', 4]] as const) {
     flow.state.inventory.push(salvage);
     await page.goto('/game/');
     await openMenu(page, 'Inventory and shops');
-    const stack = page.getByTestId(`item-${salvage.id}`);
+    const axe = await selectItem(page, flow.state.inventory[0]);
+    await expect(axe).toContainText(`NPC sell value: ${CATALOG_V1.items['axe:1:common'].npcSellValue} gold each`);
+    const stack = await selectItem(page, salvage);
     await expect(stack).toContainText(`NPC sell value: ${unit} gold each`);
-    await expect(page.getByTestId(`item-${flow.state.inventory[0].id}`)).toContainText(`NPC sell value: ${CATALOG_V1.items['axe:1:common'].npcSellValue} gold each`);
     if (rulesVersion === 'v2') {
       await stack.scrollIntoViewIfNeeded();
       await page.screenshot({ path: info.outputPath(`economy-salvage-${info.project.name}.png`) });
@@ -208,7 +362,8 @@ test('fixture inventory and shops remain read-only alongside the camp', async ({
   await expect(page.getByRole('status').filter({ hasText: 'unavailable in this preview' })).toBeVisible();
   // The fixture owner's Iron helmet is listed in the fixture market (Task 18.3): reserved, so it cannot be sold or discarded.
   await expect(page.getByText('1 / 60 slots')).toBeVisible();
-  const helmet = page.locator('.inventory-item').filter({ hasText: 'Iron helmet' });
+  await page.getByTestId('inventory-grid').getByRole('button', { name: /^Iron helmet/ }).click();
+  const helmet = page.getByRole('region', { name: 'Item details' });
   await expect(helmet).toContainText('Listed for sale');
   await expect(helmet.getByRole('button', { name: 'Sell' })).toBeDisabled();
   await expect(helmet.getByRole('button', { name: 'Discard' })).toBeDisabled();
@@ -218,11 +373,14 @@ test('fixture inventory and shops remain read-only alongside the camp', async ({
 
 /** The shared display clock's time in the page. */
 const clockNow = (page: Page) => page.evaluate(() => window.__cloudiatorShell!.clock.now());
-const card = (page: Page, piece: ItemInstance) => page.getByTestId(`item-${piece.id}`);
 const wear = (page: Page, piece: ItemInstance) => card(page, piece).getByRole('button', { name: /^Wear / });
 const undo = (page: Page, piece: ItemInstance) => card(page, piece).getByRole('button', { name: /^Undo wearing / });
 const wearing = (page: Page, piece: ItemInstance) => card(page, piece).getByRole('button', { name: /^Wearing / });
-const badge = (page: Page, piece: ItemInstance) => card(page, piece).locator('.gear-badge');
+const badge = (page: Page, piece: ItemInstance) => tile(page, piece).locator('[data-gear-badge]');
+async function wearItem(page: Page, piece: ItemInstance) {
+  await selectItem(page, piece);
+  await wear(page, piece).click();
+}
 const wearingNow = (page: Page) => page.getByRole('region', { name: 'Wearing now' });
 const cancelChanges = (page: Page) => page.getByRole('button', { name: 'Cancel changes', exact: true });
 /** The queued build's effective time as the page shows it (the next slot), worked out in the page apart from the panel. */
@@ -250,8 +408,10 @@ test('shows what is worn and swaps a second sword with its badges, Undo and Canc
   }
   await expect(cancelChanges(page)).toHaveCount(0);
   // Each worn piece says so; the others offer Wear, and nothing says a swap is queued.
+  await selectItem(page, sword);
   await expect(badge(page, sword)).toHaveText('Wearing');
   await expect(wearing(page, sword)).toBeDisabled();
+  await selectItem(page, sword2);
   await expect(badge(page, sword2)).toHaveCount(0);
   await expect(wear(page, sword2)).toHaveAccessibleName('Wear Sword, level 1 uncommon');
   await expect(wear(page, sword2)).toBeEnabled();
@@ -269,7 +429,9 @@ test('shows what is worn and swaps a second sword with its badges, Undo and Canc
   await expect(cells.nth(0)).toContainText('Next: Sword, level 1 · uncommon');
   await expect(cells.nth(0)).toContainText('Level 1 · common');
   await expect(undo(page, sword2)).toBeEnabled();
+  await selectItem(page, sword);
   await expect(wear(page, sword)).toBeEnabled();
+  await selectItem(page, sword2);
   expect(await contrastIssues(menu)).toEqual([]);
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
   await row.scrollIntoViewIfNeeded();
@@ -283,9 +445,9 @@ test('shows what is worn and swaps a second sword with its badges, Undo and Canc
   await expect(badge(page, sword)).toHaveText('Wearing');
   await expect(row.getByText(/^Gear changes start/)).toHaveCount(0);
   // Two pieces queued, then Cancel changes puts all the gear back.
-  await wear(page, helmet).click();
+  await wearItem(page, helmet);
   await expect(card(page, helmet).getByRole('status')).toHaveText('Iron helmet will be worn from the next slot.');
-  await wear(page, sword2).click();
+  await wearItem(page, sword2);
   await expect(badge(page, sword2)).toHaveText(`Wears from ${time}`);
   expect(flow.commands[3]).toMatchObject({ kind: 'queue-build', expectedVersion: 4,
     equipment: { weapon: sword2.id, offHand: shield.id, head: helmet.id, body: armor.id, feet: null } });
@@ -296,9 +458,9 @@ test('shows what is worn and swaps a second sword with its badges, Undo and Canc
   await expect(badge(page, helmet)).toHaveCount(0);
   await expect(cancelChanges(page)).toHaveCount(0);
   // Wearing the piece that is going off again lands back on the current build: the same as an undo.
-  await wear(page, sword2).click();
+  await wearItem(page, sword2);
   await expect(badge(page, sword)).toHaveText(`Off at ${time}`);
-  await wear(page, sword).click();
+  await wearItem(page, sword);
   await expect(card(page, sword).getByRole('status')).toHaveText('Back to your current gear. No gear change is queued.');
   expect(flow.commands.at(-1)).toMatchObject({ kind: 'cancel-build' });
   await expect(badge(page, sword)).toHaveText('Wearing');
@@ -316,7 +478,7 @@ test('keeps a queued stance change when gear is swapped, undone or canceled', as
   await expect(wearingNow(page).getByText(/^Gear changes start/)).toHaveCount(0);
   await expect(cancelChanges(page)).toHaveCount(0);
   // Wear sends the whole queued build, the offensive stance included, on the pending build's version.
-  await wear(page, sword2).click();
+  await wearItem(page, sword2);
   await expect(badge(page, sword2)).toBeVisible();
   expect(flow.commands[0]).toMatchObject({ kind: 'queue-build', expectedVersion: 2, classId: 'guardian', stance: 'offensive',
     equipment: { weapon: sword2.id, offHand: shield.id, head: null, body: armor.id, feet: null } });
@@ -327,7 +489,7 @@ test('keeps a queued stance change when gear is swapped, undone or canceled', as
     equipment: { weapon: sword.id, offHand: shield.id, head: null, body: armor.id, feet: null } });
   expect(flow.state.pendingBuild?.build.stance).toBe('offensive');
   // Cancel changes puts the gear back and says the other queued changes stay.
-  await wear(page, sword2).click();
+  await wearItem(page, sword2);
   await expect(wearingNow(page).getByText(/^Gear changes start/)).toContainText('Cancel changes puts the gear back; your other queued build changes stay.');
   await cancelChanges(page).click();
   await expect(wearingNow(page).getByRole('status')).toHaveText('Gear changes canceled. Your other queued build changes are kept.');
@@ -347,7 +509,7 @@ test('drops a class change queued before the release when gear is swapped, so th
     reservedMoney: 100, reservedItemIds: [flow.pieces.sword.id, shield.id, armor.id], operationId: randomUUID() };
   await page.goto('/game/');
   await openMenu(page, 'Inventory and shops');
-  await wear(page, sword2).click();
+  await wearItem(page, sword2);
   await expect(badge(page, sword2)).toBeVisible();
   // The whole build is sent with the CURRENT class (the server refuses a class change), and the gear change is accepted.
   expect(flow.commands[0]).toMatchObject({ kind: 'queue-build', expectedVersion: 2, classId: 'guardian',
@@ -362,25 +524,30 @@ test('frees the off-hand for a two-handed weapon, and undoing it brings the shie
   queueStanceChange(flow);
   await page.goto('/game/');
   await openMenu(page, 'Inventory and shops');
+  await selectItem(page, shield);
   await expect(wear(page, shield)).toHaveCount(0);
   await expect(wearing(page, shield)).toBeDisabled();
-  await wear(page, spear).click();
+  await wearItem(page, spear);
   await expect(badge(page, spear)).toBeVisible();
   expect(flow.commands[0]).toMatchObject({ kind: 'queue-build', classId: 'guardian', stance: 'offensive', equipment: { weapon: spear.id, offHand: null, head: null, body: armor.id, feet: null } });
   // The shield is going off and cannot be worn while the spear is next: its button says why, in words.
   const time = await effectiveTime(page, flow.state.processedSlotIndex);
   await expect(badge(page, shield)).toHaveText(`Off at ${time}`);
+  await selectItem(page, shield);
   await expect(card(page, shield).getByText('Needs a free hand', { exact: true })).toBeVisible();
   await expect(wear(page, shield)).toBeDisabled();
   await expect(wear(page, shield)).toHaveAccessibleName('Wear Round shield, level 1 common');
   await expect(wear(page, shield)).toHaveAccessibleDescription('Needs a free hand');
   await expect(wearingNow(page).getByRole('listitem').nth(1)).toContainText('Next: Empty');
+  await selectItem(page, sword);
   await expect(wear(page, sword)).toBeEnabled();
   // Undo brings the sword and the shield back together; the stance change stays queued.
+  await selectItem(page, spear);
   await undo(page, spear).click();
   await expect(card(page, spear).getByRole('status')).toHaveText('Swap undone. Sword stays worn.');
   expect(flow.commands[1]).toMatchObject({ kind: 'queue-build', classId: 'guardian', stance: 'offensive', equipment: { weapon: sword.id, offHand: shield.id, head: null, body: armor.id, feet: null } });
   await expect(badge(page, shield)).toHaveText('Wearing');
+  await selectItem(page, shield);
   await expect(card(page, shield).getByText('Needs a free hand')).toHaveCount(0);
   await expect(badge(page, sword)).toHaveText('Wearing');
   await expect(wearing(page, shield)).toBeDisabled();
@@ -394,23 +561,24 @@ test('brings the shield back when a one-handed weapon is worn after a two-handed
   await page.goto('/game/');
   await openMenu(page, 'Inventory and shops');
   const offHandCell = wearingNow(page).getByRole('listitem').nth(1);
-  await wear(page, spear).click();
+  await wearItem(page, spear);
   await expect(badge(page, spear)).toBeVisible();
   await expect(badge(page, shield)).toHaveText(/^Off at /);
   await expect(offHandCell).toContainText('Next: Empty');
   // The other sword: a queue-build with the shield still worn, only the weapon changed.
-  await wear(page, sword2).click();
+  await wearItem(page, sword2);
   await expect(badge(page, sword2)).toBeVisible();
   expect(flow.commands[1]).toMatchObject({ kind: 'queue-build', equipment: { weapon: sword2.id, offHand: shield.id, head: null, body: armor.id, feet: null } });
   await expect(badge(page, shield)).toHaveText('Wearing');
+  await selectItem(page, shield);
   await expect(card(page, shield).getByText('Needs a free hand')).toHaveCount(0);
   await expect(offHandCell).not.toContainText('Next:');
   await expect(wearingNow(page).getByRole('listitem').nth(0)).toContainText('Next: Sword, level 1 · uncommon');
   await expect(badge(page, spear)).toHaveCount(0);
   // The spear again, then the sword that is worn now: back on the current build, so the pending build is canceled.
-  await wear(page, spear).click();
+  await wearItem(page, spear);
   await expect(badge(page, shield)).toHaveText(/^Off at /);
-  await wear(page, sword).click();
+  await wearItem(page, sword);
   expect(flow.commands[3]).toMatchObject({ kind: 'cancel-build' });
   expect(flow.state.pendingBuild).toBeNull();
   await expect(badge(page, shield)).toHaveText('Wearing');
@@ -425,9 +593,11 @@ test('says why a piece cannot be worn: a level not reached, or a Marketplace lis
   flow.state.inventory.push(high, listed);
   await page.goto('/game/');
   await openMenu(page, 'Inventory and shops');
+  await selectItem(page, high);
   await expect(wear(page, high)).toBeDisabled();
   await expect(wear(page, high)).toHaveAccessibleDescription('Needs level 5');
   await expect(card(page, high).getByText('Needs level 5', { exact: true })).toBeVisible();
+  await selectItem(page, listed);
   await expect(wear(page, listed)).toBeDisabled();
   await expect(wear(page, listed)).toHaveAccessibleDescription('Listed for sale');
   await expect(card(page, listed).getByText('Listed for sale', { exact: true })).toBeVisible();
@@ -443,6 +613,7 @@ test('explains a gear change the server no longer allows in words, and reloads t
   const { sword2 } = flow.pieces;
   await page.goto('/game/');
   await openMenu(page, 'Inventory and shops');
+  await selectItem(page, sword2);
   await expect(wear(page, sword2)).toBeEnabled();
   sword2.reservation = { kind: 'listing', referenceId: randomUUID() };
   flow.reject('invalid');
@@ -472,8 +643,8 @@ for (const action of ['sell-item', 'discard-item', 'buy-shop', 'buy-banner'] as 
     await page.goto('/game/');
     const panel = await openMenu(page, 'Inventory and shops');
     let button: Locator;
-    if (action === 'sell-item') button = panel.getByTestId(`item-${flow.state.inventory[0].id}`).getByRole('button', { name: 'Sell', exact: true });
-    else if (action === 'discard-item') button = panel.getByTestId(`item-${flow.state.inventory[1].id}`).getByRole('button', { name: 'Discard', exact: true });
+    if (action === 'sell-item') button = (await selectItem(panel, flow.state.inventory[0])).getByRole('button', { name: 'Sell', exact: true });
+    else if (action === 'discard-item') button = (await selectItem(panel, flow.state.inventory[1])).getByRole('button', { name: 'Discard', exact: true });
     else {
       if (action === 'buy-banner') await panel.getByRole('button', { name: 'Armorer', exact: true }).click();
       button = panel.getByRole('button', { name: action === 'buy-banner' ? 'Buy Arena banner' : 'Buy Sword', exact: true });
@@ -661,7 +832,7 @@ test('retries a gear change with the same operation after a refusal, and reloads
   await page.goto('/game/');
   await openMenu(page, 'Inventory and shops');
   flow.reject('processing');
-  await wear(page, sword2).click();
+  await wearItem(page, sword2);
   await expect(card(page, sword2).getByRole('alert')).toHaveText('The world is processing previous results. Retry shortly.');
   await expect(badge(page, sword2)).toHaveCount(0);
   flow.reject('');
@@ -691,7 +862,13 @@ test('keeps the keyboard focus on the page through Wear, Undo and Cancel changes
   await page.goto('/game/');
   await openMenu(page, 'Inventory and shops');
   const reach = async (button: Locator) => { await button.focus(); await page.keyboard.press('Tab'); await page.keyboard.press('Shift+Tab'); await expect(button).toBeFocused(); };
+  const inspect = async (piece: ItemInstance) => {
+    await tile(page, piece).focus();
+    await page.keyboard.press('Enter');
+    await expect(tile(page, piece)).toHaveAttribute('aria-pressed', 'true');
+  };
   // Wear by keyboard: the button the player pressed becomes Undo and keeps the focus; the result is announced in its card.
+  await inspect(sword2);
   await reach(wear(page, sword2));
   await page.keyboard.press('Enter');
   await expect(card(page, sword2).getByRole('status')).toHaveText('Sword will be worn from the next slot.');
@@ -702,11 +879,13 @@ test('keeps the keyboard focus on the page through Wear, Undo and Cancel changes
   // Wearing the piece that is going off again disables its button: the focus goes to the outcome, never to <body>.
   await page.keyboard.press('Enter');
   await expect(undo(page, sword2)).toBeFocused();
+  await inspect(sword);
   await reach(wear(page, sword));
   await page.keyboard.press('Enter');
   await expect(card(page, sword).getByRole('status')).toHaveText('Back to your current gear. No gear change is queued.');
   await expect(card(page, sword).getByRole('status')).toBeFocused();
   // Cancel changes leaves with its section: the outcome takes the focus.
+  await inspect(helmet);
   await reach(wear(page, helmet));
   await page.keyboard.press('Enter');
   await expect(undo(page, helmet)).toBeFocused();
@@ -724,7 +903,8 @@ test('previews the gear read-only: Wear is disabled and says why', async ({ page
   await expect(wearingNow(page)).toBeVisible();
   await expect(wearingNow(page).getByRole('listitem')).toHaveCount(5);
   await expect(wearingNow(page).getByText('Gear changes are unavailable in this preview.')).toBeVisible();
-  const helmet = page.locator('.inventory-item').filter({ hasText: 'Iron helmet' });
+  await page.getByTestId('inventory-grid').getByRole('button', { name: /^Iron helmet/ }).click();
+  const helmet = page.getByRole('region', { name: 'Item details' });
   await expect(helmet.getByRole('button', { name: /^Wear / })).toBeDisabled();
   await expect(helmet.getByRole('button', { name: /^Wear / })).toHaveAccessibleDescription(/Gear changes are unavailable in this preview\./);
 });

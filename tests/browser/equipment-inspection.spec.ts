@@ -51,13 +51,21 @@ test('inspects worn and replacement equipment stats and weight', async ({ page, 
   const wornShield = worn.getByRole('button', { name: 'Off hand: Round shield' });
   const wornDetails = worn.getByRole('group', { name: 'Worn equipment details' });
   await expect(wornSword).toBeVisible();
-  if (hasTouch) await wornSword.tap();
-  else await wornSword.hover();
+  if (hasTouch) {
+    // Patch 1.9: a tap on a worn slot opens its equip picker, a sheet over the panel (equip-from-gladiator.spec.ts). Back gives the
+    // focus back to the slot, and the details box shows what is worn there, as hover and focus do on the desktop.
+    await wornSword.tap();
+    const sheet = mine.getByRole('dialog', { name: 'Change Weapon', exact: true });
+    await expect(sheet).toBeVisible();
+    await sheet.getByRole('button', { name: 'Back', exact: true }).tap();
+    await expect(sheet).toHaveCount(0);
+    await expect(wornSword).toBeFocused();
+  } else await wornSword.hover();
   await expect(wornDetails).toContainText(/Damage\s*9\.25/);
   await expect(wornDetails).toContainText(/Weight\s*3\.75/);
   if (hasTouch) {
     const width = await wornDetails.evaluate(element => element.getBoundingClientRect().width);
-    await wornShield.tap();
+    await wornShield.focus();
     expect(await wornDetails.evaluate(element => element.getBoundingClientRect().width)).toBe(width);
     await expect(wornDetails).toBeInViewport();
   } else {

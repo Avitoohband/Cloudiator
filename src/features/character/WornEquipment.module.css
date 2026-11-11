@@ -1,0 +1,641 @@
+/*
+ * My gladiator's Worn equipment with its equip picker (Patch 1.9 Task 6, the approved equip-from-gladiator and stacks mockups). The slot
+ * tiles and the details box keep build/EquipmentInspection.module.css; this file adds the slot's ▾ and NEXT tag, the picker (a popover
+ * under the slot row on desktop, a sheet over the panel body on a phone), its tiles in the Inventory's tile look, the comparison card,
+ * the "At the next slot" box and the outcome line.
+ */
+.worn {
+  min-width: 0;
+}
+
+.over strong {
+  color: #ffa99c;
+}
+
+/* ---- The slots: a ▾ in the corner of each, and NEXT on a slot whose piece changes at the next slot (its next piece dimmed). */
+.slot {
+  text-align: center;
+}
+
+.slotIcon {
+  position: relative;
+}
+
+.slot[data-next] .slotIcon {
+  border-color: #ae864a;
+}
+
+.slot[data-next] .slotIcon > [data-item-icon] {
+  opacity: .55;
+}
+
+.chevron {
+  position: absolute;
+  right: 3px;
+  bottom: 2px;
+  font-size: 10px;
+  line-height: 1;
+  color: #c9d1e2;
+  opacity: .85;
+}
+
+.nextTag {
+  position: absolute;
+  left: 2px;
+  top: 2px;
+  padding: 0 4px;
+  border-radius: 3px;
+  background: #5b4322;
+  color: var(--gold);
+  font: 700 9px/14px system-ui, sans-serif;
+  letter-spacing: .03em;
+}
+
+/* ---- The picker. Desktop: a popover under the slot row; two columns once it is 560 px wide (the panel's wide layout). */
+.frame {
+  container: picker / inline-size;
+  margin-block: 12px .65rem;
+}
+
+.picker {
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-areas: 'head' 'grid' 'card' 'act';
+  gap: 8px 12px;
+  padding: 12px;
+  border: 1px solid #8a7040;
+  border-radius: 10px;
+  background: linear-gradient(145deg, #242733, #171b24 75%);
+  box-shadow: 0 14px 30px #000a;
+  color: var(--ink);
+}
+
+/* The caret under the slot that opened the picker (`--caret`, measured from the slot). */
+.picker::before {
+  content: '';
+  position: absolute;
+  top: -8px;
+  left: var(--caret, 50px);
+  width: 14px;
+  height: 14px;
+  margin-left: -7px;
+  transform: rotate(45deg);
+  background: #242733;
+  border-left: 1px solid #8a7040;
+  border-top: 1px solid #8a7040;
+}
+
+@container picker (min-width: 560px) {
+  .picker {
+    grid-template-columns: minmax(0, 1fr) 296px;
+    grid-template-rows: auto auto 1fr;
+    grid-template-areas: 'head head' 'grid card' 'grid act';
+    align-items: start;
+  }
+}
+
+.body {
+  display: contents;
+}
+
+.head {
+  grid-area: head;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.head h4 {
+  flex: 1;
+  margin: 0;
+  font: 700 1.05rem/1.2 Georgia, serif;
+}
+
+.head small {
+  min-width: 0;
+  color: var(--muted);
+  font-size: .75rem;
+  overflow-wrap: anywhere;
+}
+
+.close,
+.back {
+  border: 1px solid #655847;
+  border-radius: 6px;
+  background: #292526;
+  color: var(--ink);
+  line-height: 1;
+}
+
+.close {
+  width: 30px;
+  height: 30px;
+  padding: 0;
+}
+
+.back {
+  display: none;
+  min-height: 34px;
+  padding: 4px 10px;
+  font-size: .85rem;
+}
+
+.backMark {
+  margin-inline-end: 4px;
+}
+
+.close:focus-visible,
+.back:focus-visible,
+.wear:focus-visible,
+.small:focus-visible {
+  outline: 3px solid var(--gold);
+  outline-offset: 2px;
+}
+
+.gridArea {
+  grid-area: grid;
+  min-width: 0;
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 6px;
+  padding: 5px 9px 9px 5px;
+  border: 1px solid #55493b;
+  border-radius: 9px;
+  background: #191719;
+}
+
+/* A tile in the Inventory's look: its level top-left, ✓ / → / a lock top-right, a stack's count bottom-right and its layered edge. */
+.pick {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 100%;
+  min-width: 0;
+  padding: 0;
+  aspect-ratio: 1;
+  border: 1px solid #655847;
+  border-radius: 7px;
+  background: linear-gradient(155deg, #30302e, #202027 74%);
+  color: var(--ink);
+}
+
+.pick > [data-item-icon] {
+  margin-top: -4px;
+}
+
+.pick[data-rarity='uncommon'] {
+  background: linear-gradient(155deg, #2a3a31, #1c2622 74%);
+}
+
+.pick[data-rarity='rare'] {
+  background: linear-gradient(155deg, #2b3550, #1b2133 74%);
+}
+
+@media (hover: hover) {
+  .pick:hover {
+    border-color: var(--gold);
+  }
+}
+
+.pick[aria-pressed='true'] {
+  border-color: var(--gold);
+  box-shadow: inset 0 0 0 1px var(--gold);
+}
+
+.pick[data-stack] {
+  box-shadow: 3px 3px 0 -0.5px #4a4036, 6px 6px 0 -1px #2c2620;
+}
+
+.pick[data-stack][aria-pressed='true'] {
+  box-shadow: inset 0 0 0 1px var(--gold), 3px 3px 0 -0.5px #4a4036, 6px 6px 0 -1px #2c2620;
+}
+
+.pick:focus-visible {
+  z-index: 1;
+  outline: 3px solid var(--gold);
+  outline-offset: 1px;
+}
+
+.pick[data-locked] {
+  border-color: #4a423a;
+}
+
+.pick[data-locked] > [data-item-icon] {
+  opacity: .38;
+  filter: grayscale(.7);
+}
+
+.level,
+.mark,
+.count {
+  position: absolute;
+  padding: 0 3px;
+  border-radius: 3px;
+  font: 700 10px/14px system-ui, sans-serif;
+}
+
+.level {
+  inset: 2px auto auto 2px;
+  background: #39312b;
+  color: #ede2cf;
+}
+
+.mark {
+  inset: 2px 2px auto auto;
+  font-size: 9px;
+  letter-spacing: .02em;
+  background: #14120f;
+  color: #f3e2b3;
+}
+
+.mark[data-mark='worn'] {
+  background: #1c3a2a;
+  color: #bdf0cc;
+}
+
+.mark[data-mark='next'] {
+  background: #5b4322;
+  color: var(--gold);
+}
+
+.mark[data-mark='lock'] {
+  display: grid;
+  place-items: center;
+  width: 16px;
+  height: 14px;
+  padding: 0;
+  background: #4a2d2d;
+}
+
+.count {
+  inset: auto 3px 2px auto;
+  background: #14120f;
+  color: #f3e2b3;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+.remove {
+  grid-template-rows: 1fr auto;
+  padding: 4px 0 3px;
+  border-style: dashed;
+  background: #1a1819;
+  color: #d7c9b8;
+  font-size: .65rem;
+  font-weight: 700;
+}
+
+.removeMark {
+  align-self: end;
+  font-size: 20px;
+  line-height: 1;
+}
+
+.legend,
+.placeholder {
+  margin: 6px 0 0;
+  color: var(--muted);
+  font-size: .78rem;
+}
+
+.placeholder {
+  margin: 0;
+}
+
+/* ---- The card: the chosen piece against what is worn next in the slot. */
+.card {
+  grid-area: card;
+  min-width: 0;
+  padding: 10px 12px;
+  border: 1px solid #5f5750;
+  border-radius: 10px;
+  background: linear-gradient(145deg, #1d2130, #141822 75%);
+  overflow-wrap: anywhere;
+}
+
+.cardHead {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
+.cardHead h5 {
+  margin: 0;
+  font: 700 1.02rem/1.2 Georgia, serif;
+}
+
+.cardHead p {
+  margin: 2px 0 0;
+  color: var(--muted);
+  font-size: .74rem;
+}
+
+.removeIcon {
+  width: 40px;
+  text-align: center;
+  font-size: 22px;
+}
+
+.compare {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: .8rem;
+}
+
+.compare thead th {
+  padding: 3px 0;
+  color: var(--muted);
+  font-size: .7rem;
+  font-weight: 600;
+  text-align: end;
+}
+
+.compare tbody th,
+.compare tbody td {
+  padding: 4px 0;
+  border-top: 1px solid var(--line);
+}
+
+.compare tbody th {
+  color: var(--muted);
+  font-weight: 400;
+  text-align: start;
+}
+
+.compare td {
+  text-align: end;
+  font-variant-numeric: tabular-nums;
+}
+
+.compare td:first-of-type {
+  padding-inline-start: 6px;
+  color: var(--muted);
+}
+
+.compare td:last-of-type {
+  width: 4.4em;
+  padding-inline-start: 6px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.compare [data-tone='good'] {
+  color: #9fe0b0;
+}
+
+.compare [data-tone='bad'] {
+  color: #ffa99c;
+}
+
+.compare [data-tone='same'] {
+  color: var(--muted);
+  font-weight: 400;
+}
+
+.compare tr[data-row='Load'] > * {
+  color: var(--gold);
+}
+
+.compare tr[data-row='Load'][data-over] > * {
+  color: #ffa99c;
+}
+
+.note,
+.info,
+.bad {
+  margin: 6px 0 0;
+  font-size: .78rem;
+}
+
+.note {
+  color: #ffd9a0;
+}
+
+.info {
+  color: var(--muted);
+}
+
+.bad {
+  color: #ffa99c;
+}
+
+.hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.act {
+  grid-area: act;
+  display: flex;
+  gap: 8px;
+  min-width: 0;
+}
+
+.wear {
+  flex: 1;
+  min-height: 44px;
+  padding: 9px 14px;
+  border: 1px solid #ffdf97;
+  border-radius: 6px;
+  background: var(--gold);
+  color: #101625;
+  font-weight: 700;
+}
+
+.wear:disabled {
+  opacity: .5;
+  cursor: not-allowed;
+  border-color: #888;
+  background: #6b6b6b;
+  color: #eee;
+}
+
+.wear[aria-disabled='true'],
+.small[aria-disabled='true'] {
+  opacity: .7;
+  cursor: not-allowed;
+}
+
+.undo {
+  border-color: #8b7a64;
+  background: #292526;
+  color: var(--ink);
+}
+
+/* ---- At the next slot: the queued pieces with Undo, the Inventory's start-time note and Cancel changes. */
+.pending {
+  margin-top: .7rem;
+  padding: .6rem .75rem;
+  border: 1px solid #6d5532;
+  border-left: 3px solid var(--gold);
+  border-radius: 7px;
+  background: #1d1a15;
+  font-size: .85rem;
+}
+
+.pending h4 {
+  margin: 0 0 4px;
+  color: var(--gold);
+  font-size: .7rem;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 0;
+  border-top: 1px solid #3a3226;
+}
+
+.pending h4 + .row {
+  border-top: 0;
+}
+
+.rowSlot {
+  min-width: 64px;
+  color: var(--muted);
+}
+
+.rowText {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.muted {
+  color: var(--muted);
+}
+
+.pending p {
+  margin: 6px 0 0;
+  color: var(--muted);
+  font-size: .8rem;
+}
+
+.small {
+  min-height: 32px;
+  padding: 3px 12px;
+  border: 1px solid #655847;
+  border-radius: 6px;
+  background: #292526;
+  color: #e4d7c9;
+  font-size: .8rem;
+}
+
+.cancel {
+  margin-top: 6px;
+}
+
+.message,
+.alert {
+  margin: .6rem 0 0;
+  font-size: .85rem;
+}
+
+.message {
+  color: #a3dfb5;
+}
+
+.alert {
+  color: #ffa99c;
+}
+
+/* ---- A phone (the shell's compact query): the picker is a sheet over the panel's body, from its top (`--sheet-top`) to the panel's foot,
+   with Back, a list that scrolls and a Wear bar that stays at the foot. What it covers is hidden, so neither Tab nor a screen reader
+   reaches it. */
+@media (hover: none), (max-width: 480px) {
+  .worn[data-picking] {
+    visibility: hidden;
+  }
+
+  .frame {
+    container-type: normal;
+    margin: 0;
+    visibility: visible;
+  }
+
+  .picker {
+    position: absolute;
+    inset: var(--sheet-top, 0px) 0 0 0;
+    z-index: 4;
+    display: flex;
+    flex-direction: column;
+    gap: 0;
+    padding: 0;
+    border: 0;
+    border-radius: 0;
+    background: #15161b;
+    box-shadow: none;
+  }
+
+  .picker::before {
+    display: none;
+  }
+
+  .head {
+    flex: none;
+    padding: 8px 14px;
+    border-bottom: 1px solid var(--line);
+  }
+
+  .head small {
+    font-size: .72rem;
+  }
+
+  .back {
+    display: inline-flex;
+    align-items: center;
+  }
+
+  .close {
+    display: none;
+  }
+
+  .body {
+    display: block;
+    flex: 1;
+    min-height: 0;
+    padding: 8px 14px 4px;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+  }
+
+  .grid {
+    gap: 4px;
+    padding: 4px 8px 8px 4px;
+  }
+
+  .legend,
+  .cardHead {
+    display: none;
+  }
+
+  .card {
+    margin-top: 8px;
+    padding: 8px 10px;
+  }
+
+  .compare tbody th,
+  .compare tbody td {
+    padding: 3px 0;
+  }
+
+  .act {
+    flex: none;
+    padding: 8px 14px 10px;
+    border-top: 1px solid var(--line);
+    background: #191b22;
+  }
+}

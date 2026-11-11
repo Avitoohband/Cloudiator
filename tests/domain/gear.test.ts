@@ -5,7 +5,7 @@ import { CATALOG_V1 } from '@domain/catalog-v1';
 import { ownerFixture, itemFixture } from '../fixtures/domain.ts';
 import {
   GEAR_SLOTS, blockedText, cancelGearCommand, changedSlots, gearRefusal, isWearable, keepsOtherChanges, nextEquipment, pendingNote,
-  undoCommand, wearBadge, wearBadgeText, wearCommand, wearState, wornNow,
+  removeCommand, undoCommand, wearBadge, wearBadgeText, wearCommand, wearState, wornNow,
 } from '../../src/features/inventory/gear';
 
 // Launch feedback, note 9: the gear view. A swap is a whole `queue-build` based on the pending build (or the current one) with
@@ -220,6 +220,28 @@ describe('undoCommand', () => {
   it('empties a slot that was empty when worn', () => {
     const state = owner({ pending: { stance: 'offensive', equipment: { body: armor.id } } });
     expect(queued(undoCommand(state, 'body', OPERATION)).equipment).toEqual(gear({ weapon: sword.id, offHand: shield.id, head: hood.id }));
+  });
+});
+
+describe('removeCommand', () => {
+  // My gladiator's picker (Patch 1.9): Remove is the same whole-build command with the slot set to null.
+  it('empties the slot from the next slot and keeps the rest of the next build', () => {
+    expect(removeCommand(owner(), 'head', OPERATION)).toEqual({ kind: 'queue-build', operationId: OPERATION, expectedVersion: 7, classId: 'guardian',
+      stance: 'balanced', allocation: { strength: 3, agility: 2, vitality: 2, endurance: 2, precision: 1 }, equipment: gear({ weapon: sword.id, offHand: shield.id, head: null }) });
+    const state = owner({ pending: { stance: 'offensive', equipment: { weapon: sword2.id } } });
+    expect(queued(removeCommand(state, 'offHand', OPERATION))).toMatchObject({ stance: 'offensive', equipment: gear({ weapon: sword2.id, offHand: null, head: hood.id }) });
+  });
+
+  it('is cancel-build when emptying a queued piece lands back on the current build', () => {
+    expect(removeCommand(owner({ pending: { equipment: { body: armor.id } } }), 'body', OPERATION))
+      .toEqual({ kind: 'cancel-build', operationId: OPERATION, expectedVersion: 7 });
+  });
+
+  it('brings the worn shield back when a queued two-handed weapon is removed, and gives each command a fresh id unless one is passed', () => {
+    const state = owner({ pending: { equipment: { weapon: spear.id, offHand: null } } });
+    expect(queued(removeCommand(state, 'weapon', OPERATION)).equipment).toEqual(gear({ weapon: null, offHand: shield.id, head: hood.id }));
+    const first = removeCommand(state, 'weapon'), second = removeCommand(state, 'weapon');
+    expect(first.operationId).not.toBe(second.operationId);
   });
 });
 

@@ -463,3 +463,15 @@ p.partTitle {
   outline: 2px solid var(--gold);
   outline-offset: 2px;
 }
+
+/*
+ * Patch 1.9: on a phone (the shell's compact query) the equip picker is a sheet over the panel's body. What it covers (the summary
+ * and the build planner) is hidden while it is open, so neither Tab nor a screen reader reaches it; the page keeps its layout and
+ * scroll position under the sheet.
+ */
+@media (hover: none), (max-width: 480px) {
+  .summary[data-covered],
+  .planner[data-covered] {
+    visibility: hidden;
+  }
+}

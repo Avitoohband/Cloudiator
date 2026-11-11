@@ -180,6 +180,17 @@ export function undoCommand(owner: OwnerState, slot: EquipmentSlot, operationId:
   return buildCommand(owner, equipment, operationId);
 }
 
+/**
+ * Remove the piece in `slot` from the next slot (My gladiator's picker, Patch 1.9): the same whole-build command with that slot empty.
+ * The weapon's hands are settled as for `wearCommand`: a two-handed weapon that comes off brings the worn off-hand piece back.
+ */
+export function removeCommand(owner: OwnerState, slot: EquipmentSlot, operationId: string = newOperation()): GearCommand {
+  const equipment = nextEquipment(owner), before = equipment.weapon;
+  equipment[slot] = null;
+  if (slot === 'weapon') settleOffHand(owner, equipment, before);
+  return buildCommand(owner, equipment, operationId);
+}
+
 /** "Cancel changes": every slot back to what is worn now; a queued class, stance or attribute change is kept. */
 export function cancelGearCommand(owner: OwnerState, operationId: string = newOperation()): GearCommand {
   return buildCommand(owner, wornNow(owner), operationId);

@@ -43,7 +43,8 @@ function EquipmentTile({ item, missing, title, subtitle, ...props }: ComponentPr
   </button>;
 }
 
-function EquipmentDetails({ label, item, instance, empty, note, detailsRef, children }: {
+/** A piece's details box (My gladiator's Worn equipment uses it too, `character/WornEquipment.tsx`). */
+export function EquipmentDetails({ label, item, instance, empty, note, detailsRef, children }: {
   label: string; item?: ItemInstance; instance?: string; empty: string; note?: string;
   detailsRef: Ref<HTMLDivElement>; children?: ReactNode;
 }) {
@@ -65,41 +66,6 @@ function EquipmentDetails({ label, item, instance, empty, note, detailsRef, chil
 function buildStats(draft: BuildInput, owner: OwnerState) {
   const result = validateBuild(draft, owner.inventory, owner.progression.earnedAttributePoints, owner.progression.level);
   return result.ok ? deriveStats(result.snapshot, RULES_V1) : null;
-}
-
-export function WornEquipment({ owner }: { owner: OwnerState }) {
-  const { currentBuild, inventory } = owner;
-  const { equipment } = currentBuild;
-  const headingId = useId();
-  const detail = useRef<HTMLDivElement>(null);
-  const [selected, setInspectedSlot] = useState<EquipmentSlot>();
-  const wearing = equipmentSlots.some(slot => equipment[slot] !== null);
-  const inspected = selected && slotItem(equipment, inventory, selected);
-  const stats = buildStats({ classId: currentBuild.classId, stance: currentBuild.stance, allocation: currentBuild.allocations, equipment }, owner);
-  return <section className={styles.worn} aria-labelledby={headingId} data-wearing={wearing || undefined}>
-    <div className={styles.heading}>
-      <h3 id={headingId}>Worn equipment</h3>
-      {stats && <p>Load <strong>{stats.load} / {stats.loadCapacity}</strong></p>}
-    </div>
-    <div className={styles.slots}>
-      {equipmentSlots.map(slot => {
-        const item = slotItem(equipment, inventory, slot);
-        const name = slotItemName(item, equipment[slot]);
-        const instance = instanceLabel(item, inventory);
-        return <EquipmentTile key={slot} item={item} missing={!!equipment[slot]} title={slotNames[slot]}
-          aria-label={`${slotNames[slot]}: ${name}${instance ? `, ${instance}` : ''}`} aria-pressed={selected === slot}
-          subtitle={instance ? `${name} · ${instance}` : name}
-          onPointerEnter={event => { if (event.pointerType !== 'touch') setInspectedSlot(slot); }}
-          onFocus={() => setInspectedSlot(slot)} onClick={event => {
-            setInspectedSlot(slot);
-            revealOnTouch(event, () => detail.current?.scrollIntoView({ block: 'nearest' }));
-          }} />;
-      })}
-    </div>
-    <EquipmentDetails label="Worn equipment details" item={inspected} instance={instanceLabel(inspected, inventory)} detailsRef={detail}
-      empty={selected ? (equipment[selected] ? 'This equipment is unavailable.' : 'No equipment worn in this slot.')
-        : wearing ? 'Choose a slot to see its stats and weight.' : 'No equipment worn.'} />
-  </section>;
 }
 
 function equip(draft: BuildInput, slot: EquipmentSlot, item: ItemInstance | undefined): BuildInput {

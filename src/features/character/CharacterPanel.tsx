@@ -6,6 +6,8 @@
 // Without a gladiator it holds the joining path (Task 13.6): a visitor is told everything is open to watch and offered
 // "Sign in with Google to create your gladiator"; signed in without one, "Create your gladiator" reopens the creation
 // dialog over the camp; and the session and owner-load states. Names render as React text.
+// Patch 1.9: Worn equipment's slots open the equip picker (`WornEquipment`); a phone's picker is a sheet over the panel body, and the
+// summary and the build planner it covers are hidden meanwhile.
 import { useEffect, useId, useState, type ReactNode } from 'react';
 import type { OwnerState } from '@contracts/reads';
 import type { GameGateway } from '../../lib/api/gateway';
@@ -13,7 +15,6 @@ import type { SessionState } from '../../lib/api/session';
 import type { DisplayClock } from '../../game/display-clock';
 import { SignIn } from '../auth/SignIn';
 import { BuildPanel } from '../build/BuildPanel';
-import { WornEquipment } from '../build/EquipmentInspection';
 import { useClockMode } from '../../lib/clock-setting';
 import { RestGainText } from '../schedule/RestGainText';
 import { restingGain, restingGainText } from '../schedule/rest-stamina';
@@ -21,6 +22,7 @@ import { slotTimeText } from '../schedule/slot-time';
 import { TitleButton } from '../titles/TitlePicker';
 import { activityStatus } from './activity-status';
 import { ClassCard } from './ClassCard';
+import { WornEquipment } from './WornEquipment';
 import type { Viewer } from './useGameState';
 import styles from './CharacterPanel.module.css';
 
@@ -45,9 +47,11 @@ function useNow(clock: DisplayClock) {
  */
 export type TitleControls = { worn: string | null; status: string | null; onOpen(): void };
 
-function OwnerSummary({ owner, slotIndex, clock, fixture, stale, resting, onRetry, titles }: {
+function OwnerSummary({ owner, slotIndex, clock, fixture, stale, resting, onRetry, titles, covered }: {
   owner: OwnerState; slotIndex: number | null; clock: DisplayClock; fixture: boolean; stale: boolean; resting: boolean; onRetry(): void;
   titles?: TitleControls;
+  /** A phone's equip sheet is open over the panel: this is hidden under it. */
+  covered: boolean;
 }) {
   const now = useNow(clock);
   const clockMode = useClockMode();
@@ -61,7 +65,7 @@ function OwnerSummary({ owner, slotIndex, clock, fixture, stale, resting, onRetr
   // its slot ends (Patch A item 6). A Rest that has not started, or is over, shows none; nor does resting at home, which has no activity.
   const gain = activity?.kind === 'rest' && status.status === 'in-progress' ? restingGainText(restingGain(owner)) : null;
   return (
-    <section className={styles.summary} aria-labelledby={headingId}>
+    <section className={styles.summary} aria-labelledby={headingId} data-covered={covered || undefined}>
       <p className="eyebrow">{fixture ? 'SAMPLE GLADIATOR' : 'YOUR GLADIATOR'}</p>
       <div className={styles.nameRow}>
         <h2 id={headingId} className={styles.name}>{owner.name}</h2>
@@ -113,13 +117,17 @@ export function CharacterPanel({ viewer, session, owner, ownerError, slotIndex, 
   resting?: boolean;
 }) {
   const retry = () => { void refreshOwner().catch(() => undefined); };
+  // Patch 1.9: a Worn equipment slot opens the equip picker; on a phone it is a sheet over the panel body, and what it covers is hidden.
+  const [picking, setPicking] = useState(false);
   if (owner) {
     return <>
       <OwnerSummary owner={owner} slotIndex={slotIndex} clock={clock} fixture={fixture} stale={ownerError !== null} resting={resting} onRetry={retry}
-        titles={titles} />
-      <WornEquipment key={`worn-${owner.gladiatorId}`} owner={owner} />
-      {fixture ? <p className="panel-notice">This preview cannot change the build.</p>
-        : <BuildPanel key={owner.gladiatorId} owner={owner} gateway={gateway} refresh={refreshOwner} clock={clock} />}
+        titles={titles} covered={picking} />
+      <WornEquipment key={`worn-${owner.gladiatorId}`} owner={owner} gateway={gateway} refresh={refreshOwner} clock={clock} preview={fixture} onPicking={setPicking} />
+      <div className={styles.planner} data-covered={picking || undefined}>
+        {fixture ? <p className="panel-notice">This preview cannot change the build.</p>
+          : <BuildPanel key={owner.gladiatorId} owner={owner} gateway={gateway} refresh={refreshOwner} clock={clock} />}
+      </div>
     </>;
   }
   let joining: ReactNode;

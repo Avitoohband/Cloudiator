@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto';
 import { ownerFixture, itemFixture } from '../fixtures/domain';
 import type { ItemInstance } from '../../supabase/functions/_shared/contracts/reads';
 import { CATALOG_V1 } from '../../supabase/functions/_shared/domain/catalog-v1';
+import { shopOffers } from '../../supabase/functions/_shared/domain/inventory';
 import type { GameCommand } from '../../supabase/functions/_shared/contracts/commands';
 import { SLOT_MS, emptyWorld, isPresence, routeLiveReads } from './live-routes';
 import { openMenu } from './shell-helpers';
@@ -103,6 +104,19 @@ async function selectItem(scope: Page | Locator, piece: ItemInstance) {
   return card(scope, piece);
 }
 
+// The shops as one icon grid (Patch 1.9): a cell per offer, filters, a currency switch and the chosen offer's card.
+const shopsRegion = (scope: Page | Locator) => scope.getByRole('region', { name: 'Shops', exact: true });
+const offerCell = (scope: Page | Locator, catalogId: string) => scope.getByTestId(`offer-${catalogId}`);
+const offerDetails = (scope: Page | Locator) => scope.getByRole('region', { name: 'Offer details', exact: true });
+const shopButton = (shops: Locator, group: 'Shop filters' | 'Shop currency', name: string) =>
+  shops.getByRole('group', { name: group, exact: true }).getByRole('button', { name, exact: true });
+/** Chooses a shop cell the way the player's device does: a tap on the phone, a click on the desktop. */
+async function chooseOffer(shops: Locator, catalogId: string, mobile: boolean) {
+  const cell = offerCell(shops, catalogId);
+  if (mobile) await cell.tap(); else await cell.click();
+  await expect(cell).toHaveAttribute('aria-pressed', 'true');
+}
+
 /** The camp reads the owner again when its next sync sees a new world revision. */
 async function publishInventoryRefresh(page: Page, flow: Awaited<ReturnType<typeof inventoryFlow>>) {
   await page.waitForFunction(() => window.__cloudiatorShell!.syncs() > 0);
@@ -126,7 +140,8 @@ test('shows a square pixel-art inventory and selected item details', async ({ pa
   const grid = page.getByTestId('inventory-grid');
   const tiles = grid.getByRole('button');
   const detail = page.getByRole('region', { name: 'Item details' });
-  const filter = (name: string) => page.getByRole('button', { name, exact: true });
+  // The shops below have All, Weapons and Armor too (Patch 1.9): these are the inventory's.
+  const filter = (name: string) => page.getByRole('group', { name: 'Inventory filters', exact: true }).getByRole('button', { name, exact: true });
   await expect(tiles).toHaveCount(4);
   const geometry = await tiles.evaluateAll(nodes => nodes.map(node => {
     const { width, height } = node.getBoundingClientRect();
@@ -203,7 +218,7 @@ test('keeps the default and filtered inventory selections through an ordered ref
   await expect(tile(menu, axe)).toHaveAttribute('aria-pressed', 'true');
   await expect(sell).toBeFocused();
 
-  await menu.getByRole('button', { name: 'Armor', exact: true }).click();
+  await menu.getByRole('group', { name: 'Inventory filters', exact: true }).getByRole('button', { name: 'Armor', exact: true }).click();
   await expect(tile(menu, armor)).toHaveAttribute('aria-pressed', 'true');
   const boots = { ...itemFixture(CATALOG_V1.items['light-boots:1:common']), id: randomUUID() };
   flow.state.inventory.unshift(boots);
@@ -265,9 +280,12 @@ test('buys through the live gateway, refreshes inventory, and confirms bound dis
   await expect(tile(page, boundItem)).toHaveCount(0);
   expect(flow.commands.map(command => command.kind)).toEqual(['buy-shop', 'discard-item']);
   await expect(page.getByText('Available gold: 260')).toBeVisible();
-  await page.getByRole('button', { name: 'Armorer', exact: true }).click();
-  // Patch 1.6 (spec "The Arena banner"): the shop says where the banner shows, before and after it is bought.
-  const offer = page.locator('.cosmetic-offer');
+  // Patch 1.9: the banner is a Renown cell, sold by the Armorer. Patch 1.6 (spec "The Arena banner"): its card says where the
+  // banner shows, before and after it is bought.
+  const shops = shopsRegion(menu);
+  await shopButton(shops, 'Shop currency', 'Renown').click();
+  await chooseOffer(shops, 'banner', info.project.name === 'mobile');
+  const offer = offerDetails(shops);
   const DESCRIPTION = 'Cosmetic · Account-bound · Shown on your profile card · No inventory slot or combat bonus';
   await expect(offer.getByText(DESCRIPTION, { exact: true })).toBeVisible();
   await offer.scrollIntoViewIfNeeded();
@@ -287,7 +305,7 @@ test('buys through the live gateway, refreshes inventory, and confirms bound dis
   await page.setViewportSize(size);
 });
 
-test('retries the same operation after a lost response and explains processing without optimistic changes', async ({ page, context }) => {
+test('retries the same operation after a lost response and explains processing without optimistic changes', async ({ page, context }, info) => {
   const flow = await inventoryFlow(context);
   await page.goto('/game/'); await openMenu(page, 'Inventory and shops');
   flow.loseNext();
@@ -298,22 +316,32 @@ test('retries the same operation after a lost response and explains processing w
   await expect(page.getByText('4 / 60 slots')).toBeVisible();
   expect(flow.commands[1]).toEqual(flow.commands[0]);
   flow.reject('processing');
+  await chooseOffer(shopsRegion(page), 'axe:1:common', info.project.name === 'mobile');
   await page.getByRole('button', { name: 'Buy Axe', exact: true }).click();
   await expect(page.locator('.inventory-panel').getByRole('alert')).toContainText('processing');
   await expect(page.getByText('4 / 60 slots')).toBeVisible();
 });
 
-test('shows level locks and reservation restrictions with both currencies', async ({ page, context }) => {
+test('shows level locks and reservation restrictions with both currencies', async ({ page, context }, info) => {
   const flow = await inventoryFlow(context);
   await page.goto('/game/'); await openMenu(page, 'Inventory and shops');
   const equipped = await selectItem(page, flow.state.inventory[2]);
   await expect(equipped.getByRole('button', { name: 'Sell' })).toBeDisabled();
   await expect(equipped.getByRole('button', { name: 'Discard' })).toBeDisabled();
-  await page.getByLabel('Shop tier').selectOption('5');
-  await expect(page.getByRole('button', { name: 'Buy Sword', exact: true })).toBeDisabled();
-  await expect(page.getByTestId('offer-sword:5:common')).toContainText('120 gold');
-  await page.getByLabel('Shop currency').selectOption('renown');
-  await expect(page.getByTestId('offer-sword:5:renown')).toContainText('100 renown');
+  // A level 1 player: the level 5 Sword is locked in both currencies, its card says why, and Buy stays disabled.
+  const shops = shopsRegion(page), details = offerDetails(shops);
+  await chooseOffer(shops, 'sword:5:common', info.project.name === 'mobile');
+  await expect(offerCell(shops, 'sword:5:common')).toContainText('120');
+  await expect(offerCell(shops, 'sword:5:common')).toHaveAccessibleDescription('Requires level 5');
+  const buy = details.getByRole('button', { name: 'Buy Sword', exact: true });
+  await expect(buy).toBeDisabled();
+  await expect(buy).toHaveAccessibleDescription(/Requires level 5/);
+  await expect(details).toContainText('120 gold each');
+  await shopButton(shops, 'Shop currency', 'Renown').click();
+  await expect(offerCell(shops, 'sword:5:renown')).toHaveAttribute('aria-pressed', 'true');
+  await expect(offerCell(shops, 'sword:5:renown')).toContainText('100');
+  await expect(details).toContainText('100 renown each');
+  await expect(buy).toBeDisabled();
   expect(flow.commands).toHaveLength(0);
 });
 
@@ -367,6 +395,171 @@ test('fixture inventory and shops remain read-only alongside the camp', async ({
   await expect(helmet).toContainText('Listed for sale');
   await expect(helmet.getByRole('button', { name: 'Sell' })).toBeDisabled();
   await expect(helmet.getByRole('button', { name: 'Discard' })).toBeDisabled();
+});
+
+// ---- The shops as an icon grid (Patch 1.9, the approved shop-grid mockup) ---------------------------------------------------
+
+test('shows the shop offers as an icon grid by level, locks pieces above the level and marks prices the wallet cannot pay', async ({ page, context }, info) => {
+  const flow = await inventoryFlow(context);
+  flow.state.progression.level = 5;
+  flow.state.wallets = { money: 100, renown: 100 };
+  if (info.project.name === 'mobile') await page.setViewportSize({ width: 360, height: 740 });
+  await page.goto('/game/');
+  const menu = await openMenu(page, 'Inventory and shops');
+  const shops = shopsRegion(menu);
+  const filters = shops.getByRole('group', { name: 'Shop filters', exact: true });
+  const currencies = shops.getByRole('group', { name: 'Shop currency', exact: true });
+  await expect(filters.getByRole('button')).toHaveText(['All', 'Weapons', 'Armor']);
+  await expect(filters.getByRole('button', { pressed: true })).toHaveText(['All']);
+  await expect(currencies.getByRole('button')).toHaveText(['Gold', 'Renown']);
+  await expect(currencies.getByRole('button', { pressed: true })).toHaveText(['Gold']);
+
+  const gold = shopOffers(CATALOG_V1).filter(offer => offer.currency === 'money');
+  expect(gold).toHaveLength(33);
+  const cells = shops.locator('[data-testid^="offer-"]');
+  await expect(cells).toHaveCount(33);
+  const shown = await cells.evaluateAll(nodes => nodes.map(node => {
+    const { width, height } = node.getBoundingClientRect();
+    const art = Array.from(node.querySelectorAll('[data-item-icon]')).find(element => {
+      const style = getComputedStyle(element);
+      return style.imageRendering === 'pixelated' && style.backgroundImage !== 'none';
+    });
+    return { id: node.getAttribute('data-testid')!.slice('offer-'.length), text: node.textContent ?? '', square: Math.abs(width - height) <= 1,
+      icon: art?.getAttribute('data-item-icon') ?? null, iconOpacity: art ? Number(getComputedStyle(art).opacity) : null,
+      lock: node.querySelector('[data-shop-lock]') !== null, locked: node.hasAttribute('data-locked'), poor: node.hasAttribute('data-poor'),
+      priceColor: getComputedStyle(node.querySelector('[data-shop-price]')!).color, tag: node.querySelector('[data-shop-level]')?.textContent ?? '' };
+  }));
+  expect(shown.map(cell => cell.id).sort()).toEqual(gold.map(offer => offer.catalogId).sort());
+  const levels = shown.map(cell => gold.find(offer => offer.catalogId === cell.id)!.requiredLevel);
+  expect(levels).toEqual([...levels].sort((a, b) => a - b));
+  for (const cell of shown) {
+    const offer = gold.find(entry => entry.catalogId === cell.id)!;
+    expect(cell.square, cell.id).toBe(true);
+    expect(cell.tag, cell.id).toBe(`L${offer.requiredLevel}`);
+    expect(cell.text, cell.id).toContain(String(offer.unitPrice));
+    expect(cell.icon, cell.id).not.toBeNull();
+    const locked = offer.requiredLevel > 5;
+    expect([cell.locked, cell.lock, cell.poor], cell.id).toEqual([locked, locked, !locked && offer.unitPrice > 100]);
+    expect(cell.iconOpacity! < 1, cell.id).toBe(locked);
+  }
+  const color = (id: string) => shown.find(cell => cell.id === id)!.priceColor;
+  expect(color('sword:5:common')).not.toBe(color('sword:1:common'));
+  await expect(offerCell(shops, 'sword:10:common')).toHaveAccessibleDescription('Requires level 10');
+  await expect(offerCell(shops, 'sword:5:common')).toHaveAccessibleDescription('Not enough available gold');
+  await expect(offerCell(shops, 'sword:1:common')).toHaveAccessibleDescription('');
+  await expect(offerCell(shops, 'sword:1:common')).toHaveAccessibleName(/^Sword, level 1, 40 gold/);
+
+  // The first cell is chosen; its card sits beside the grid on the desktop and below it on the phone.
+  await expect(offerCell(shops, shown[0].id)).toHaveAttribute('aria-pressed', 'true');
+  const details = offerDetails(shops);
+  await expect(details.getByRole('heading', { name: 'Sword', exact: true })).toBeVisible();
+  await expect(details).toContainText('Weapon · sold by the Weaponsmith');
+  await expect(details).toContainText('40 gold each');
+  await expect(details).toContainText(`NPC sell value: ${CATALOG_V1.items['sword:1:common'].npcSellValue} gold each`);
+  const grid = (await shops.getByRole('group', { name: 'Shop items' }).boundingBox())!, card = (await details.boundingBox())!;
+  if (info.project.name === 'mobile') expect(card.y).toBeGreaterThanOrEqual(grid.y + grid.height - 1);
+  else expect(card.x).toBeGreaterThanOrEqual(grid.x + grid.width - 1);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  await shops.screenshot({ path: info.outputPath(`shop-grid-${info.project.name}.png`) });
+});
+
+test('keeps the shop card, the keyboard choice and Buy on the same one of two same-name offers', async ({ page, context }, info) => {
+  const mobile = info.project.name === 'mobile';
+  const flow = await inventoryFlow(context);
+  flow.state.progression.level = 5;
+  await page.goto('/game/');
+  const menu = await openMenu(page, 'Inventory and shops');
+  const shops = shopsRegion(menu), details = offerDetails(shops);
+  const first = offerCell(shops, 'sword:1:common'), fifth = offerCell(shops, 'sword:5:common');
+  const [low, high] = [CATALOG_V1.items['sword:1:common'], CATALOG_V1.items['sword:5:common']];
+  expect(low.stats.damage).not.toBe(high.stats.damage);
+  await chooseOffer(shops, 'sword:1:common', mobile);
+  await expect(details).toContainText('Level 1 · common · Tradable');
+  await expect(details).toContainText(new RegExp(`Damage\\s*${low.stats.damage}(?!\\d)`));
+
+  // The arrow keys move between cells without choosing; Enter or Space chooses.
+  await first.focus();
+  await page.keyboard.press('ArrowDown');
+  await expect(first).not.toBeFocused();
+  await page.keyboard.press('ArrowUp');
+  await expect(first).toBeFocused();
+  for (let step = 0; step < 11; step++) await page.keyboard.press('ArrowRight');
+  await expect(fifth).toBeFocused();
+  await expect(first).toHaveAttribute('aria-pressed', 'true');
+  await expect(details).toContainText('Level 1 · common');
+  await page.keyboard.press('Enter');
+  await expect(fifth).toHaveAttribute('aria-pressed', 'true');
+  await expect(first).toHaveAttribute('aria-pressed', 'false');
+  await page.keyboard.press('ArrowLeft');
+  await page.keyboard.press('Space');
+  await expect(offerCell(shops, 'heavy-boots:1:common')).toHaveAttribute('aria-pressed', 'true');
+  await expect(details.getByRole('heading', { name: 'Heavy boots', exact: true })).toBeVisible();
+  await page.keyboard.press('ArrowRight');
+  await page.keyboard.press('Space');
+  await expect(fifth).toHaveAttribute('aria-pressed', 'true');
+  await expect(details.getByRole('heading', { name: 'Sword', exact: true })).toBeVisible();
+  await expect(details).toContainText('Level 5 · common · Tradable');
+  await expect(details).toContainText(new RegExp(`Damage\\s*${high.stats.damage}(?!\\d)`));
+  await expect(details).toContainText(/Weight\s*4/);
+  await expect(details).toContainText(`${high.moneyPrice} gold each`);
+
+  // A pointer passing over another cell while the keyboard is on Buy changes neither the card nor what Buy sends.
+  const buy = details.getByRole('button', { name: 'Buy Sword', exact: true });
+  await buy.focus();
+  await offerCell(shops, 'axe:1:common').hover();
+  await expect(buy).toBeFocused();
+  await expect(fifth).toHaveAttribute('aria-pressed', 'true');
+  await expect(details).toContainText('Level 5 · common · Tradable');
+  await page.keyboard.press('Enter');
+  await expect(menu.getByRole('status').filter({ hasText: 'Purchase confirmed.' })).toBeVisible();
+  expect(flow.commands).toMatchObject([{ kind: 'buy-shop', catalogId: 'sword:5:common', quantity: 1 }]);
+
+  // Gold to Renown keeps the chosen piece: the renown Sword of level 5.
+  await shopButton(shops, 'Shop currency', 'Renown').click();
+  await expect(offerCell(shops, 'sword:5:renown')).toHaveAttribute('aria-pressed', 'true');
+  await expect(details).toContainText('100 renown each');
+  await expect(details).toContainText('Level 5 · common · Account-bound');
+  await expect(details).toContainText('Account-bound · Cannot sell');
+  await details.getByRole('button', { name: 'Buy Sword', exact: true }).click();
+  await expect.poll(() => flow.commands.length).toBe(2);
+  expect(flow.commands[1]).toMatchObject({ kind: 'buy-shop', catalogId: 'sword:5:renown', quantity: 1 });
+});
+
+test('chooses the first visible offer when a filter hides the choice, and sells the Arena banner in Renown at the Armorer', async ({ page, context }, info) => {
+  const mobile = info.project.name === 'mobile';
+  const flow = await inventoryFlow(context);
+  await page.goto('/game/');
+  const menu = await openMenu(page, 'Inventory and shops');
+  const shops = shopsRegion(menu), details = offerDetails(shops);
+  const cells = shops.locator('[data-testid^="offer-"]');
+  await chooseOffer(shops, 'axe:1:common', mobile);
+  await shopButton(shops, 'Shop filters', 'Weapons').click();
+  await expect(cells).toHaveCount(12);
+  await expect(offerCell(shops, 'axe:1:common')).toHaveAttribute('aria-pressed', 'true');
+  await shopButton(shops, 'Shop filters', 'Armor').click();
+  await expect(cells).toHaveCount(21);
+  await expect(offerCell(shops, 'round-shield:1:common')).toHaveAttribute('aria-pressed', 'true');
+  await expect(details.getByRole('button', { name: 'Buy Round shield', exact: true })).toBeVisible();
+  await expect(details).toContainText('Off-hand · sold by the Armorer');
+
+  await shopButton(shops, 'Shop currency', 'Renown').click();
+  await expect(cells).toHaveCount(22);
+  const banner = offerCell(shops, 'banner');
+  await expect(banner).toBeVisible();
+  await expect(banner).toContainText(String(CATALOG_V1.cosmetics.banner.renownPrice));
+  await chooseOffer(shops, 'banner', mobile);
+  await expect(details).toContainText('Cosmetic · Account-bound · Shown on your profile card · No inventory slot or combat bonus');
+  await expect(details).toContainText(`${CATALOG_V1.cosmetics.banner.renownPrice} renown`);
+  await expect(details.getByRole('spinbutton', { name: 'Purchase quantity' })).toHaveCount(0);
+  await shopButton(shops, 'Shop filters', 'Weapons').click();
+  await expect(banner).toHaveCount(0);
+  await expect(offerCell(shops, 'sword:1:renown')).toHaveAttribute('aria-pressed', 'true');
+  await shopButton(shops, 'Shop filters', 'All').click();
+  await expect(cells).toHaveCount(34);
+  await shopButton(shops, 'Shop currency', 'Gold').click();
+  await expect(cells).toHaveCount(33);
+  await expect(offerCell(shops, 'sword:1:common')).toHaveAttribute('aria-pressed', 'true');
+  expect(flow.commands).toEqual([]);
 });
 
 // ---- The gear view (launch feedback, note 9) ------------------------------------------------------------------------------
@@ -626,7 +819,7 @@ test('explains a gear change the server no longer allows in words, and reloads t
 });
 
 for (const action of ['sell-item', 'discard-item', 'buy-shop', 'buy-banner'] as const) {
-  test(`keeps keyboard focus on a busy inventory ${action} button and ignores repeated activation`, async ({ page, context }) => {
+  test(`keeps keyboard focus on a busy inventory ${action} button and ignores repeated activation`, async ({ page, context }, info) => {
     await watchFocus(page);
     const flow = await inventoryFlow(context);
     flow.reject('processing');
@@ -646,7 +839,10 @@ for (const action of ['sell-item', 'discard-item', 'buy-shop', 'buy-banner'] as 
     if (action === 'sell-item') button = (await selectItem(panel, flow.state.inventory[0])).getByRole('button', { name: 'Sell', exact: true });
     else if (action === 'discard-item') button = (await selectItem(panel, flow.state.inventory[1])).getByRole('button', { name: 'Discard', exact: true });
     else {
-      if (action === 'buy-banner') await panel.getByRole('button', { name: 'Armorer', exact: true }).click();
+      if (action === 'buy-banner') {
+        await shopButton(shopsRegion(panel), 'Shop currency', 'Renown').click();
+        await chooseOffer(shopsRegion(panel), 'banner', info.project.name === 'mobile');
+      }
       button = panel.getByRole('button', { name: action === 'buy-banner' ? 'Buy Arena banner' : 'Buy Sword', exact: true });
     }
     const activate = async () => {

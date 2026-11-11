@@ -128,15 +128,11 @@ main[tabindex="-1"]:focus { outline: none; }
 .sample-replays a { color: #b9e6f5; text-decoration: underline; text-underline-offset: 3px; }
 @media (max-width: 540px) { .replay-page { padding: 1rem; } }
 
-/* Inventory and the two merchants share compact, responsive item cards. */
-.inventory-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 220px), 1fr)); gap: 12px; }
-.inventory-item { padding: 16px; border: 1px solid var(--border); border-radius: 10px; background: #172338; min-width: 0; }
-.inventory-item h3 { margin-top: 0; }
-.inventory-item p { font-size: .9rem; overflow-wrap: anywhere; }
+/* Inventory and shops (their grids and cards are InventoryPanel.module.css and ShopPanel.module.css): 44 px controls and fields. */
 .inventory-panel button { min-height: 44px; padding: 9px 14px; }
 .inventory-panel input, .inventory-panel select { min-height: 44px; padding: 8px; width: 100%; background: #111c2d; color: #f4ead5; border: 1px solid var(--field-line); border-radius: 6px; }
 .inventory-panel label { display: grid; gap: 6px; }
-.item-actions, .shop-merchants { display: flex; flex-wrap: wrap; gap: 8px; }
+.item-actions { display: flex; flex-wrap: wrap; gap: 8px; }
 /* Gear (launch feedback, note 9): the "Wearing now" row, the badges and the reasons on the item cards. Text on the fills below
    is at least 4.5:1 (cream or gold on the dark fills, dark on the badge fills). */
 .gear-now { margin: 16px 0 20px; padding: 14px; border: 1px solid var(--line); border-radius: 10px; background: #111b2d; }
@@ -157,19 +153,13 @@ main[tabindex="-1"]:focus { outline: none; }
 .gear-badge[data-badge="wearing"] { color: #0d1f17; background: #4fb58a; }
 .gear-badge[data-badge="wears-from"] { color: #101625; background: var(--gold); }
 .gear-badge[data-badge="off-at"] { color: var(--ink); background: var(--line); }
-.inventory-item[data-wear] { border-color: #4fb58a; background: #22303f; }
 .gear-note { margin: 0 0 8px; color: var(--muted); }
-.inventory-item [role="status"], .inventory-item [role="alert"] { margin: 10px 0 0; font-size: .85rem; }
 /* Wear is the card's main action (gold fill, dark text); Undo is its outline form, as in the approved mockup. */
 .inventory-panel .gear-wear:enabled { color: #101625; background: var(--gold); border: 1px solid #ffdf97; font-weight: 700; }
 .inventory-panel .gear-undo:enabled { color: var(--gold); background: transparent; border: 1px solid var(--gold); font-weight: 700; }
 /* A gear button is aria-disabled while its command is sent: it keeps the focus, and looks unavailable. */
 .inventory-panel button[aria-disabled="true"] { cursor: not-allowed; opacity: .7; }
-/* The chosen merchant: gold on a dark fill (8.8:1; gold on the default button grey was 3.3:1, Task 23.5). */
-.shop-merchants button[aria-pressed="true"] { border-color: #ecc677; color: #ecc677; background: #2f2a1e; }
-.shop-filters { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 12px; margin: 16px 0; }
 .shops-panel { margin-top: 32px; padding-top: 20px; border-top: 1px solid #475670; }
-.cosmetic-offer { margin-top: 16px; }
 .inventory-panel dialog { max-width: min(440px, calc(100vw - 32px)); color: #f4ead5; background: #172338; border: 2px solid #ecc677; border-radius: 12px; padding: 24px; }
 .inventory-panel dialog::backdrop { background: #070b17bb; }
 .inventory-panel dialog button { margin: 6px; }

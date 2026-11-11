@@ -801,12 +801,17 @@ test.describe('release accessibility in the fixture preview', () => {
     // The card closes first: on a phone the taller card (Task 11c) covers the open sheet's own close button, as a player sees it.
     await page.getByRole('dialog', { name: /^Profile: / }).getByRole('button', { name: 'Close profile' }).click();
     const shops = await settled(await openMenu(page, 'Inventory and shops'));
-    // Reached by Tab, so the button shows its focus ring (:focus-visible).
-    await shops.getByRole('button', { name: 'Weaponsmith' }).focus();
+    // Reached by Tab, so the button shows its focus ring (:focus-visible). Patch 1.9: the shop's filters, then its first cell.
+    const shopFilters = shops.getByRole('group', { name: 'Shop filters', exact: true });
+    await shopFilters.getByRole('button', { name: 'All', exact: true }).focus();
     await page.keyboard.press('Tab');
-    await expect(shops.getByRole('button', { name: 'Armorer' })).toBeFocused();
+    await expect(shopFilters.getByRole('button', { name: 'Weapons', exact: true })).toBeFocused();
     expect(await contrastIssues(shops.getByRole('region', { name: 'Shops' }), { focusRing: true }), 'the shops').toEqual([]);
-    await shot(page, testInfo, 'shops-merchants');
+    await shot(page, testInfo, 'shops-filters');
+    await shops.getByRole('group', { name: 'Shop currency', exact: true }).getByRole('button', { name: 'Renown', exact: true }).focus();
+    await page.keyboard.press('Tab');
+    await expect(shops.getByTestId('offer-sword:1:common')).toBeFocused();
+    expect(await contrastIssues(shops.getByRole('region', { name: 'Shops' }), { focusRing: true }), 'a shop cell focused').toEqual([]);
     // The scenes.
     await page.goto(`/game/?mode=fixture&view=replay&activity=${REPLAY_FIXTURES.pvp.activityId}`);
     await page.waitForFunction(() => window.__cloudiatorBattle?.debug()?.ready === true, null, { timeout: 45_000 });

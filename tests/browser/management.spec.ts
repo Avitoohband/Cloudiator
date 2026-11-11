@@ -155,7 +155,7 @@ test.describe('profile cards and merchants in the fixture preview', () => {
     await expect(menuDialog(page, 'My gladiator')).toBeVisible();
   });
 
-  test('opens Inventory and shops at the weapon smith when the merchant is clicked', async ({ page }) => {
+  test('opens Inventory and shops at the merchant’s shop filter when a merchant is clicked', async ({ page }) => {
     await openCamp(page, '/game/?mode=fixture');
     await expectOwnerShown(page, 'Aster');
     // Hold the camp still so the merchants stay where they are drawn.
@@ -163,14 +163,18 @@ test.describe('profile cards and merchants in the fixture preview', () => {
     await clickInCamp(page, 'npc:smith');
     const inventory = menuDialog(page, 'Inventory and shops');
     await expect(inventory).toBeVisible();
-    await expect(inventory.getByRole('button', { name: 'Weaponsmith', exact: true })).toHaveAttribute('aria-pressed', 'true');
+    // Patch 1.9: the merchant chooses the shop's filter (Weapons or Armor) and its first piece.
+    const shopFilters = inventory.getByRole('group', { name: 'Shop filters', exact: true });
+    await expect(shopFilters.getByRole('button', { pressed: true })).toHaveText(['Weapons']);
+    await expect(inventory.getByTestId('offer-sword:1:common')).toHaveAttribute('aria-pressed', 'true');
     await expect(inventory.getByRole('heading', { name: 'Shops', exact: true })).toBeInViewport();
     // On desktop pan the merchant into the camp beside the open panel. Close the phone sheet before tapping camp.
     const touch = await touchLayout(page);
     if (touch) await closeMenu(page);
     await clickInCamp(page, 'npc:armorer', touch ? undefined : inventory);
     await expect(inventory).toBeVisible();
-    await expect(inventory.getByRole('button', { name: 'Armorer', exact: true })).toHaveAttribute('aria-pressed', 'true');
+    await expect(shopFilters.getByRole('button', { pressed: true })).toHaveText(['Armor']);
+    await expect(inventory.getByTestId('offer-round-shield:1:common')).toHaveAttribute('aria-pressed', 'true');
     await expect(inventory.getByRole('heading', { name: 'Shops', exact: true })).toBeInViewport();
   });
 

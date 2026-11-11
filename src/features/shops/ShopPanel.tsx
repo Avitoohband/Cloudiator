@@ -1,68 +1,122 @@
 'use client';
 
-import { useEffect, useId, useRef, useState } from 'react';
+import { useEffect, useId, useRef, useState, type KeyboardEvent } from 'react';
 import type { OwnerState } from '@contracts/reads';
 import { CATALOG_V1 } from '@domain/catalog-v1';
-import { shopOffers, type Merchant } from '@domain/inventory';
+import type { Merchant } from '@domain/inventory';
+import { ItemIcon } from '../inventory/ItemPresentation';
+import inventory from '../inventory/InventoryPanel.module.css';
+import { BannerArt, CurrencyIcon } from './ShopArt';
+import { BannerCard, OfferCard, spendable } from './ShopCard';
+import {
+  BANNER, SHOP_FILTERS, counterpartId, currencyWord, merchantFilter, shopChoices, type ShopChoice, type ShopCurrency, type ShopFilter,
+} from './shop-offers';
+import styles from './ShopPanel.module.css';
+
+const CURRENCIES = [['money', 'Gold'], ['renown', 'Renown']] as const;
+const EXPLAINERS: Record<ShopCurrency, string> = {
+  money: 'Common equipment. NPC sell value is shown for comparison.',
+  renown: 'Account-bound gear. +10% weapon damage or armor in Arena and tournaments; no expedition bonus.',
+};
 
 /**
- * The weapon smith's and the armorer's shops. `initialMerchant` opens that merchant's tab and brings the shops into view in
- * their scrolling menu (a click on the merchant in the camp, Task 13.7); without it the weapon smith's tab shows.
+ * The weapon smith's and the armorer's shops as one icon grid (Patch 1.9, the approved shop-grid mockup): every level in
+ * one grid by required level, filtered to All, Weapons or Armor, in gold or renown, and the chosen cell's card beside it
+ * (below it on a phone). `initialMerchant` opens that merchant's filter and brings the shops into view in their scrolling
+ * menu (a click on the merchant in the camp, Task 13.7). Cells are chosen by a click, a tap, or Enter or Space after the
+ * arrow keys; a pointer passing over a cell changes nothing, so Buy always sends the card's offer.
  */
 export function ShopPanel({ owner, busy, preview, buy, initialMerchant }: {
   owner: OwnerState; busy: boolean; preview: boolean; buy(catalogId: string, quantity: number): void; initialMerchant?: Merchant;
 }) {
-  const [merchant, setMerchant] = useState<Merchant>(initialMerchant ?? 'weaponsmith');
-  const section = useRef<HTMLElement>(null);
+  const section = useRef<HTMLElement>(null), grid = useRef<HTMLDivElement>(null);
   useEffect(() => { if (initialMerchant) scrollToTop(section.current); }, [initialMerchant]);
-  const [currency, setCurrency] = useState<'money' | 'renown'>('money');
-  // The currency as a player reads it: the data keeps `money`, the word is gold (Task 7b).
-  const currencyWord = currency === 'money' ? 'gold' : 'renown';
-  const [tier, setTier] = useState(1), [quantity, setQuantity] = useState(1);
-  const validQuantity = Number.isSafeInteger(quantity) && quantity >= 1 && quantity <= 60;
-  const available = owner.wallets[currency] - owner.reservedFees[currency];
-  const full = owner.inventory.length + quantity > owner.inventoryCapacity;
-  const banner = CATALOG_V1.cosmetics.banner;
-  const ownsBanner = owner.ownedCosmetics.some(item => item.catalogId === banner.id);
-  // Each message names what it explains (Task 23.5): the quantity field and the Buy buttons are described by it.
-  const ids = useId();
-  const quantityId = `${ids}-quantity`, fullId = `${ids}-full`;
-  const shared = [!validQuantity && quantityId, full && fullId].filter(Boolean).join(' ');
-  return <section ref={section} aria-labelledby="shops-heading" className="shops-panel">
-    <h2 id="shops-heading">Shops</h2>
-    <div className="shop-merchants" aria-label="Merchants">
-      <button aria-pressed={merchant === 'weaponsmith'} onClick={() => setMerchant('weaponsmith')}>Weaponsmith</button>
-      <button aria-pressed={merchant === 'armorer'} onClick={() => setMerchant('armorer')}>Armorer</button>
+  const [filter, setFilter] = useState<ShopFilter>(merchantFilter(initialMerchant));
+  const [currency, setCurrency] = useState<ShopCurrency>('money');
+  const [chosenId, setChosenId] = useState<string | null>(null);
+  /** The cell the arrow keys last reached: the grid's one Tab stop while it is shown, else the chosen cell. */
+  const [stopId, setStopId] = useState<string | null>(null);
+  const [quantity, setQuantity] = useState(1);
+  const choices = shopChoices(filter, currency);
+  // The first visible cell when nothing visible is chosen; remembered, so Buy never sends an offer the grid hides.
+  const chosen = choices.find(choice => choice.id === chosenId) ?? choices[0];
+  if (chosenId !== chosen.id) setChosenId(chosen.id);
+  const tabStop = choices.some(choice => choice.id === stopId) ? stopId : chosen.id;
+  const ids = useId(), detailsId = `${ids}-details`;
+  const word = currencyWord(currency);
+
+  /** A currency switch keeps the chosen piece when the other currency sells it (the same kind and level). */
+  function switchCurrency(next: ShopCurrency) {
+    if (next === currency) return;
+    const counterpart = counterpartId(chosen.id, next);
+    setCurrency(next);
+    if (counterpart) setChosenId(counterpart);
+  }
+  /** The arrow keys move the focus a cell (left, right) or a row (up, down) at a time; Home and End go to the ends. */
+  function move(event: KeyboardEvent<HTMLDivElement>) {
+    const cells = Array.from(grid.current?.querySelectorAll<HTMLButtonElement>('[data-shop-cell]') ?? []);
+    const index = cells.indexOf(event.target as HTMLButtonElement);
+    if (index < 0 || event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return;
+    const columns = grid.current ? getComputedStyle(grid.current).gridTemplateColumns.split(' ').length : 1;
+    const steps: Record<string, number> = { ArrowRight: index + 1, ArrowLeft: index - 1, ArrowDown: index + columns, ArrowUp: index - columns, Home: 0, End: cells.length - 1 };
+    const next = steps[event.key];
+    if (next === undefined) return;
+    event.preventDefault();
+    cells[next]?.focus();
+  }
+  function cell(choice: ShopChoice) {
+    const offer = choice.kind === 'offer' ? choice.offer : null, entry = offer ? CATALOG_V1.items[offer.catalogId] : null;
+    const price = offer ? offer.unitPrice : BANNER.renownPrice;
+    const owned = !offer && owner.ownedCosmetics.some(item => item.catalogId === BANNER.id);
+    const locked = !!offer && owner.progression.level < offer.requiredLevel;
+    const poor = !locked && !owned && price > spendable(owner, currency);
+    const name = entry ? [`${entry.name}, level ${entry.tier}`, entry.binding === 'bound' && 'account-bound', `${price} ${word}`]
+      : [BANNER.name, 'cosmetic', `${price} ${word}`, owned && 'owned'];
+    const description = locked && offer ? `Requires level ${offer.requiredLevel}` : poor ? `Not enough available ${word}` : undefined;
+    return <button key={choice.id} type="button" className={`${inventory.tile} ${styles.cell}`} data-shop-cell="" data-testid={`offer-${choice.id}`}
+      data-locked={locked ? '' : undefined} data-poor={poor ? '' : undefined}
+      aria-label={name.filter(Boolean).join(', ')} aria-description={description} aria-controls={detailsId} aria-pressed={choice.id === chosen.id}
+      tabIndex={choice.id === tabStop ? 0 : -1} onFocus={() => setStopId(choice.id)} onClick={() => setChosenId(choice.id)}>
+      {offer ? <ItemIcon catalogId={offer.catalogId} /> : <BannerArt />}
+      {offer ? <span className={styles.level} data-shop-level="" aria-hidden="true">L{offer.requiredLevel}</span>
+        : owned && <span className={styles.owned} aria-hidden="true">✓</span>}
+      {locked && <span className={styles.lock} data-shop-lock="" aria-hidden="true">
+        <svg width="10" height="11" viewBox="0 0 10 11"><rect x=".5" y="4.5" width="9" height="6" rx="1" fill="currentColor" /><path d="M2.5 4.5V3a2.5 2.5 0 0 1 5 0v1.5" fill="none" stroke="currentColor" strokeWidth="1.4" /></svg>
+      </span>}
+      <span className={styles.price} data-shop-price="" aria-hidden="true"><CurrencyIcon currency={currency} size={10} />{price}</span>
+    </button>;
+  }
+  const purchase = { owner, busy, preview, buy };
+  return <section ref={section} aria-labelledby="shops-heading" className={`shops-panel ${styles.panel}`}>
+    <div className={styles.top}>
+      <h2 id="shops-heading">Shops</h2>
+      <p className={styles.wallet}>
+        <span><CurrencyIcon currency="money" size={14} /> Gold <b>{spendable(owner, 'money')}</b></span>
+        <span><CurrencyIcon currency="renown" size={14} /> Renown <b>{spendable(owner, 'renown')}</b></span>
+      </p>
     </div>
-    <div className="shop-filters">
-      <label>Shop currency<select value={currency} onChange={e => setCurrency(e.target.value as typeof currency)}><option value="money">Gold</option><option value="renown">Renown</option></select></label>
-      <label>Shop tier<select value={tier} onChange={e => setTier(Number(e.target.value))}>{[1, 5, 10].map(level => <option key={level} value={level}>Level {level}</option>)}</select></label>
-      <label>Purchase quantity<input type="number" min="1" max="60" step="1" value={quantity || ''} onChange={e => setQuantity(Number(e.target.value))}
-        aria-invalid={!validQuantity || full ? true : undefined} aria-describedby={shared || undefined} /></label>
+    <div className={inventory.columns}>
+      <div>
+        <div className={styles.bar}>
+          <div className={inventory.filters} role="group" aria-label="Shop filters">
+            {SHOP_FILTERS.map(option => <button key={option} type="button" aria-pressed={option === filter} onClick={() => setFilter(option)}>{option}</button>)}
+          </div>
+          <div className={inventory.filters} role="group" aria-label="Shop currency">
+            {CURRENCIES.map(([value, label]) => <button key={value} type="button" aria-pressed={value === currency} onClick={() => switchCurrency(value)}>{label}</button>)}
+          </div>
+        </div>
+        <div className={`${inventory.gridScroll} ${styles.scroll}`} role="group" aria-label="Shop items" onKeyDown={move}>
+          <div ref={grid} className={inventory.grid}>
+            {choices.map(cell)}
+            {Array.from({ length: Math.max(0, 30 - choices.length) }, (_, index) => <span key={index} className={inventory.emptyCell} aria-hidden="true" />)}
+          </div>
+        </div>
+        <p className={`muted ${styles.foot}`}>{EXPLAINERS[currency]} L = level needed; pieces with a lock are above your level. {choices.length} items.</p>
+      </div>
+      <section id={detailsId} aria-label="Offer details" className={inventory.details}>
+        {chosen.kind === 'offer' ? <OfferCard offer={chosen.offer} quantity={quantity} setQuantity={setQuantity} {...purchase} /> : <BannerCard {...purchase} />}
+      </section>
     </div>
-    <p>{currency === 'renown' ? 'Account-bound gear. +10% weapon damage or armor in Arena and tournaments; no expedition bonus.' : 'Common equipment. NPC sell value is shown for comparison.'}</p>
-    {!validQuantity && <p id={quantityId} role="status">Choose a whole quantity from 1 to 60.</p>}
-    {full && <p id={fullId} role="status">Inventory full for this purchase. Clear enough slots first.</p>}
-    <div className="inventory-grid">{shopOffers(CATALOG_V1).filter(offer => offer.merchant === merchant && offer.currency === currency && offer.requiredLevel === tier).map(offer => {
-      const entry = CATALOG_V1.items[offer.catalogId], total = offer.unitPrice * quantity;
-      const levelLocked = owner.progression.level < offer.requiredLevel;
-      const poor = total > available;
-      const levelId = `${ids}-${offer.catalogId}-level`, moneyId = `${ids}-${offer.catalogId}-money`;
-      const described = [shared, levelLocked && levelId, poor && moneyId].filter(Boolean).join(' ');
-      return <article className="inventory-item" key={offer.catalogId} data-testid={`offer-${offer.catalogId}`}>
-        <h3>{entry.name}</h3><p>Level {entry.tier} · {entry.hands === 2 ? 'Two hands' : entry.slot}</p>
-        <p>Damage {entry.stats.damage} · Armor {entry.stats.armor} · Weight {entry.stats.weight}</p>
-        <p>{offer.unitPrice} {currencyWord} each{quantity > 1 && ` · ${total} total`}</p>
-        <p>{entry.npcSellValue === null ? 'Account-bound · Cannot sell' : `NPC sell value: ${entry.npcSellValue} gold`}</p>
-        {levelLocked && <p id={levelId}>Requires level {entry.tier}</p>}{poor && <p id={moneyId}>Not enough available {currencyWord}</p>}
-        <button disabled={!validQuantity || (!preview && (levelLocked || full || poor))} aria-disabled={busy || undefined} aria-describedby={described || undefined} onClick={() => { if (!busy) buy(offer.catalogId, quantity); }}>Buy {entry.name}</button>
-      </article>;
-    })}</div>
-    {merchant === 'armorer' && <article className="inventory-item cosmetic-offer">
-      {/* Patch 1.6 (spec "The Arena banner"): the banner shows on the owner's profile card, and the shop says so. */}
-      <h3>{banner.name}</h3><p>Cosmetic · Account-bound · Shown on your profile card · No inventory slot or combat bonus</p><p>{banner.renownPrice} renown</p>
-      {ownsBanner ? <p>{banner.name} · Owned · Shown on your profile card</p> : <button disabled={!preview && owner.wallets.renown - owner.reservedFees.renown < banner.renownPrice} aria-disabled={busy || undefined} onClick={() => { if (!busy) buy(banner.id, 1); }}>Buy Arena banner</button>}
-    </article>}
   </section>;
 }
 

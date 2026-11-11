@@ -1,0 +1,130 @@
+/* The shops as an icon grid (Patch 1.9, the approved shop-grid mockup). The grid, the cells and the card are the inventory's
+   (InventoryPanel.module.css); these rules add the shop's header, its two button groups, and each cell's level, lock and price.
+   Rules that change an inventory class are written with two classes, so they win whatever order the stylesheets load in. */
+
+.top {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px 12px;
+  margin-bottom: 8px;
+}
+
+.top h2 { margin: 0; }
+
+.wallet {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin: 0;
+  color: var(--muted);
+  font-size: .82rem;
+}
+
+.wallet span { display: inline-flex; align-items: center; gap: 4px; }
+.wallet b { color: var(--ink); }
+
+.bar {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+
+.bar > div { margin-bottom: 0; }
+
+.panel .scroll { height: 360px; }
+
+.coin {
+  display: inline-block;
+  flex: none;
+  background-repeat: no-repeat;
+  image-rendering: pixelated;
+  vertical-align: middle;
+}
+
+/* The icon sits a little high, clear of the price chip. */
+.scroll .cell > [data-item-icon] { margin-top: -8px; }
+
+/* Above the player's level: a darker cell, a faded grey icon, a lock and a grey price. */
+.scroll .cell[data-locked] { background: linear-gradient(155deg, #262626, #1b1b20 74%); }
+.scroll .cell[data-locked] > [data-item-icon] { opacity: .38; filter: grayscale(.7); }
+
+.level,
+.lock,
+.owned,
+.price {
+  position: absolute;
+  padding: 0 3px;
+  border-radius: 3px;
+  font: 700 10px/14px system-ui, sans-serif;
+}
+
+.level { inset: 2px auto auto 2px; color: #ede2cf; background: #39312b; }
+.owned { inset: 2px auto auto 2px; min-width: 14px; color: #edf2e0; background: #202719; text-align: center; }
+
+.lock {
+  inset: 2px 2px auto auto;
+  display: grid;
+  place-items: center;
+  width: 16px;
+  height: 14px;
+  padding: 0;
+  color: #f0b8b0;
+  background: #4a2d2d;
+}
+
+.price {
+  inset: auto 2px 2px 2px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  color: #f3e2b3;
+  background: #14120f;
+  font-variant-numeric: tabular-nums;
+}
+
+/* A price the spendable wallet cannot pay is red; a locked piece's price is grey. */
+.cell[data-poor] .price { color: #ff9c8f; }
+.cell[data-locked] .price { color: #9d9488; }
+
+/* The Arena banner: the icon atlas has no banner frame, so a pole and a red cloth with a gold emblem, drawn here. */
+.bannerArt {
+  position: relative;
+  display: inline-block;
+  flex: none;
+  width: var(--banner-size);
+  height: var(--banner-size);
+}
+
+.bannerArt::before {
+  content: '';
+  position: absolute;
+  inset: 8% 12% auto;
+  height: 9%;
+  border-radius: 2px;
+  background: #c9a25a;
+}
+
+.bannerArt::after {
+  content: '';
+  position: absolute;
+  inset: 16% 24% 6%;
+  background: radial-gradient(circle at 50% 38%, #f2c66b 0 16%, transparent 17%), linear-gradient(#c0463a, #8f2c27);
+  clip-path: polygon(0 0, 100% 0, 100% 100%, 50% 78%, 0 100%);
+}
+
+.foot { margin: 10px 0 0; }
+
+.priceLine { display: flex; align-items: center; gap: 6px; font-weight: 700; }
+.warn { color: #ffb4a8; }
+
+/* Buy is the card's main action: gold fill, dark text, as Wear is in the inventory. */
+.panel .buy:enabled { color: #101625; background: var(--gold); border: 1px solid #ffdf97; border-radius: 6px; font-weight: 700; }
+
+@media (hover: none), (max-width: 480px) {
+  .panel .scroll { height: 194px; }
+}

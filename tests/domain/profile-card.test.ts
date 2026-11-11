@@ -6,7 +6,7 @@ import type { PublicActor, WorldSnapshot } from '@contracts/reads';
 import { CATALOG_V1 } from '@domain/catalog-v1';
 import type { ProfileRead, PublicBuild, PublicGear } from '@/lib/api/reads';
 import { ProfileCard, ProfileLayer, placeCard } from '@/features/character/ProfileCard';
-import { ShopPanel } from '@/features/shops/ShopPanel';
+import { BannerCard } from '@/features/shops/ShopCard';
 import { ownerFixture, worldFixture } from '../fixtures/domain';
 
 const noop = () => {};
@@ -302,7 +302,8 @@ describe('profile card', () => {
   });
 
   it('says in the shop that the banner shows on the profile card, bought or not', () => {
-    const shop = (owner = ownerFixture) => text(renderToStaticMarkup(createElement(ShopPanel, { owner, busy: false, preview: false, buy: noop, initialMerchant: 'armorer' })));
+    // Patch 1.9: the banner's card in the shop grid (a Renown cell, sold by the Armorer).
+    const shop = (owner = ownerFixture) => text(renderToStaticMarkup(createElement(BannerCard, { owner, busy: false, preview: false, buy: noop })));
     const unowned = shop();
     expect(unowned).toContain('Cosmetic · Account-bound · Shown on your profile card · No inventory slot or combat bonus');
     expect(unowned).toContain('Buy Arena banner');

@@ -1,6 +1,6 @@
 # Cloudiator roadmap
 
-Updated 2026-11-08. Production is **1.8**. The later items are grouped by area. They have no assigned patch number unless stated.
+Updated 2026-11-11. Production is **1.8.1**. The later items are grouped by area. They have no assigned patch number unless stated.
 
 ## Patch overview
 
@@ -17,6 +17,8 @@ Updated 2026-11-08. Production is **1.8**. The later items are grouped by area. 
 | 1.7 | Live | 31 wearable titles, including Founder. Past achievements count, and players can see their title progress and equip a title. |
 | 1.7.1 | Live | Hand-given Game Master and High Ground titles, visible in the picker for holders. |
 | 1.8 | Live | Party dungeons, hired fighters and the Ludus Nimbus bot team, live viewing, dungeon replays, and four dungeon titles. |
+| 1.8.1 | Live | Clearer attack speed label and help for gladiator stats and attributes. |
+| 1.9 | Release checks | Game Info in camp with a Wiki and public Future Updates. |
 
 Release details and dates are in the [changelog](CHANGELOG.md).
 

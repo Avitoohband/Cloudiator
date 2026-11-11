@@ -1,5 +1,11 @@
 # Local identity backend and migrations
 
+## Game Info draft storage, verified locally
+
+`20261111075248_game_info.sql` adds the two published Game Info documents, private drafts, the private editor allowlist and the backend-only edit RPC. The tested source is `supabase/sql/26-game-info.sql`. It seeds only public guide and roadmap copy, with two empty video slots and an empty editor allowlist. The local migration used pg-delta and was completed with the tested source. Clean replay matched the source across 1,513 fingerprint lines, 728 access audit lines and five seed digests. Both lint and advisors passed with no new findings. The sealed migration SHA-256 is `b1e47d33c331c8c27685220a739f0a95cb29c2e412792739b78976cea99341ff`.
+
+45 focused database tests passed with stable Edge. They include public read isolation, owner authorization, MCP draft edits on both tabs through the actual MCP process and handler, conflicting revisions, atomic publication and the affected restore checks. Evidence is in parent `logs/game-info-store-20261111/` and `logs/game-info-build-20261111/`. This is the next migration on `codex/game-info`; reconcile its sequence with the future dungeon parties plan before release.
+
 ## Patch 1.8 rollout correction (M31): Cinder
 
 Avi chose **Cinder** for the level 7 skirmisher on 2026-11-08 after the production registration preflight found the

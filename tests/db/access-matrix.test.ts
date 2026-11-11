@@ -249,6 +249,7 @@ const SERVICE_ROLE = [
   // (create_gladiator and the boundary functions, as service_role) needs EXECUTE; clients never do.
   'function private.valid_appearance(jsonb): EXECUTE',
   'function private.valid_bracket(uuid, jsonb, jsonb): EXECUTE',
+  'function private.valid_game_info_document(text, jsonb): EXECUTE',
   'function private.valid_preparation(uuid, jsonb): EXECUTE',
   'function private.valid_tournament_outcomes(text, text, text, text, jsonb): EXECUTE',
   'function public.advance_boundary(bigint, uuid): EXECUTE',
@@ -268,6 +269,7 @@ const SERVICE_ROLE = [
   'function public.discard_item(uuid, uuid, jsonb): EXECUTE',
   // Launch feedback (M23): the whole day saved in one command, backend only like edit_schedule.
   'function public.edit_day_schedule(uuid, uuid, jsonb): EXECUTE',
+  'function public.edit_game_info(uuid, boolean, jsonb): EXECUTE',
   'function public.edit_schedule(uuid, uuid, jsonb): EXECUTE',
   'function public.expedition_settlement_input(uuid, uuid): EXECUTE',
   'function public.fail_job(uuid, uuid, text): EXECUTE',
@@ -303,6 +305,8 @@ const SERVICE_ROLE = [
   'relation private.dungeon_run_members: DELETE,INSERT,SELECT',
   'relation private.dungeon_runs: DELETE,INSERT,SELECT',
   'relation private.expedition_plans: DELETE,INSERT,SELECT',
+  'relation private.game_info_drafts: SELECT,UPDATE',
+  'relation private.game_info_editors: SELECT',
   'relation private.job_attempts: DELETE,INSERT,SELECT,UPDATE',
   'relation private.job_dependencies: DELETE,INSERT,SELECT',
   'relation private.jobs: DELETE,INSERT,SELECT,UPDATE',
@@ -330,6 +334,7 @@ const SERVICE_ROLE = [
   // Task 23.8 (M22): a character's rest at home, written by boundary phase 3 and consume_command_rate.
   'relation public.character_rests: INSERT,SELECT,UPDATE',
   'relation public.dungeon_fights: DELETE,INSERT,SELECT',
+  'relation public.game_info_reads: SELECT,UPDATE',
   // Game messages (M25): the backend only reads them (the owner read's inbox, read_message); the operator writes as postgres.
   'relation public.game_messages: SELECT',
   // Titles (M28): earned titles and the ownership history are only ever inserted (guard_frozen refuses update and delete);

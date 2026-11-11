@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
 import postgres from 'postgres';
 
 // Task 24.10 (review Minor 5): the SQL around scripts/restore-hosted.ps1's load, run as the local postgres role (not a
@@ -40,8 +40,9 @@ describe('the hosted restore SQL', () => {
       return JSON.parse(results[results.length - 1][0].jsonb_build_object);
     });
     expect(Object.keys(facts).sort()).toEqual(['accounts', 'characters', 'epochSet', 'identities', 'migrations', 'schedulerEnabled']);
-    // M01–M31, including the 1.8 dungeon migration and the follow-up bot label correction.
-    expect(facts.migrations).toHaveLength(31);
+    const versions = readdirSync(new URL('../../supabase/migrations/', import.meta.url))
+      .flatMap(name => /^(\d{14})_.+\.sql$/.exec(name)?.[1] ?? []).sort();
+    expect(facts.migrations.map((entry: { version: string }) => entry.version)).toEqual(versions);
     for (const key of ['accounts', 'identities', 'characters']) expect(Number.isSafeInteger(facts[key])).toBe(true);
   });
 
@@ -65,7 +66,8 @@ describe('the hosted restore SQL', () => {
       await tx.unsafe(BEFORE);
       const during = { disabled: await disabledTriggers(tx),
         rows: Number((await tx`select (select count(*) from private.scheduler) + (select count(*) from private.coordinator)
-          + (select count(*) from public.gladiators) as n`)[0].n) };
+          + (select count(*) from public.gladiators) + (select count(*) from public.game_info_reads)
+          + (select count(*) from private.game_info_drafts) as n`)[0].n) };
       // What the data load would restore: the singletons, with the scheduler left on by the source.
       await tx`insert into private.scheduler (singleton, enabled) values (true, true)`;
       await tx.unsafe(AFTER);

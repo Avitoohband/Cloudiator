@@ -6,6 +6,8 @@
 
 45 focused database tests passed with stable Edge. They include public read isolation, owner authorization, MCP draft edits on both tabs through the actual MCP process and handler, conflicting revisions, atomic publication and the affected restore checks. Evidence is in parent `logs/game-info-store-20261111/` and `logs/game-info-build-20261111/`. This is the next migration on `codex/game-info`; reconcile its sequence with the future dungeon parties plan before release.
 
+**Production apply (M32).** Avi approved M32 alone on 2026-11-11 after the 12/12 gate on `2727cff`. In the window after the 14:40 UTC boundary, the structured dry run listed exactly M32 with empty seed and role lists; one push finished 15:00:34 UTC. Linked history then showed 32 migrations ending at M32. The Game Info seed digests matched the replay, the hosted fingerprint (1,510 lines) differed from the 1,513-line replay only by the accepted platform and live lines, and the 692-row access audit had zero findings. See parent `logs/p19-m32-release-20261111/`.
+
 ## Patch 1.8 rollout correction (M31): Cinder
 
 Avi chose **Cinder** for the level 7 skirmisher on 2026-11-08 after the production registration preflight found the

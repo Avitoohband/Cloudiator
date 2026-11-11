@@ -25,12 +25,23 @@ async function openCamp(page: Page, url: string) {
   await page.waitForFunction(() => window.__cloudiatorCamp?.state()?.ready === true, null, { timeout: 45_000 });
 }
 /** Clicks the camp on `id`'s body, centred at zoom 2 (the camp click a player makes; a gladiator or an NPC). */
-async function clickInCamp(page: Page, id: string) {
+async function clickInCamp(page: Page, id: string, clearOf?: Locator) {
   const actor = (await page.evaluate(() => window.__cloudiatorCamp!.state()!)).actors.find(a => a.id === id)!;
   await page.evaluate(({ x, y }) => window.__cloudiatorCamp!.centerOn(x, y, 2), { x: actor.x, y: actor.y });
   await nextFrames(page);
-  const at = (await page.evaluate(x => window.__cloudiatorCamp!.screenOf(x), id))!;
+  let at = (await page.evaluate(x => window.__cloudiatorCamp!.screenOf(x), id))!;
   const box = (await page.locator('canvas').boundingBox())!;
+  if (clearOf) {
+    const panel = (await clearOf.boundingBox())!;
+    const dx = panel.x + panel.width + 24 - (box.x + at.x);
+    if (dx > 0) {
+      await page.evaluate(shift => window.__cloudiatorCamp!.emit('camera-pan', { dx: shift, dy: 0 }), dx);
+      await nextFrames(page);
+      at = (await page.evaluate(x => window.__cloudiatorCamp!.screenOf(x), id))!;
+    }
+    expect(await page.evaluate(({ x, y }) => document.elementFromPoint(x, y) instanceof HTMLCanvasElement,
+      { x: box.x + at.x, y: box.y + at.y - 16 })).toBe(true);
+  }
   await page.mouse.click(box.x + at.x, box.y + at.y - 16);
   return { x: box.x + at.x, y: box.y + at.y };
 }
@@ -154,9 +165,10 @@ test.describe('profile cards and merchants in the fixture preview', () => {
     await expect(inventory).toBeVisible();
     await expect(inventory.getByRole('button', { name: 'Weaponsmith', exact: true })).toHaveAttribute('aria-pressed', 'true');
     await expect(inventory.getByRole('heading', { name: 'Shops', exact: true })).toBeInViewport();
-    // On desktop the camp stays clickable beside the open panel; a touch sheet covers it, so it closes first.
-    if (await touchLayout(page)) await closeMenu(page);
-    await clickInCamp(page, 'npc:armorer');
+    // On desktop pan the merchant into the camp beside the open panel. Close the phone sheet before tapping camp.
+    const touch = await touchLayout(page);
+    if (touch) await closeMenu(page);
+    await clickInCamp(page, 'npc:armorer', touch ? undefined : inventory);
     await expect(inventory).toBeVisible();
     await expect(inventory.getByRole('button', { name: 'Armorer', exact: true })).toHaveAttribute('aria-pressed', 'true');
     await expect(inventory.getByRole('heading', { name: 'Shops', exact: true })).toBeInViewport();

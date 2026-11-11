@@ -208,7 +208,7 @@ test.describe('the camp shell with a pointer', () => {
     await expect(inventoryIcon).toHaveAttribute('aria-expanded', 'true');
     // Panels sit beside the rail, below the chip row, and scroll internally.
     const panel = await boxOf(await settled(menuDialog(page, 'Inventory and shops')));
-    expect([panel.x, panel.y, panel.width]).toEqual([66, 64, 380]);
+    expect([panel.x, panel.y, panel.width]).toEqual([66, 64, 704]);
     expect(panel.y + panel.height).toBeLessThanOrEqual(720);
     // The same icon closes it.
     await inventoryIcon.click();

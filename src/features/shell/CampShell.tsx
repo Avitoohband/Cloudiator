@@ -514,7 +514,7 @@ export function CampShell({ fixture, previewAs, previewResting = false, fixtureR
   // The arrival banner (Patch A item 2): not while the viewer is still loading (the owner's own welcome would flash as an announcement),
   // not while a scene covers the camp. Find is the Gladiators list's Find: the camp view's centre, the menu closed, the camp keyboard.
   const arrivals = useArrivals(world, ownerId);
-  const place = useBannerPlace(shellRef, game.viewer);
+  const place = useBannerPlace(shellRef, game.viewer, open);
   const arrival = arrivals.banner !== null && scene === null && game.viewer !== 'loading' && !(place.coversPanel && open !== null) ? arrivals.banner : null;
   const { dismiss: dismissArrival } = arrivals;
   const arrivalSlot = (
@@ -556,8 +556,9 @@ export function CampShell({ fixture, previewAs, previewResting = false, fixtureR
 
   return (
     <div ref={shellRef} className={styles.shell} data-rail={rail.revealed ? 'shown' : 'hidden'} data-sheet={open ? 'open' : undefined}
-      data-card={card ? 'open' : undefined} data-pill={fixture || fixtureRefused ? 'shown' : undefined}
-      style={{ '--chip-w': `${place.chipWidth}px`, '--chip-bottom': `${place.chipBottom}px` } as CSSProperties}>
+      data-card={card ? 'open' : undefined} data-owner-menu={owner ? '' : undefined} data-pill={fixture || fixtureRefused ? 'shown' : undefined}
+      style={{ '--chip-w': `${place.chipWidth}px`, '--chip-bottom': `${place.chipBottom}px`,
+        '--panel-clear-left': `${place.panelClearLeft}px` } as CSSProperties}>
       <h1 className={styles.sr}>Cloudiator — Hearthstone Camp</h1>
       <MenuRail menus={menus} state={{ revealed: rail.revealed, open }} send={send} onToggle={id => send({ toggle: id })}
         zoom={sceneUnavailable ? null : direction => bridge.emit('camera-zoom', { direction })} />

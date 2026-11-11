@@ -175,6 +175,12 @@
   animation: pop 0.16s ease;
 }
 
+@media (hover: hover) and (min-width: 1220px) {
+  .shell[data-owner-menu] .surface:is([data-menu-surface='inventory'], [data-menu-surface='gladiator']) {
+    width: 704px;
+  }
+}
+
 .surface[hidden] {
   display: none;
 }
@@ -586,10 +592,10 @@
   color: var(--ink);
 }
 
-/* An open menu panel (the rail's 458 px, as the arrival banner's slot keeps clear of): the pill starts at its right. */
+/* The pill keeps the same measured clearance as the arrival banner when a menu is open. */
 .shell[data-sheet='open'] .away {
-  left: max(458px, calc(50% - 270px));
-  width: min(540px, calc(100% - max(458px, calc(50% - 270px)) - 12px));
+  left: max(var(--panel-clear-left, 458px), calc(50% - 270px));
+  width: min(540px, calc(100% - max(var(--panel-clear-left, 458px), calc(50% - 270px)) - 12px));
   transform: none;
 }
 

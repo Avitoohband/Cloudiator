@@ -96,6 +96,7 @@ describe('where the banner sits', () => {
   it('takes the top row while 380 px are left beside the chip', () => {
     // Aster's chip is 371 px wide: 1280 - 24 - 371 - 458 = 427 px.
     expect(bannerPlace({ windowWidth: 1280, chipWidth: 371, compact: false })).toEqual({ stacked: false, coversPanel: false });
+    expect(bannerPlace({ windowWidth: 1280, chipWidth: 371, compact: false, panelClearLeft: 782 })).toEqual({ stacked: true, coversPanel: false });
     expect(bannerPlace({ windowWidth: 1920, chipWidth: 600, compact: false })).toEqual({ stacked: false, coversPanel: false });
   });
   it('keeps clear of the notices under a narrow chip too (they are up to 320 px wide)', () => {

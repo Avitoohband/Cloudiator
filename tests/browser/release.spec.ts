@@ -166,6 +166,17 @@ test.describe('release accessibility in the fixture preview', () => {
     await expect(cornerChip(page).getByRole('group', { name: 'Account' })).toBeVisible();
     await press('Escape');
     await expect(chip).toBeFocused();
+    await press('Tab');
+    const gameInfo = cornerChip(page).getByRole('button', { name: 'Game Info', exact: true });
+    await expect(gameInfo).toBeFocused();
+    await press('Enter');
+    const info = page.getByRole('dialog', { name: 'Game Info', exact: true });
+    await expect(info.getByRole('tab', { name: 'Wiki', exact: true })).toBeFocused();
+    await press('ArrowRight');
+    await expect(info.getByRole('tab', { name: 'Future Updates', exact: true })).toBeFocused();
+    await press('Escape');
+    await expect(info).toBeHidden();
+    await expect(gameInfo).toBeFocused();
     // The sign-in notice's Dismiss: the notice goes, and the focus stays on the page.
     await press('Tab');
     await expect(page.getByRole('button', { name: 'Dismiss', exact: true })).toBeFocused();

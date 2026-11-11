@@ -145,6 +145,7 @@ export function CornerChip({ viewer, session, owner, fixture, previewAs, clock, 
 
   const infoToggle = <button ref={infoButton} type="button" className={styles.infoToggle}
     aria-expanded={popover === 'game-info'} aria-controls={popover === 'game-info' ? infoId : undefined} aria-haspopup="dialog"
+    tabIndex={open ? -1 : undefined}
     onClick={() => { if (popover === 'game-info') closeInfo(); else setPopover('game-info'); }}>Game Info</button>;
   const editorAccount = signedIn ? session.userId : null;
   const infoPanel = popover === 'game-info' && <GameInfoPanel key={editorAccount ?? 'reader'} id={infoId} onClose={closeInfo} fixture={fixture} editorAccount={editorAccount}
@@ -175,7 +176,7 @@ export function CornerChip({ viewer, session, owner, fixture, previewAs, clock, 
           watch={messaging.watch ? { kept: messaging.watch.kept, open: note => { setPopover(null); messaging.watch!.open(note); } } : undefined} changeLook={onChangeLook} open={popover === 'messages'} panelId={messagesId}
           onToggle={() => { if (allowDiscard()) { setRequestedTab(null); setHistory(undefined); setPopover(value => (value === 'messages' ? null : 'messages')); } }} onClose={closeMessages} buttonRef={messagesButton}
           history={history} latestPatch={latestPatch} titles={titles} />}
-        <button ref={toggle} type="button" className={styles.chipButton} aria-expanded={open} aria-controls={menuId}
+        <button ref={toggle} type="button" className={styles.chipButton} data-account-button="" aria-expanded={open} aria-controls={menuId}
           onClick={() => { if (allowDiscard()) { setHistory(undefined); setPopover(value => (value === 'account' ? null : 'account')); } }}>
           {owner ? <>
             <b data-testid="chip-name">{owner.name}</b>

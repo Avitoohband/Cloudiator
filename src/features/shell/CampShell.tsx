@@ -556,7 +556,8 @@ export function CampShell({ fixture, previewAs, previewResting = false, fixtureR
 
   return (
     <div ref={shellRef} className={styles.shell} data-rail={rail.revealed ? 'shown' : 'hidden'} data-sheet={open ? 'open' : undefined}
-      data-card={card ? 'open' : undefined} data-pill={fixture || fixtureRefused ? 'shown' : undefined} style={{ '--chip-w': `${place.chipWidth}px` } as CSSProperties}>
+      data-card={card ? 'open' : undefined} data-pill={fixture || fixtureRefused ? 'shown' : undefined}
+      style={{ '--chip-w': `${place.chipWidth}px`, '--chip-bottom': `${place.chipBottom}px` } as CSSProperties}>
       <h1 className={styles.sr}>Cloudiator — Hearthstone Camp</h1>
       <MenuRail menus={menus} state={{ revealed: rail.revealed, open }} send={send} onToggle={id => send({ toggle: id })}
         zoom={sceneUnavailable ? null : direction => bridge.emit('camera-zoom', { direction })} />

@@ -72,13 +72,20 @@ test('a short phone can scroll the full reader below wrapped signed-in controls'
   await seedSession(page.context());
   await quietArrivals(page.context());
   const name = 'WWWWWWWWWWWWWWWWWWWW';
-  await routeLiveReads(page.context(), { world: worldFixture, owner: { ...ownerFixture, name } });
+  const newerPatch = `${Number(PATCH.split('.')[0]) + 1}.0`;
+  await routeLiveReads(page.context(), { world: worldFixture, owner: { ...ownerFixture, name }, latestPatch: newerPatch });
   await page.goto('/game/');
   await expectOwnerShown(page, name);
   const chip = cornerChip(page);
   const trigger = chip.getByRole('button', { name: 'Game Info', exact: true });
   const nameBox = (await chip.getByTestId('chip-name').boundingBox())!;
   expect((await trigger.boundingBox())!.y).toBeGreaterThan(nameBox.y + nameBox.height);
+  const notice = page.locator('[data-patch-notice]');
+  await expect(notice).toContainText(`Patch ${newerPatch} is out`);
+  await expect.poll(async () => {
+    const [noticeBox, chipBox] = await Promise.all([notice.boundingBox(), chip.boundingBox()]);
+    return noticeBox!.y - (chipBox!.y + chipBox!.height);
+  }).toBeGreaterThanOrEqual(0);
   await trigger.click();
 
   const panel = page.getByRole('dialog', { name: 'Game Info' });

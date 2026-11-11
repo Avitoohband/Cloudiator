@@ -438,3 +438,18 @@ Observed: the copied NPC config referenced a missing static-server helper.
 Tested correction: the verified helper was restored, both-mode preflight and
 the supplemental static checks passed, and the next full run's static phase
 passed. That full run still failed on a separate Windows transport error.
+
+# New tables and historical replay - persistent project override
+
+Avi approved this supplement on 2026-11-11 for
+`superpowers:verification-before-completion`, **The Gate Function**.
+
+Before the full gate for a migration that adds tables, verify each new table's
+capacity classification and review historical SQL replay lists for additive or
+seeding sources that must be excluded. Run the owning focused regressions first.
+
+Observed in the 1.9 gate: Game Info's three tables lacked capacity classes, and
+the economy fixture tried to reapply its create-and-seed source. Tested fixes:
+fixed-storage projection and the explicit economy replay chain passed their
+focused regressions and the next 638-case database stage. This preflight is
+new guidance for future migrations.

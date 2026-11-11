@@ -489,7 +489,7 @@
 .notices {
   position: absolute;
   right: 12px;
-  top: 58px;
+  top: max(58px, calc(var(--chip-bottom, 0px) + 2px));
   /* No z-index: the column makes no stacking context, so the arrival slot (z-index 8 when it is drawn in the top row) and the notice list
      (9) take their places in the shell's. */
   display: grid;
@@ -1037,7 +1037,7 @@
   }
 
   .pill {
-    top: 56px;
+    top: max(56px, var(--chip-bottom, 0px));
   }
 
   /* Touch: the dock and the sheets take the bottom and the chip the top right, so the overlay sits below the pill. */
@@ -1046,20 +1046,20 @@
   }
 
   .notices {
-    top: 52px;
+    top: max(52px, calc(var(--chip-bottom, 0px) + 8px));
   }
 
   /* The stacked column spans the width (the banner's 12 px gutters). */
   .notices[data-stacked='true'] {
     left: 12px;
-    /* Under the chip's tap area and the messages button (44 px from 12 px), as the mockup has it. */
-    top: 64px;
+    /* Keep the existing gap below the controls, including when they wrap. */
+    top: max(64px, calc(var(--chip-bottom, 0px) + 8px));
     max-width: none;
   }
 
-  /* The fixture pill is at 56 px here (fixture only): the column starts below it, so the pill (z-index 9) is never over the banner. */
+  /* The fixture pill follows the chip. Leave room for it above the column. */
   .shell[data-pill='shown'] .notices[data-stacked='true'] {
-    top: 96px;
+    top: max(96px, calc(var(--chip-bottom, 0px) + 40px));
   }
 }
 

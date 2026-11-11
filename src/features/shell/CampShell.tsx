@@ -211,11 +211,13 @@ function ResultsMenu({ fixture, samples, previewFailed, reads, viewerId, clock, 
   </>;
 }
 
-export function CampShell({ fixture, previewAs, previewResting = false, fixtureRefused = false, signInResult = null, scene = null, perf = false }: {
+export function CampShell({ fixture, previewAs, previewResting = false, previewBag, fixtureRefused = false, signInResult = null, scene = null, perf = false }: {
   fixture: boolean;
   previewAs?: 'visitor' | 'player';
   /** `?as=resting` (fixture mode only): the player's gladiator rests at home (Task 23.9). */
   previewResting?: boolean;
+  /** `?bag=demo` (fixture mode only): Aster gets 18 extra items in her bag. */
+  previewBag?: 'demo';
   /** `?mode=fixture` was asked for in a build without the preview: say so over the live camp. */
   fixtureRefused?: boolean;
   /** `?signin=`: a Google sign-in that was cancelled or failed has returned to the camp. */
@@ -240,12 +242,12 @@ export function CampShell({ fixture, previewAs, previewResting = false, fixtureR
         .then(({ createFixtureGateway, FIXTURE_REPLAYS, FIXTURE_EXPEDITIONS, FIXTURE_DUNGEONS, FIXTURE_ARENA, FIXTURE_TOURNAMENTS }) => {
           if (!active) return;
           setSamples({ replays: FIXTURE_REPLAYS, expeditions: FIXTURE_EXPEDITIONS, dungeons: FIXTURE_DUNGEONS, arena: FIXTURE_ARENA, tournaments: FIXTURE_TOURNAMENTS });
-          setFixtureReads(createFixtureGateway({ resting: previewResting }));
+          setFixtureReads(createFixtureGateway({ resting: previewResting, bag: previewBag }));
         })
         .catch(() => { if (active) setPreviewError(true); });
     }
     return () => { active = false; };
-  }, [fixture, previewResting]);
+  }, [fixture, previewResting, previewBag]);
 
   const reads = fixture ? fixtureReads : gateway;
   // One sync controller, display clock and owner state for the camp and every menu (the fixture gateway once loaded).

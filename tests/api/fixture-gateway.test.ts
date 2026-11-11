@@ -713,3 +713,14 @@ test('fixture preview: the owner’s bouts are the fixtures’ own timelines, ea
     expect((await gateway.timeline(t.activityId)).summary).toMatchObject({ result: rows[i].result, settledAtMs: rows[i].settledAtMs });
   }
 });
+
+test('fixture demo bag: bag=demo gives Aster 18 extra catalog items; the default fixture is unchanged', async () => {
+  const plain = await createFixtureGateway().owner();
+  const demo = await createFixtureGateway({ bag: 'demo' }).owner();
+  expect(demo.inventory).toHaveLength(plain.inventory.length + 18);
+  expect(demo.inventory.slice(0, plain.inventory.length)).toEqual(plain.inventory);
+  const added = demo.inventory.slice(plain.inventory.length);
+  expect(new Set(added.map(i => i.id)).size).toBe(18);
+  expect(added.filter(i => i.catalogId === 'light-boots:1:common')).toHaveLength(3);
+  expect({ ...demo, inventory: plain.inventory }).toEqual(plain);
+});

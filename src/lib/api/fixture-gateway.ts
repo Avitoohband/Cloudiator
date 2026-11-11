@@ -25,6 +25,8 @@ import { ASTER_TITLES, titleNoticeCount, withAsterTitles } from '../../../tests/
 import { PATCH } from '../patch';
 import { withoutTournamentLogs } from '../../game/tournament-stage';
 import { FIXTURE_TITLES } from '../../game/demo-world';
+import { CATALOG_V1 } from '@domain/catalog-v1';
+import { fixtureUuid } from '../../../tests/fixtures/arena-ids';
 
 /** Sample replays the fixture game page links to. */
 export const FIXTURE_REPLAYS: readonly { activityId: string; label: string }[] = REPLAY_SAMPLES;
@@ -65,6 +67,19 @@ const FIXTURE_PROFILES: typeof BASE_PROFILES = Object.fromEntries(Object.entries
 }));
 /** The owner's cosmetics: the Arena banner, bound to her account as a bought one is. */
 const OWNER_COSMETICS: OwnerState['ownedCosmetics'] = [{ catalogId: 'banner', catalogVersion: 'v1', binding: 'bound' }];
+
+/** The opt-in demo bag (`?mode=fixture&bag=demo`): 18 extra catalog items, with duplicates, for looking at a fuller inventory. */
+const DEMO_BAG = ['sword:1:common', 'sword:1:common', 'sword:1:uncommon', 'sword:5:common', 'axe:1:common', 'spear:1:rare', 'bow:5:renown',
+  'round-shield:1:common', 'round-shield:1:common', 'leather-hood:1:common', 'iron-helmet:1:uncommon', 'light-armor:1:common', 'light-armor:1:common',
+  'heavy-armor:5:common', 'light-boots:1:common', 'light-boots:1:common', 'light-boots:1:common', 'heavy-boots:1:rare'];
+function withDemoBag(owner: OwnerState): OwnerState {
+  const items = DEMO_BAG.flatMap((catalogId, index) => {
+    const entry = CATALOG_V1.items[catalogId];
+    return entry ? [{ id: fixtureUuid(`demo-bag-${index}`), ownerId: owner.inventory[0]?.ownerId ?? 'aster', catalogId, catalogVersion: CATALOG_V1.version,
+      tier: entry.tier, rarity: entry.rarity, stats: structuredClone(entry.stats), quantity: 1, origin: 'shop' as const, binding: entry.binding, reservation: null }] : [];
+  });
+  return { ...owner, inventory: [...owner.inventory, ...items] as OwnerState['inventory'] };
+}
 /**
  * The seasons newest first, each with the rules version that opened it (Patch 1.6): the current sample season was opened under the
  * economy's v2 (its card lists every league's prizes), the closed one before it under v1.
@@ -107,7 +122,7 @@ const FIXTURE_BOUTS = myBoutTimelines(FIXTURE_TIMELINES).map(timeline => {
  * resting at home in the current slot: drawn nowhere in the camp, and with no `restingUntilSlot` until this preview has
  * answered a presence, then the next slot, as the server answers it (Task 23.8).
  */
-export function createFixtureGateway(options: { resting?: boolean } = {}): GameGateway {
+export function createFixtureGateway(options: { resting?: boolean; bag?: 'demo' } = {}): GameGateway {
   const resting = options.resting === true;
   /** The resting preview: whether a presence has been answered since the gladiator began resting. */
   let signalled = false;
@@ -123,7 +138,7 @@ export function createFixtureGateway(options: { resting?: boolean } = {}): GameG
     // the sample messages make (tests/fixtures/messages.ts). Patch 1.7: Aster's 8 titles and the mockup's progress, wearing Founder
     // (tests/fixtures/titles.ts); her history notice counts as new in the inbox, as the server counts it (Task 11).
     owner: async () => withAsterTitles({ ...(resting ? { ...structuredClone(RESTING_OWNER), restingUntilSlot: signalled ? RESTING_OWNER.processedSlotIndex + 1 : null }
-      : structuredClone(ARENA_OWNER)), inbox: { ...structuredClone(FIXTURE_INBOX),
+      : (options.bag === 'demo' ? withDemoBag : (o: OwnerState) => o)(structuredClone(ARENA_OWNER))), inbox: { ...structuredClone(FIXTURE_INBOX),
       newNotifications: FIXTURE_INBOX.newNotifications + titleNoticeCount(ASTER_TITLES, FIXTURE_INBOX.notificationsSeenMs) }, ownedCosmetics: structuredClone(OWNER_COSMETICS) }),
     // The sample messages, newest first (a copy each time), each patch note with the number of the patch that links it; no network.
     messages: async () => FIXTURE_MESSAGES.map(m => ({ ...structuredClone(m),

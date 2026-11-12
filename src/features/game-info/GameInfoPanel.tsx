@@ -3,7 +3,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { ClipboardEvent, KeyboardEvent } from 'react';
 import { GameInfoEditor } from './GameInfoEditor';
-import { editGameInfo, loadPublishedGameInfo, type GameInfoPages, type GameInfoSnapshot, type GameInfoTab } from './game-info-client';
+import { editGameInfo, loadDraftGameInfo, loadPublishedGameInfo, type GameInfoPages, type GameInfoSnapshot, type GameInfoTab } from './game-info-client';
 import { futureUpdates, wikiTopics } from './public-content';
 import styles from './game-info.module.css';
 
@@ -61,8 +61,14 @@ export function GameInfoPanel({ id, onClose, update, fixture, editorAccount, onD
   }
 
   useEffect(() => {
-    if (fixture) return;
     let alive = true;
+    if (fixture) {
+      // `?mode=fixture&info=draft` previews the drafts in docs/game-info (fixture builds only).
+      if (new URLSearchParams(window.location.search).get('info') === 'draft') void loadDraftGameInfo().then(next => {
+        if (alive) setPages(next);
+      }, () => {});
+      return () => { alive = false; };
+    }
     void loadPublishedGameInfo().then(next => {
       if (alive) setPages(previous => ({ ...next, ...previous }));
     }, () => {});

@@ -7,7 +7,8 @@ import { sceneOf } from '../../features/shell/scene-url';
 
 /**
  * Reads the preview options from the URL: `?mode=fixture` (fixture-enabled builds only) and, with it, `?as=visitor` or
- * `?as=resting` (the player's gladiator resting at home, Task 23.9), and `?bag=demo` (18 extra items in Aster's bag);
+ * `?as=resting` (the player's gladiator resting at home, Task 23.9), `?bag=demo` (18 extra items in Aster's bag), and
+ * `?info=draft` (Game Info shows the Wiki and Future Updates drafts in docs/game-info; read by GameInfoPanel);
  * `?signin=cancelled|failed`, a Google sign-in that returned without completing (plan Decision 6); and
  * `?view=replay|expedition&activity=…`, a scene over the camp (plan Decision 4), which the shell opens and closes with
  * `history.pushState` and Back (the App Router keeps `useSearchParams` in step with them); and `?perf=1`, the opt-in

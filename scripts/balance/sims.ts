@@ -31,7 +31,7 @@ const RULES = { ...RULES_V1, classes: { ...RULES_V1.classes, [NEUTRAL]: { streng
 
 /** The most points Training allows at a level (rules v2: 10 + 4 per level). */
 export const pointsAt = (level: number): number => 10 + 4 * level;
-const gearLevelAt = (level: number): 1 | 5 | 10 => (level >= 10 ? 10 : level >= 5 ? 5 : 1);
+export const gearLevelAt = (level: number): 1 | 5 | 10 => (level >= 10 ? 10 : level >= 5 ? 5 : 1);
 
 /** An even split, the leftover points going to the first keys in order. */
 function evenSplit(total: number, keys: readonly (keyof Attrs)[]): Partial<Attrs> {
@@ -47,11 +47,11 @@ export function precisionPoints(total: number, precision: number): Attrs {
 
 type Gear = { weapon: string; offHand: string | null; head: string; body: string; feet: string };
 /** The Balanced preset's kit at a gear level, the weapon being a full catalog id. */
-const kit = (weapon: string, tier: 1 | 5 | 10): Gear => ({ weapon, offHand: `round-shield:${tier}:common`, head: `leather-hood:${tier}:common`,
+export const kit = (weapon: string, tier: 1 | 5 | 10): Gear => ({ weapon, offHand: `round-shield:${tier}:common`, head: `leather-hood:${tier}:common`,
   body: `light-armor:${tier}:common`, feet: `light-boots:${tier}:common` });
 
 /** A classless fighter: base 5 plus its points, catalog gear (an id is `template:tier:kind`), balanced stance. */
-function fighter(allocations: Attrs, gear: Gear, context: 'arena' | 'expedition'): FighterSnapshot {
+export function fighter(allocations: Attrs, gear: Gear, context: 'arena' | 'expedition'): FighterSnapshot {
   const piece = (slot: string, id: string | null) => {
     if (id === null) return null;
     const item = CATALOG_V1.items[id];
@@ -74,9 +74,11 @@ export function wilson(wins: number, n: number): [low: number, high: number] {
   return [Math.max(0, centre - half), Math.min(1, centre + half)];
 }
 
-type Spec = { id: string; label: string; level: number; context: 'arena' | 'expedition'; subject: FighterSnapshot; opponent: FighterSnapshot; criticalChance: number };
+type Spec = { id: string; label: string; level: number; context: 'arena' | 'expedition'; subject: FighterSnapshot; opponent: FighterSnapshot };
 
-function fight(spec: Spec, scenario: ScenarioId, fights: number): Matchup {
+export type Observer = (info: { matchup: string; n: number; seed: string; participants: readonly string[]; winnerId: string }) => void;
+
+function fight(spec: Spec, scenario: ScenarioId, fights: number, observe?: Observer): Matchup {
   let wins = 0, duration = 0, attacks = 0, hits = 0, crits = 0, damage = 0, critDamage = 0, subjectFirst = 0;
   const seeds: string[] = [];
   for (let n = 0; n < fights; n++) {
@@ -87,6 +89,7 @@ function fight(spec: Spec, scenario: ScenarioId, fights: number): Matchup {
     const subject = { id: 'subject', gladiatorId: null, name: 'Subject', snapshot: spec.subject };
     const opponent = { id: 'opponent', gladiatorId: null, name: 'Opponent', snapshot: spec.opponent };
     const log = simulateBattle({ battleId: 'sim', rulesVersion: RULES.version, rules: RULES, fighters: swap ? [opponent, subject] : [subject, opponent] } as never, seed);
+    observe?.({ matchup: spec.id, n, seed, participants: log.participants.map(p => p.id), winnerId: log.winnerId });
     if (log.winnerId === 'subject') wins++;
     duration += log.durationMs;
     for (const event of log.events) {
@@ -99,7 +102,7 @@ function fight(spec: Spec, scenario: ScenarioId, fights: number): Matchup {
   const winRate = wins / fights;
   return { id: spec.id, label: spec.label, level: spec.level, context: spec.context, wins, fights, winRate,
     low95: Math.min(low95, winRate), high95: Math.max(high95, winRate), meanDurationMs: duration / fights,
-    meanHit: attacks ? hits / attacks : 0, criticalChance: spec.criticalChance,
+    meanHit: attacks ? hits / attacks : 0, criticalChance: criticalProbability(spec.subject.attributes.precision, RULES),
     criticalRate: hits ? crits / hits : 0, criticalDamageShare: damage ? critDamage / damage : 0, subjectFirst, seeds };
 }
 
@@ -109,8 +112,7 @@ function specs(id: ScenarioId): Spec[] {
     const level = 10, total = pointsAt(level), opponent = fighter(balancedPoints(level), kit('sword:10:common', 10), 'arena');
     for (const precision of [0, 10, 20, 30, 40, 50]) {
       const subject = fighter(precisionPoints(total, precision), kit('sword:10:common', 10), 'arena');
-      out.push({ id: `precision-${precision}`, label: `Precision ${precision} vs Balanced`, level, context: 'arena', subject, opponent,
-        criticalChance: criticalProbability(subject.attributes.precision, RULES) });
+      out.push({ id: `precision-${precision}`, label: `Precision ${precision} vs Balanced`, level, context: 'arena', subject, opponent });
     }
   } else if (id === 'two-handed') {
     const name = (weapon: string) => weapon[0].toUpperCase() + weapon.slice(1);
@@ -118,22 +120,22 @@ function specs(id: ScenarioId): Spec[] {
       const tier = gearLevelAt(level), points = balancedPoints(level);
       for (const two of ['spear', 'bow']) for (const one of ['sword', 'axe']) {
         out.push({ id: `${two}-vs-${one}-L${level}`, label: `${name(two)} vs ${name(one)} + Round shield`, level, context: 'arena',
-          subject: fighter(points, kit(`${two}:${tier}:common`, tier), 'arena'), opponent: fighter(points, kit(`${one}:${tier}:common`, tier), 'arena'), criticalChance: 0 });
+          subject: fighter(points, kit(`${two}:${tier}:common`, tier), 'arena'), opponent: fighter(points, kit(`${one}:${tier}:common`, tier), 'arena') });
       }
     }
   } else {
     for (const context of ['arena', 'expedition'] as const) for (const level of [1, 5, 10]) {
       const tier = gearLevelAt(level), points = balancedPoints(level);
       out.push({ id: `renown-vs-common-${context}-L${level}`, label: `sword:${tier}:renown vs sword:${tier}:common`, level, context,
-        subject: fighter(points, kit(`sword:${tier}:renown`, tier), context), opponent: fighter(points, kit(`sword:${tier}:common`, tier), context), criticalChance: 0 });
+        subject: fighter(points, kit(`sword:${tier}:renown`, tier), context), opponent: fighter(points, kit(`sword:${tier}:common`, tier), context) });
     }
     const points = balancedPoints(10);
     out.push({ id: 'renown5-vs-common10-arena-L10', label: 'sword:5:renown vs sword:10:common', level: 10, context: 'arena',
-      subject: fighter(points, kit('sword:5:renown', 10), 'arena'), opponent: fighter(points, kit('sword:10:common', 10), 'arena'), criticalChance: 0 });
+      subject: fighter(points, kit('sword:5:renown', 10), 'arena'), opponent: fighter(points, kit('sword:10:common', 10), 'arena') });
   }
   return out;
 }
 
-export function runScenario(id: ScenarioId, fights: number): ScenarioResult {
-  return { scenario: id, fightsPerMatchup: fights, matchups: specs(id).map(spec => fight(spec, id, fights)) };
+export function runScenario(id: ScenarioId, fights: number, observe?: Observer): ScenarioResult {
+  return { scenario: id, fightsPerMatchup: fights, matchups: specs(id).map(spec => fight(spec, id, fights, observe)) };
 }

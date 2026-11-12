@@ -8,6 +8,8 @@ import { runScenario, type Matchup, type ScenarioId, type ScenarioResult } from 
 const FIGHTS = Number(process.argv[2] ?? 2000);
 const root = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
 const outDir = join(root, 'docs', 'balance');
+// Only the full 2,000-fight run may write the committed outputs; any other count writes beside them with the count in the name.
+const suffix = FIGHTS === 2000 ? '' : `-${FIGHTS}fights`;
 mkdirSync(outDir, { recursive: true });
 
 const ids: ScenarioId[] = ['critical', 'two-handed', 'renown'];
@@ -32,8 +34,7 @@ function table(rows: Matchup[], extra: boolean): string {
 function findings(): string[] {
   const out: string[] = [];
   const crit = by.critical, base = crit[0], top = crit[crit.length - 1];
-  const even = crit.reduce((a, b) => (Math.abs(b.winRate - 0.5) < Math.abs(a.winRate - 0.5) ? b : a));
-  out.push(`Critical chance: the win rate falls steadily as points move into Precision (${crit.map(m => pct(m.winRate)).join(', ')} for Precision 0 to 50), because every point put into Precision comes out of the other four attributes; the closest to an even fight is ${even.label}. Critical chance only goes from ${pct(base.criticalChance)} to ${pct(top.criticalChance)} (the cap is 40%) and critical hits supply ${pct(base.criticalDamageShare)} to ${pct(top.criticalDamageShare)} of the damage dealt, while the hit rate rises from ${pct(base.meanHit)} to ${pct(top.meanHit)}. In this sweep, piling points into Precision does not pay.`);
+  out.push(`Critical chance: the win rate falls steadily as points move into Precision (${crit.map(m => pct(m.winRate)).join(', ')} for Precision 0 to 50). The sweep takes those points out of the other four attributes, so it measures concentrating points in Precision, not critical chance on its own (the Precision 10 row is the identical build, so about 50% is expected). Critical chance only goes from ${pct(base.criticalChance)} to ${pct(top.criticalChance)} (the cap is 40%) and critical hits supply ${pct(base.criticalDamageShare)} to ${pct(top.criticalDamageShare)} of the damage dealt, while the hit rate rises from ${pct(base.meanHit)} to ${pct(top.meanHit)}. In this sweep, concentrating points in Precision does not pay.`);
   const two = by['two-handed'];
   const spears = two.filter(m => m.label.startsWith('Spear')), bows = two.filter(m => m.label.startsWith('Bow'));
   const avg = (rows: Matchup[]) => rows.reduce((s, m) => s + m.winRate, 0) / rows.length;
@@ -54,12 +55,13 @@ Generated ${generated} by \`node scripts/balance/run-sims.ts\` (${FIGHTS} fights
 
 - Rules v1 combat (the Arena's and the expedition's use the same constants), classless fighters from \`makeFighter\`: attributes are base 5 plus the points, gear comes straight from the catalog, so gear and points are isolated. Balanced stance. Arena rules unless the Context column says expedition.
 - Points at a level are the Training cap, 10 + 4 per level (level 10 = 50 points). The Balanced split is 20% to each attribute, the leftover points going in the order Strength, Agility, Vitality, Endurance, Precision.
+- The critical sweep keeps the total fixed at 50 points, so raising Precision lowers the other four; read it as concentration, not as critical chance alone.
 - Each fight uses the seed \`sim-<scenario>-<matchup>-<n>\`. The listed first side alternates every fight (half the fights each), so the first-attacker order cancels out.
 - Win rate is the first named build's wins out of ${FIGHTS}; the interval is the Wilson 95% interval. Hit rate is the share of that build's attacks that landed; critical share is the part of its dealt damage that came from critical hits.
 
 ## Critical chance (level 10, 50 points, Balanced gear at gear level 10)
 
-Precision 0 to 50, the rest of the points spread evenly over the other four attributes, against the Balanced preset (10 points in each attribute).
+Precision 0 to 50, the rest of the points spread evenly over the other four attributes, against the Balanced preset (10 points in each attribute). Caution: the total stays 50, so each step moves points out of Strength, Agility, Vitality and Endurance. This sweep measures concentrating points in Precision; it does not isolate critical chance (the Precision 10 row is the identical build to the opponent).
 
 ${table(by.critical, true)}
 
@@ -77,7 +79,7 @@ ${findings().map(f => `- ${f}`).join('\n')}
 - These are plain results from the current numbers only. No number change is proposed here; classless fighters leave out the class bonus, and real builds add it.
 `;
 
-writeFileSync(join(outDir, '2026-11-12-1.9-sims.md'), md);
-writeFileSync(join(outDir, '2026-11-12-1.9-sims.json'), `${JSON.stringify({ title: 'Offline balance simulations for 2.0', generated, fightsPerMatchup: FIGHTS,
+writeFileSync(join(outDir, `2026-11-12-1.9-sims${suffix}.md`), md);
+writeFileSync(join(outDir, `2026-11-12-1.9-sims${suffix}.json`), `${JSON.stringify({ title: 'Offline balance simulations for 2.0', generated, fightsPerMatchup: FIGHTS,
   scenarios: results.map(r => ({ ...r, matchups: r.matchups.map(({ seeds, ...m }) => ({ ...m, firstSeed: seeds[0], lastSeed: seeds[seeds.length - 1] })) })) }, null, 2)}\n`);
 console.log(`Wrote ${outDir}`);

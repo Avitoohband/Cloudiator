@@ -40,6 +40,10 @@
 // the camp (beside ☰ on a phone) says where it is and opens the live view, or offers the whole trip once it is back (`AwayButton`,
 // `useAwayTrip`, `away-trip.ts`). Like the arrival banner it is not mounted while a scene covers the camp; unlike it, it is the player's own
 // (nothing is read for a visitor). The scene it opens gives the focus back to it when the camp returns.
+//
+// Patch 1.9 Task 18: practice fights. My gladiator's ⚔ Practice fight opens the dummy dialog, and ⚔ Fight shows the fight over the camp like a
+// scene, with one history entry of its own and the camp paused beneath (`usePractice`: the state, kept here so Change dummy reopens the dialog
+// as it was). Nothing is sent or saved.
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties } from 'react';
 import type { Phase, WearTitleValue } from '@contracts/commands';
 import type { PublicActivitySummary } from '@contracts/events';
@@ -100,6 +104,7 @@ import { useCampClicks } from './useCampClicks';
 import { useFocusRescue } from './useFocusRescue';
 import { useJoining } from './useJoining';
 import { useSceneHistory } from './useSceneHistory';
+import { PracticeLayer, usePractice } from '../practice/usePractice';
 import styles from './shell.module.css';
 
 /** How a Google sign-in that did not complete came back (`AuthCallback`, plan Decision 6). */
@@ -365,6 +370,10 @@ export function CampShell({ fixture, previewAs, previewResting = false, previewB
   const shellRef = useRef<HTMLDivElement>(null);
   useFocusRescue(shellRef, focusCamp);
 
+  // Practice fights (Task 18): the owner's, while one is shown the camp is paused beneath it as under a scene.
+  const practice = usePractice(viewer === 'player' ? owner : null);
+  const practising = practice.fight !== null;
+
   // Scenes over the camp: a history entry each; the bridge opens and closes them.
   const { open: openScene, close: closeScene, replace: replaceScene } = useSceneHistory();
   useEffect(() => bridge.on('view-replay', ({ activityId, stageId, from }) => openScene({ kind: 'replay', activityId, ...(stageId ? { stageId } : {}), ...(from ? { from } : {}) })),
@@ -562,7 +571,8 @@ export function CampShell({ fixture, previewAs, previewResting = false, previewB
     switch (id) {
       case 'gladiator': return <CharacterPanel viewer={viewer} session={game.session} owner={owner} ownerError={game.ownerError} slotIndex={game.slotIndex}
         clock={clock} gateway={gateway} fixture={fixture} previewAs={previewAs} previewFailed={previewError} refreshOwner={game.refreshOwner}
-        onCreate={joining.offer} resting={game.ownResting} rules={game.rules} location={ownLocation} titles={owner ? { worn: wornTitle, status: shownTitleStatus, onOpen: openTitlePicker } : undefined} />;
+        onCreate={joining.offer} resting={game.ownResting} rules={game.rules} location={ownLocation} titles={owner ? { worn: wornTitle, status: shownTitleStatus, onOpen: openTitlePicker } : undefined}
+        onPractice={viewer === 'player' && owner ? practice.open : undefined} />;
       case 'schedule': return owner && !fixture ? <SchedulePanel key={owner.gladiatorId} owner={owner} gateway={gateway} refresh={game.refreshOwner} clock={clock} rules={game.rules} />
         : <SchedulePreview owner={owner} />;
       case 'inventory': return owner ? <InventoryPanel key={owner.gladiatorId} owner={owner} gateway={gateway} refresh={game.refreshOwner} clock={clock} preview={fixture} rules={game.rules}
@@ -637,7 +647,7 @@ export function CampShell({ fixture, previewAs, previewResting = false, previewB
           if (start && isClick(event.clientX - start.x, event.clientY - start.y)) { send('camp-click'); closeCard(false); }
         }}>
         <GameViewport chrome="none" world={world} bridge={bridge} focusGladiatorId={ownerId} clock={clock} timelines={reads} tournaments={reads}
-          onStatus={game.setSceneStatus} paused={scene !== null} labels={labels} talkInsets={talkInsets} />
+          onStatus={game.setSceneStatus} paused={scene !== null || practising} labels={labels} talkInsets={talkInsets} />
       </main>
       {scene && <SceneOverlay view={scene} gateway={reads} state={game} fixture={fixture} bouts={bouts} tournamentSamples={samples.tournaments} onReplace={replaceScene}
         onClose={() => bridge.emit('return-camp', {})} onWatch={openScene} />}
@@ -647,6 +657,7 @@ export function CampShell({ fixture, previewAs, previewResting = false, previewB
       {lookOpen && owner && reads && (
         <ChangeLookDialog key={owner.gladiatorId} owner={owner} gateway={reads} refresh={refreshLook} preview={fixture} onClose={closeLook} />
       )}
+      <PracticeLayer practice={practice} owner={viewer === 'player' ? owner : null} />
       {titleOpen && pickerOwner && reads && (
         <TitlePicker key={pickerOwner.gladiatorId} owner={pickerOwner} gateway={reads} refresh={refreshTitle} preview={fixture} onWorn={titleAnswered}
           onClose={closeTitle} />

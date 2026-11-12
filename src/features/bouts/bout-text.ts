@@ -196,6 +196,23 @@ export function againLabel(compact: boolean): string {
   return compact ? '↺ Again' : '↺ Watch again';
 }
 
+// ------------------------------------------------------------------ a practice fight in the viewer (Patch 1.9 Task 18)
+
+/** A practice fight's eyebrow: what it is and under which rules, never a time (it was fought just now and is kept nowhere). */
+export function practiceEyebrow(kind: 'dummy' | 'spar'): string {
+  return `PRACTICE${SEP}${kind === 'dummy' ? 'TRAINING DUMMY' : 'SPAR A COPY'}${SEP}ARENA RULES`;
+}
+/** The tag beside a practice fight's title, in the fixture banner's amber (which already means "not saved"). */
+export const PRACTICE_TAG = 'Practice — not saved';
+/** The end card's eyebrow for a practice fight. */
+export const PRACTICE_RESULT = `RESULT${SEP}PRACTICE`;
+/** The end card's one chip for a practice fight, where an Arena bout shows its rewards. */
+export const PRACTICE_CHIP = `No rewards${SEP}no rating${SEP}not saved`;
+/** The end card's roll of a new practice fight with the same builds. */
+export const FIGHT_AGAIN = '⚔ Fight again';
+/** The Result card's line for a practice fight, where an Arena bout says its rewards and how long its replay is kept. */
+export const PRACTICE_NOTE = 'Practice fights give no rewards and change nothing. Close this and the fight is gone.';
+
 /** The position among loaded kept replays, with + while another page exists. */
 export function counterText(queue: QueueEntries): { wide: string; narrow: string } {
   const total = `${queue.entries.length}${queue.more ? '+' : ''}`;

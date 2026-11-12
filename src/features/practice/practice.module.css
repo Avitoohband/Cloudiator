@@ -1,0 +1,463 @@
+/*
+ * The "⚔ Practice fight" dialog (Patch 1.9 Task 18, the approved mockup's `.dlg`): a modal over My gladiator, its title and intro on top,
+ * the dummy's setup scrolling inside, and the footer with Cancel and ⚔ Fight always in view. Wide: the setup on the left and the dummy
+ * beside it with the comparison. A narrow window: a sheet from near the top, one column. The shell's touch layout: 44 px targets.
+ */
+.dialog {
+  box-sizing: border-box;
+  width: min(680px, calc(100% - 32px));
+  max-width: none;
+  max-height: min(676px, calc(100% - 32px));
+  margin: auto;
+  padding: 0;
+  overflow: hidden;
+  border: 1px solid var(--glass-line);
+  border-radius: 14px;
+  background: #1d1825;
+  box-shadow: 0 18px 50px rgba(0, 0, 0, 0.66);
+  color: var(--ink);
+  font-size: 14px;
+  line-height: 1.4;
+}
+
+.dialog[open] {
+  display: flex;
+  flex-direction: column;
+}
+
+.dialog::backdrop {
+  background: rgba(5, 6, 10, 0.55);
+}
+
+.head {
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 10px 12px 2px 18px;
+}
+
+.head h2 {
+  margin: 0;
+  font: 700 21px/1.2 system-ui, -apple-system, 'Segoe UI', sans-serif;
+}
+
+.head h2:focus {
+  outline: none;
+}
+
+.close {
+  min-width: 44px;
+  min-height: 44px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--ink);
+  font-size: 22px;
+}
+
+.close:hover {
+  background: var(--glass-2);
+}
+
+.intro {
+  flex: none;
+  margin: 0 18px 10px;
+  color: var(--ink-dim);
+  font-size: 13.5px;
+}
+
+.intro b {
+  color: var(--ink);
+}
+
+.body {
+  flex: 1;
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 4px 18px 14px;
+  border-top: 1px solid var(--glass-line);
+}
+
+.columns {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 220px;
+  gap: 18px;
+}
+
+.side {
+  padding-top: 12px;
+}
+
+.field {
+  margin-top: 12px;
+}
+
+.label {
+  display: block;
+  margin-bottom: 5px;
+  color: var(--gold);
+  font: 700 0.68rem/1.2 system-ui, sans-serif;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.help {
+  margin: 6px 0 0;
+  color: var(--ink-dim);
+  font-size: 12.5px;
+}
+
+.pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+
+.pills button {
+  min-height: 34px;
+  padding: 4px 12px;
+  border: 1px solid var(--glass-line);
+  border-radius: 8px;
+  background: var(--glass-2);
+  color: var(--ink);
+  font-size: 13.5px;
+}
+
+.pills button[aria-pressed='true'] {
+  border-color: var(--accent);
+  background: rgba(230, 180, 80, 0.18);
+  color: var(--gold);
+  font-weight: 700;
+}
+
+.two {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 0 28px;
+  align-items: end;
+}
+
+.stepper {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.stepper button {
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border: 1px solid var(--field-line);
+  border-radius: 8px;
+  background: #111b2d;
+  color: var(--ink);
+  font-weight: 700;
+  font-size: 16px;
+  line-height: 1;
+}
+
+.stepper button[aria-disabled='true'] {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.stepper output {
+  min-width: 30px;
+  text-align: center;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.attributes {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 4px 18px;
+}
+
+.attribute {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-height: 36px;
+}
+
+.points {
+  margin: 4px 0 0;
+  color: var(--ink-dim);
+  font-size: 12.5px;
+}
+
+.bad {
+  margin: 6px 0 0;
+  color: #ffb59e;
+  font-size: 12.5px;
+  font-weight: 650;
+}
+
+.gear {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px 10px;
+}
+
+.slot {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.slot label {
+  color: var(--ink-dim);
+  font-size: 12px;
+}
+
+.slot select {
+  min-width: 0;
+  min-height: 34px;
+  padding: 4px 6px;
+  border: 1px solid var(--field-line);
+  border-radius: 8px;
+  background: #111b2d;
+  color: var(--ink);
+  font: 13.5px system-ui, sans-serif;
+}
+
+.slot select:disabled {
+  color: var(--ink-dim);
+  opacity: 1;
+}
+
+.preview {
+  padding: 10px;
+  border: 1px solid var(--glass-line);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.035);
+}
+
+/* The dummy on the camp's green ground, as the creation preview and the profile portrait draw a gladiator. */
+.figure {
+  position: relative;
+  height: 150px;
+  overflow: hidden;
+  border-radius: 9px;
+  background:
+    radial-gradient(ellipse 30px 7px at 50% 138px, rgba(10, 20, 12, 0.5), transparent),
+    radial-gradient(ellipse 120px 44px at 50% 136px, #3f7d48, transparent),
+    #2c5d36;
+}
+
+.sprite {
+  position: absolute;
+  left: 50%;
+  top: 138px;
+}
+
+.layer {
+  position: absolute;
+  top: 0;
+  left: 0;
+  image-rendering: pixelated;
+}
+
+.who {
+  margin: 8px 0 0;
+  font: 700 15px/1.3 Georgia, serif;
+}
+
+.sub {
+  margin: 0 0 6px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.mini {
+  display: grid;
+  grid-template-columns: 100px minmax(0, 1fr);
+  gap: 10px;
+  align-items: center;
+  margin-top: 12px;
+}
+
+.mini .figure {
+  height: 100px;
+  background:
+    radial-gradient(ellipse 22px 5px at 50% 90px, rgba(10, 20, 12, 0.5), transparent),
+    radial-gradient(ellipse 80px 30px at 50% 88px, #3f7d48, transparent),
+    #2c5d36;
+}
+
+.mini .sprite {
+  top: 90px;
+}
+
+.mini .who {
+  margin: 0;
+}
+
+.mini .sub {
+  margin: 2px 0 0;
+}
+
+.table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12.5px;
+}
+
+.table th,
+.table td {
+  padding: 3px 2px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.07);
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.table th:first-child,
+.table td:first-child {
+  text-align: left;
+}
+
+.table tbody th {
+  color: var(--ink-dim);
+  font-weight: 400;
+}
+
+.table thead th {
+  color: var(--gold);
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.foot {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 18px;
+  border-top: 1px solid var(--glass-line);
+  background: #19151f;
+}
+
+.foot p {
+  margin: 0 auto 0 0;
+  color: var(--ink-dim);
+  font-size: 12.5px;
+}
+
+.foot button {
+  min-height: 40px;
+  padding: 0 16px;
+  border: 1px solid var(--glass-line);
+  border-radius: 9px;
+  background: var(--glass-2);
+  color: var(--ink);
+  font-weight: 650;
+  white-space: nowrap;
+}
+
+.foot .gold {
+  border-color: #ffe48f;
+  background: var(--accent);
+  color: var(--accent-ink);
+  font-weight: 700;
+}
+
+.foot .gold[aria-disabled='true'] {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.pills button:focus-visible,
+.stepper button:focus-visible,
+.close:focus-visible,
+.foot button:focus-visible,
+.slot select:focus-visible {
+  outline: 3px solid var(--gold);
+  outline-offset: 2px;
+}
+
+.sr {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+/* A narrow window: a sheet from near the top, one column. */
+@media (max-width: 640px) {
+  .dialog {
+    inset: 30px 0 0;
+    width: 100%;
+    max-height: none;
+    height: auto;
+    margin: 0;
+    border-bottom: 0;
+    border-radius: 14px 14px 0 0;
+  }
+
+  .head {
+    padding-left: 14px;
+  }
+
+  .intro {
+    margin: 0 14px 10px;
+  }
+
+  .body {
+    padding: 4px 14px 14px;
+  }
+
+  .columns,
+  .two,
+  .attributes {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .gear {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .foot {
+    flex-wrap: wrap;
+    padding: 10px 14px;
+  }
+
+  .foot p {
+    flex-basis: 100%;
+    margin: 0 0 4px;
+  }
+
+  .foot button {
+    flex: 1;
+  }
+}
+
+/* The shell's touch layout (`COMPACT_QUERY`): 44 px targets, and 16 px fields so a phone does not zoom into them. */
+@media (hover: none), (max-width: 480px) {
+  .pills button,
+  .foot button {
+    min-height: 44px;
+  }
+
+  .stepper button {
+    width: 44px;
+    height: 44px;
+  }
+
+  .attribute {
+    min-height: 48px;
+  }
+
+  .slot select {
+    min-height: 44px;
+    font-size: 16px;
+  }
+}

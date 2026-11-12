@@ -9,6 +9,7 @@
 // Patch 1.9 Task 10: the XP bar under Stamina, the Attributes and Stats blocks, and help on their labels (and on Stamina and Load).
 // Patch 1.9: Worn equipment's slots open the equip picker (`WornEquipment`); a phone's picker is a sheet over the panel body, and the
 // summary and the build planner it covers are hidden meanwhile.
+// Patch 1.9 Task 18: ⚔ Practice fight under Stats opens the shell's practice dialog (a fight against a training dummy; nothing is saved).
 import { useEffect, useId, useState, type ReactNode } from 'react';
 import type { OwnerState } from '@contracts/reads';
 import { RULES_V2 } from '@domain/rules-v2';
@@ -79,14 +80,18 @@ function XpBar({ owner, rules, nowMs, location }: { owner: OwnerState; rules: Ru
   );
 }
 
-/** Attributes (the build's points and the class's bonus) beside Stats (what a fight uses), each label with its help (Patch 1.9 Task 10). */
-function BuildFacts({ owner, hints }: { owner: OwnerState; hints: Hints }) {
+/**
+ * Attributes (the build's points and the class's bonus) beside Stats (what a fight uses), each label with its help (Patch 1.9 Task 10).
+ * Under them, Patch 1.9 Task 18: ⚔ Practice fight, which tests this build against a training dummy (only for a build the rules can fight).
+ */
+function BuildFacts({ owner, hints, onPractice }: { owner: OwnerState; hints: Hints; onPractice?: () => void }) {
   const build = ownBuild(owner);
   const classId = owner.currentBuild.classId;
   const stats = cardStats(classId, build);
   // Patch 1.9 Task 13: what Damage and Armor are in each context, in the tooltip (only where they differ).
   const contexts = stats ? contextLines(stats) : {};
-  return (
+  const practiceId = useId();
+  return <>
     <div className={styles.facts}>
       <section aria-label="Attributes">
         <h3 className={styles.factsHead}>Attributes · {pointsTotal(build.allocations)} points</h3>
@@ -108,10 +113,16 @@ function BuildFacts({ owner, hints }: { owner: OwnerState; hints: Hints }) {
         </ul>
       </section>}
     </div>
-  );
+    {stats && onPractice && <div className={styles.practice}>
+      <button type="button" className={styles.practiceButton} data-practice-button="" aria-describedby={practiceId} onClick={onPractice}>
+        <span aria-hidden="true">⚔</span> Practice fight
+      </button>
+      <p id={practiceId}>Test this build against a training dummy you set up. Free: no stamina, no schedule slot, no rating. Nothing is saved.</p>
+    </div>}
+  </>;
 }
 
-function OwnerSummary({ owner, slotIndex, clock, fixture, stale, resting, onRetry, titles, covered, rules, location, hints }: {
+function OwnerSummary({ owner, slotIndex, clock, fixture, stale, resting, onRetry, titles, covered, rules, location, hints, onPractice }: {
   owner: OwnerState; slotIndex: number | null; clock: DisplayClock; fixture: boolean; stale: boolean; resting: boolean; onRetry(): void;
   titles?: TitleControls;
   rules: Rules;
@@ -121,6 +132,8 @@ function OwnerSummary({ owner, slotIndex, clock, fixture, stale, resting, onRetr
   hints: Hints;
   /** A phone's equip sheet is open over the panel: this is hidden under it. */
   covered: boolean;
+  /** Opens the practice dialog (Patch 1.9 Task 18). */
+  onPractice?: () => void;
 }) {
   const now = useNow(clock);
   const clockMode = useClockMode();
@@ -163,13 +176,13 @@ function OwnerSummary({ owner, slotIndex, clock, fixture, stale, resting, onRetr
       <progress className={styles.bar} aria-label="Stamina" aria-describedby={staminaId} value={owner.stamina.current} max={owner.stamina.maximum} />
       <XpBar owner={owner} rules={rules} nowMs={now} location={location} />
       <dl className={styles.wallets}><div><dt>Gold</dt><dd>{owner.wallets.money}</dd></div><div><dt>Renown</dt><dd>{owner.wallets.renown}</dd></div></dl>
-      <BuildFacts owner={owner} hints={hints} />
+      <BuildFacts owner={owner} hints={hints} onPractice={onPractice} />
     </section>
   );
 }
 
 export function CharacterPanel({ viewer, session, owner, ownerError, slotIndex, clock, gateway, fixture, previewAs, previewFailed, refreshOwner, onCreate,
-  resting = false, titles, rules = RULES_V2, location = null }: {
+  resting = false, titles, rules = RULES_V2, location = null, onPractice }: {
   viewer: Viewer;
   session: SessionState;
   owner: OwnerState | null;
@@ -193,6 +206,8 @@ export function CharacterPanel({ viewer, session, owner, ownerError, slotIndex, 
   rules?: Rules;
   /** The owner's world actor's location (`expedition:<id>` while away), for the XP bar; null while the world is not loaded. */
   location?: string | null;
+  /** ⚔ Practice fight under Stats opens the practice dialog (Patch 1.9 Task 18); without it there is no button. */
+  onPractice?: () => void;
 }) {
   const retry = () => { void refreshOwner().catch(() => undefined); };
   // Patch 1.9: a Worn equipment slot opens the equip picker. The build planner is inert while it is open (the desktop popover lies over its
@@ -203,7 +218,7 @@ export function CharacterPanel({ viewer, session, owner, ownerError, slotIndex, 
   if (owner) {
     return <>
       <OwnerSummary owner={owner} slotIndex={slotIndex} clock={clock} fixture={fixture} stale={ownerError !== null} resting={resting} onRetry={retry}
-        titles={titles} covered={picking} rules={rules} location={location} hints={hints} />
+        titles={titles} covered={picking} rules={rules} location={location} hints={hints} onPractice={onPractice} />
       <WornEquipment key={`worn-${owner.gladiatorId}`} owner={owner} gateway={gateway} refresh={refreshOwner} clock={clock} preview={fixture} onPicking={setPicking}
         loadHelp={{ row: hints.hintRow('Load'), label: hints.hintLabel('Load', loadHelp, statNumbers.Load), className: styles.loadRow }} />
       <div className={styles.planner} data-covered={picking || undefined} inert={picking}>

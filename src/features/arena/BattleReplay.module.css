@@ -53,8 +53,36 @@
   white-space: nowrap;
 }
 
+/* A practice fight's title and its "Practice — not saved" tag (Patch 1.9 Task 18), in the fixture banner's amber. */
+.titleRow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 14px;
+  min-width: 0;
+}
+
+.titleRow :is(h1, h2, h3, h4, h5, h6) {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.practiceTag {
+  display: inline-flex;
+  align-items: center;
+  padding: 3px 11px;
+  border: 1px solid #88683d;
+  border-radius: 999px;
+  background: rgba(71, 54, 35, 0.92);
+  color: #ffe1a3;
+  font: 700 13px/1.4 system-ui, sans-serif;
+  white-space: nowrap;
+}
+
 @media (hover: none), (max-width: 480px) {
   .header { display: block; }
+  /* The touch layout: the tag under the title. */
+  .titleRow { flex-direction: column; align-items: flex-start; }
   .upNext { display: grid; gap: 0.2rem; font-size: 0.8rem; }
   .upNext button { display: none; }
 }

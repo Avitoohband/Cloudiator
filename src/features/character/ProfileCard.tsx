@@ -199,8 +199,11 @@ const RAIL_SIDE = 66, BAR = 8 + 54 + 12;
 const ABOVE = 64, BELOW = 44;
 /** Beside a clicked body: the card's near edge this far from the body's centre (clear of the gladiator at the camp's zoom). */
 const SIDE = 40;
-/** The narrowest a card is made to sit beside a panel (it is 520 px wide when it has the room). */
-const MIN_CARD = 300, CARD_WIDTH = 520;
+/**
+ * The narrowest a card is made to sit beside a panel (it is 520 px wide when it has the room): measured, the card's sections fit
+ * without a sideways scroll from 280 px (Task 21; it was a 300 px floor that could lie over the panel).
+ */
+const MIN_CARD = 280, CARD_WIDTH = 520;
 const clamp = (value: number, min: number, max: number) => Math.max(min, Math.min(value, max));
 
 /**
@@ -214,19 +217,24 @@ export function placeCard(screen: Point | null, card: Size, view: Size, side: Me
   const maxLeft = view.width - card.width - (place === 'right' ? RAIL_SIDE : MARGIN);
   const maxTop = view.height - card.height - (place === 'bottom' ? BAR : MARGIN);
   if (!screen) {
-    if (place === 'left') return { left: clamp(PANEL_RIGHT, minLeft, maxLeft), top: TOP };
-    // Right and bottom panels start below the chip and the notices, so the card lines up with the panel's top.
-    const top = clamp(panel?.top ?? TOP, TOP, Math.max(TOP, maxTop));
-    const panelLeft = panel?.left ?? (place === 'right' ? view.width - 78 - 380 : view.width / 2 - 190), panelWidth = panel?.width ?? 380;
-    // Room left of the panel (always), and right of it (a bottom bar's panel is centred; a right panel has the rail there).
-    const leftRoom = panelLeft - MARGIN - minLeft;
-    const rightRoom = place === 'bottom' ? view.width - MARGIN - (panelLeft + panelWidth + MARGIN) : 0;
+    // A left panel starts under the chip row; right and bottom panels start below the chip and the notices, so the card lines up
+    // with the panel's top.
+    const top = place === 'left' ? TOP : clamp(panel?.top ?? TOP, TOP, Math.max(TOP, maxTop));
+    const panelLeft = panel?.left ?? (place === 'left' ? RAIL_RIGHT : place === 'right' ? view.width - 78 - 380 : view.width / 2 - 190);
+    const panelWidth = panel?.width ?? PANEL_RIGHT - MARGIN - RAIL_RIGHT;
+    // Room left of the panel (not beside a left rail), and right of it (not beside a right rail). A left panel's card prefers its right.
+    const leftRoom = place === 'left' ? 0 : panelLeft - MARGIN - minLeft;
+    const rightRoom = place === 'right' ? 0 : view.width - MARGIN - (panelLeft + panelWidth + MARGIN);
     if (card.width <= leftRoom) return { left: panelLeft - MARGIN - card.width, top };
     if (card.width <= rightRoom) return { left: panelLeft + panelWidth + MARGIN, top };
-    // Neither side holds the full card: it narrows to the roomier side (not below MIN_CARD) rather than cover the panel.
+    // Neither side holds the full card: it narrows to the roomier side rather than lie over the panel.
     const roomier = rightRoom > leftRoom ? 'right' : 'left';
-    const room = Math.max(MIN_CARD, Math.floor(roomier === 'right' ? rightRoom : leftRoom));
-    return roomier === 'right' ? { left: panelLeft + panelWidth + MARGIN, top, width: room } : { left: Math.max(minLeft, panelLeft - MARGIN - room), top, width: room };
+    const room = Math.floor(roomier === 'right' ? rightRoom : leftRoom);
+    if (room >= MIN_CARD) return roomier === 'right' ? { left: panelLeft + panelWidth + MARGIN, top, width: room } : { left: panelLeft - MARGIN - room, top, width: room };
+    // Task 21: not even the narrowest card fits beside it (a pointer window under about 750 px, or 990 px with the bar at the
+    // bottom). Rather than lie partly over the panel, the card moves above it: on the panel's own box, its width, the list under it
+    // until the card closes.
+    return { left: panelLeft, top, width: panelWidth };
   }
   const above = screen.y - ABOVE - card.height, below = screen.y + BELOW;
   const centred = clamp(screen.x - card.width / 2, minLeft, maxLeft);
@@ -306,6 +314,10 @@ export function ProfileLayer({ target, world, reads, ownerId, ownPlace = null, r
     update();
     const observer = typeof ResizeObserver === 'function' ? new ResizeObserver(update) : null;
     observer?.observe(element);
+    // The open panel too (Task 21): after a resize it moves (and so resizes) once the shell has measured the notices again, and a
+    // card beside or over it follows.
+    const surface = document.querySelector<HTMLElement>('[data-menu-surface]:not([hidden])');
+    if (surface) observer?.observe(surface);
     window.addEventListener('resize', update);
     return () => { observer?.disconnect(); window.removeEventListener('resize', update); };
   }, [screen, menuPlace]);

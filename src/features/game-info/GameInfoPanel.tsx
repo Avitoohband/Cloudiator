@@ -71,6 +71,8 @@ export function GameInfoPanel({ id, onClose, update, fixture, editorAccount, onD
   }, [article?.id, active, pages.wiki, editing]);
 
   function moveTopic(event: KeyboardEvent<HTMLDivElement>) {
+    // Alt, Ctrl or Meta with a key is the browser's or the system's (Alt+Up, Ctrl+End...), never a move in the list (Task 21).
+    if (event.altKey || event.ctrlKey || event.metaKey) return;
     const at = Math.max(0, wiki.findIndex(item => item.id === article?.id));
     const next = event.key === 'ArrowDown' ? Math.min(at + 1, wiki.length - 1) : event.key === 'ArrowUp' ? Math.max(at - 1, 0)
       : event.key === 'Home' ? 0 : event.key === 'End' ? wiki.length - 1 : null;

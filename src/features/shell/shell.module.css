@@ -196,6 +196,21 @@
   }
 }
 
+/* A panel opens from the side its menu is on (Task 21): from the right beside a right-hand rail, from below above a bottom bar. */
+@keyframes popRight {
+  from {
+    opacity: 0;
+    transform: translateX(8px);
+  }
+}
+
+@keyframes popUp {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+}
+
 .top {
   flex: none;
   border-bottom: 1px solid var(--glass-line);
@@ -1326,6 +1341,16 @@
     --rail-avail: calc(100vh - var(--menu-clear-top, 148px) - 16px);
   }
 
+  /* Task 21: a very tall notice on a short window pushed a right-hand rail out of the window, even at its 24 px floor. The notices
+     column now stops where the rail's shortest length (12 buttons of 24 px and 80 px, 8 px from each end) still fits 12 px under it,
+     and scrolls inside. */
+  .shell[data-menu-place='right'] .notices {
+    max-height: calc(100vh - max(58px, calc(var(--chip-bottom, 0px) + 2px)) - 12px - (12 * 24px + 80px) - 16px);
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    scrollbar-width: thin;
+  }
+
   .shell[data-menu-place='bottom'] {
     --rail-avail: calc(100vw - 16px);
   }
@@ -1416,6 +1441,7 @@
     right: 78px;
     top: var(--menu-clear-top, 148px);
     max-height: calc(100% - var(--menu-clear-top, 148px) - 12px);
+    animation-name: popRight;
   }
 
   .shell[data-menu-place='bottom'] .surface {
@@ -1425,6 +1451,7 @@
     top: auto;
     bottom: 74px;
     max-height: calc(100% - var(--menu-clear-top, 148px) - 74px);
+    animation-name: popUp;
   }
 
   /* The away pill steps beside a panel on the right, and above a bar at the bottom (hidden while a panel is open above it). */

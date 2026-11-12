@@ -265,3 +265,85 @@ for (const place of ['right', 'bottom'] as const) {
     });
   });
 }
+
+// ---- Review leftovers (Patch 1.9, Task 21: planned as 1.9.1, folded into 1.9) -----------------------------------------------
+
+test.describe('a very tall notice on a short window (1280×640), menu on the right', () => {
+  test.use({ viewport: { width: 1280, height: 640 } });
+  test.beforeEach(({}, testInfo) => { test.skip(testInfo.project.name !== 'desktop', 'The pointer layout.'); });
+
+  test('keeps the whole rail in the window and under the notices, which scroll instead (Task 21 item 5)', async ({ page }) => {
+    await openCamp(page, JSON.stringify({ pinned: true, place: 'right' }), '&signin=cancelled');
+    await expect(rail(page)).toHaveAttribute('data-revealed', 'true');
+    // A notice taller than the window leaves room for: the sign-in notice, made 420 px tall.
+    const notice = notices(page).getByText(/sign-in/i).first();
+    await expect(notice).toBeVisible();
+    await notice.evaluate(el => { (el.closest('[data-notices] > * > *') as HTMLElement ?? el).style.minHeight = '420px'; });
+    await expect.poll(async () => { const b = await boxOf(rail(page)); return b.y >= 0 && b.y + b.height <= 640; }, 'the rail stays in the window').toBe(true);
+    const r = await boxOf(rail(page)), column = await boxOf(notices(page));
+    expect(r.y, 'the rail starts under the notices').toBeGreaterThanOrEqual(column.y + column.height);
+    expect(await notices(page).evaluate(el => el.scrollHeight > el.clientHeight), 'the notices scroll inside their column').toBe(true);
+    expect((await boxOf(rail(page).getByRole('button', { name: 'Settings', exact: true }))).width).toBeGreaterThanOrEqual(24);
+  });
+});
+
+for (const place of ['left', 'right', 'bottom'] as const) {
+  test.describe(`a profile card opened from a list on a pointer window 600 to 1000 px wide, menu on the ${place}`, () => {
+    test.use({ viewport: { width: 1000, height: 800 } });
+    test.beforeEach(({}, testInfo) => { test.skip(testInfo.project.name !== 'desktop', 'The pointer layout.'); });
+
+    test('never lies partly over the open panel: beside it, narrowed to fit, or where no side holds the card, over the whole panel (Task 21 item 5)', async ({ page }) => {
+      await openCamp(page, JSON.stringify({ pinned: true, place }));
+      const list = await settled(await openMenuAt(page, 'Gladiators'));
+      await list.getByRole('button', { name: /^Profile: / }).first().click();
+      const card = page.getByRole('dialog', { name: /^Profile: / });
+      await expect(card).toBeVisible();
+      for (const width of [1000, 800, 600]) {
+        await page.setViewportSize({ width, height: 800 });
+        await expect.poll(async () => (await boxOf(list)).x + (await boxOf(list)).width <= width).toBe(true);
+        const p = await boxOf(list);
+        // The room beside the panel on the sides a card may use (never between the panel and its rail).
+        const room = Math.max(place === 'left' ? 0 : p.x - 24, place === 'right' ? 0 : width - (p.x + p.width) - 24);
+        // Beside it when a side holds the narrowest card (280 px); otherwise on the panel's own columns, from its top or higher.
+        await expect.poll(async () => {
+          const c = await boxOf(card);
+          return room >= 280 ? !intersects(c, p) : Math.abs(c.x - p.x) <= 1 && Math.abs(c.width - p.width) <= 1 && c.y <= p.y + 1;
+        }, `${width} px, ${room} px beside the panel`).toBe(true);
+        const c = await boxOf(card);
+        expect(c.x).toBeGreaterThanOrEqual(0);
+        expect(c.x + c.width, `${width} px`).toBeLessThanOrEqual(width);
+        expect(intersects(c, await boxOf(rail(page))), `${width} px: clear of the rail`).toBe(false);
+        await expect(card.getByRole('button', { name: 'Close profile' })).toBeInViewport({ ratio: 1 });
+      }
+    });
+  });
+}
+
+test.describe('the Settings panel', () => {
+  test.beforeEach(({}, testInfo) => { test.skip(testInfo.project.name !== 'desktop', 'The pointer layout.'); });
+
+  test('opens from the side its menu is on: left, right or bottom (Task 21 item 7)', async ({ page }) => {
+    const from: Record<'left' | 'right' | 'bottom', string> = { left: 'translateX(-8px)', right: 'translateX(8px)', bottom: 'translateY(8px)' };
+    for (const place of ['left', 'right', 'bottom'] as const) {
+      await page.addInitScript(([key, value]) => localStorage.setItem(key, value), [MENU_PREFS_KEY, JSON.stringify({ pinned: true, place })]);
+      await page.goto('/game/?mode=fixture');
+      await page.waitForFunction(() => window.__cloudiatorCamp?.state()?.ready === true, null, { timeout: 45_000 });
+      await expect(rail(page)).toHaveAttribute('data-place', place);
+      await openSettings(page);
+      // The panel's opening animation, read from its keyframes: where it starts from.
+      const start = await settings(page).evaluate(el => {
+        const name = getComputedStyle(el).animationName;
+        for (const sheet of Array.from(document.styleSheets)) {
+          let rules: CSSRuleList;
+          try { rules = sheet.cssRules; } catch { continue; }
+          for (const rule of Array.from(rules)) {
+            const found = rule instanceof CSSKeyframesRule && rule.name === name ? rule : null;
+            if (found) return (found.cssRules[0] as CSSKeyframeRule).style.transform;
+          }
+        }
+        return `no keyframes named ${name}`;
+      });
+      expect(start, place).toBe(from[place]);
+    }
+  });
+});

@@ -161,6 +161,40 @@ test('Wiki topics are one short scrolling list', async ({ page }) => {
   expect(await panel.evaluate(element => element.scrollWidth <= element.clientWidth)).toBe(true);
 });
 
+test('the Wiki topic list leaves Alt, Ctrl and Meta with an arrow key alone, and its active descendant is the chosen topic (Task 21 item 9)', async ({ page }) => {
+  await page.goto('/game/');
+  await cornerChip(page).getByRole('button', { name: 'Game Info', exact: true }).click();
+  const panel = page.getByRole('dialog', { name: 'Game Info' });
+  const list = panel.getByRole('listbox', { name: 'Wiki topics' });
+  const chosen = list.getByRole('option', { selected: true });
+  await expect(chosen).toHaveCount(1);
+  // The id of the chosen option, read after a frame (so a key that moved the choice has re-rendered).
+  const idOf = async () => {
+    await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => resolve(null))));
+    return (await chosen.getAttribute('id'))!;
+  };
+  await list.focus();
+  const first = await idOf();
+  await expect(list).toHaveAttribute('aria-activedescendant', first);
+  for (const key of ['Alt+ArrowDown', 'Control+ArrowDown', 'Meta+ArrowDown', 'Alt+ArrowUp', 'Control+End', 'Meta+Home']) {
+    await page.keyboard.press(key);
+    expect(await idOf(), key).toBe(first);
+    await expect(list, key).toHaveAttribute('aria-activedescendant', first);
+  }
+  await page.keyboard.press('ArrowDown');
+  const second = await idOf();
+  expect(second).not.toBe(first);
+  await expect(list).toHaveAttribute('aria-activedescendant', second);
+  for (const key of ['Alt+ArrowUp', 'Control+ArrowUp', 'Meta+ArrowUp']) {
+    await page.keyboard.press(key);
+    expect(await idOf(), key).toBe(second);
+  }
+  await page.keyboard.press('End');
+  await expect(list).toHaveAttribute('aria-activedescendant', await list.getByRole('option').last().getAttribute('id') as string);
+  await list.getByRole('option').nth(1).click();
+  await expect(list).toHaveAttribute('aria-activedescendant', await list.getByRole('option').nth(1).getAttribute('id') as string);
+});
+
 // A 1x1 PNG, so the guide thumbnails (https://i.ytimg.com/vi/<id>/mqdefault.jpg) load offline.
 const PIXEL = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==', 'base64');
 type WikiDoc = { entries: { id: string; title: string; body: string; video?: string; videoLength?: string }[] };

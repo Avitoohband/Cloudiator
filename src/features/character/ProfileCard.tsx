@@ -20,7 +20,11 @@
 //
 // Patch 1.6 (spec "The Arena banner"): a gladiator who owns the Arena banner (the profile read's `banner`) shows the pill "🚩 Arena banner"
 // right after the name line, its flag decorative; every viewer sees the same card.
-import { useEffect, useId, useLayoutEffect, useRef, useState, type CSSProperties } from 'react';
+//
+// Patch 1.9 Task 19: a player's card (any gladiator's, their own too: a mirror) offers "⚔ Spar a copy" after Follow, which fights a copy of the
+// build the card shows, at once, in the browser (`copySide`; nothing is sent, and the gladiator is not told). It is disabled until the card
+// has a build to copy; a visitor or an account without a gladiator is offered none.
+import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import type { PublicActor, WorldSnapshot } from '@contracts/reads';
 import type { GameGateway } from '../../lib/api/gateway';
 import type { ProfileRead } from '../../lib/api/reads';
@@ -39,6 +43,7 @@ import { ActorPortrait } from './ActorPortrait';
 import { useStatHints } from './stat-hints';
 import { ClassChips } from './ClassCard';
 import { attributeHelp, attributeRows, cardStats, gearRows, overloadLine, pointsTotal, recordText, sinceText, statHelp, statRows } from './profile-card';
+import { copySide, type PracticeSide } from '../practice/practice';
 import styles from './ProfileCard.module.css';
 
 /**
@@ -63,7 +68,7 @@ export type ProfileTarget = {
 const RARITY_CLASS = { common: styles.rCommon, uncommon: styles.rUncommon, rare: styles.rRare } as const;
 
 export function ProfileCard({ actor, profile, profileFailed = false, own, ownPlace = null, record = null, followReason = null, following = false, nowMs, onFollow,
-  onWatch, onOpenMenu }: {
+  onWatch, onOpenMenu, onSpar }: {
   actor: PublicActor;
   /** The public profile with its card data, once loaded (null while it loads or when it failed). */
   profile: ProfileRead | null;
@@ -86,6 +91,8 @@ export function ProfileCard({ actor, profile, profileFailed = false, own, ownPla
   /** Watches an Arena entrant's bout. */
   onWatch?(activityId: string): void;
   onOpenMenu(id: MenuId): void;
+  /** ⚔ Spar a copy (Patch 1.9 Task 19): a player's only; without it the card offers none. */
+  onSpar?(copy: PracticeSide): void;
 }) {
   const reasonId = useId();
   const bodyRef = useRef<HTMLDivElement>(null);
@@ -112,6 +119,11 @@ export function ProfileCard({ actor, profile, profileFailed = false, own, ownPla
   const gear = build ? gearRows(build) : null;
   const overload = stats ? overloadLine(stats) : null;
   const since = profile && profile.joinedAtMs !== null ? sinceText(profile.joinedAtMs, nowMs) : '';
+  // The copy a spar fights: the card's build under the Arena's rules, once there is one the rules accept.
+  const copy = useMemo(() => {
+    if (!onSpar || !build) return null;
+    try { return copySide(actor, build); } catch { return null; }
+  }, [onSpar, actor, build]);
   return <>
     <div ref={bodyRef} className={styles.body} data-testid="profile-body">
       <div className={styles.head}>
@@ -174,13 +186,16 @@ export function ProfileCard({ actor, profile, profileFailed = false, own, ownPla
       </div>
       {followReason && <p id={reasonId} className={styles.reason}>{followReason}</p>}
     </div>
-    <div className={styles.actions}>
+    <div className={styles.actions} data-card-actions="">
       {own && <>
         <button type="button" className={styles.gold} onClick={() => onOpenMenu('gladiator')}>My gladiator</button>
         <button type="button" onClick={() => onOpenMenu('schedule')}>Schedule</button>
       </>}
       <button type="button" disabled={!!followReason} aria-describedby={followReason ? reasonId : undefined} aria-pressed={following && !followReason}
         onClick={() => onFollow(actor.gladiatorId)}>Follow</button>
+      {onSpar && <button type="button" data-spar-button="" disabled={!copy} onClick={() => { if (copy) onSpar(copy); }}>
+        <span aria-hidden="true">⚔</span> Spar a copy
+      </button>}
       {bout && onWatch && <button type="button" onClick={() => onWatch(bout)}>Watch bout</button>}
     </div>
   </>;
@@ -252,7 +267,8 @@ function followReasonOf(actor: PublicActor, roster: Roster | null, sceneStatus: 
 }
 
 /** The profile card over the camp: resolves the actor, loads the public profile and places the card. */
-export function ProfileLayer({ target, world, reads, ownerId, ownPlace = null, roster, sceneStatus, following, nowMs, menuPlace = 'left', onFollow, onWatch, onOpenMenu, onClose }: {
+export function ProfileLayer({ target, world, reads, ownerId, ownPlace = null, roster, sceneStatus, following, nowMs, menuPlace = 'left', onFollow, onWatch, onOpenMenu, onClose,
+  onSpar }: {
   target: ProfileTarget;
   world: WorldSnapshot | null;
   /** Public profile reads (null until the fixture preview's reads load). */
@@ -273,6 +289,8 @@ export function ProfileLayer({ target, world, reads, ownerId, ownPlace = null, r
   onWatch(activityId: string, gladiatorId: string): void;
   onOpenMenu(id: MenuId): void;
   onClose(): void;
+  /** ⚔ Spar a copy: a player's (Patch 1.9 Task 19). */
+  onSpar?(copy: PracticeSide): void;
 }) {
   const card = useRef<HTMLElement>(null);
   const [loaded, setLoaded] = useState<{ profile: ProfileRead | null; failed: boolean } | null>(null);
@@ -319,7 +337,7 @@ export function ProfileLayer({ target, world, reads, ownerId, ownPlace = null, r
       {actor ? (
         <ProfileCard key={id} actor={actor} profile={loaded?.profile ?? null} profileFailed={loaded?.failed ?? false} own={ownerId === id} ownPlace={ownPlace} record={target.record}
           followReason={followReasonOf(actor, roster, sceneStatus)} following={following === id} nowMs={nowMs} onFollow={onFollow}
-          onWatch={activityId => onWatch(activityId, id)} onOpenMenu={onOpenMenu} />
+          onWatch={activityId => onWatch(activityId, id)} onOpenMenu={onOpenMenu} onSpar={onSpar} />
       ) : <div className={styles.body} data-testid="profile-body">
         <div className={styles.headPlain}><h2 className={styles.name}>{name}</h2></div>
         {target.record && <dl className={styles.facts}><div><dt>Record</dt><dd>{target.record.wins}–{target.record.losses}</dd></div></dl>}

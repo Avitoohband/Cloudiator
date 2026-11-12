@@ -1,13 +1,20 @@
-import { expect, test, type Locator, type Page } from './fixtures';
-import { ownerFixture } from '../fixtures/domain';
+import { readFileSync } from 'node:fs';
+import { expect, test, type BrowserContext, type Locator, type Page } from './fixtures';
+import type { RevealedTimeline } from '../../supabase/functions/_shared/contracts/events';
+import type { OwnerState, PublicActor, WorldSnapshot } from '../../supabase/functions/_shared/contracts/reads';
+import { ownerFixture, worldFixture } from '../fixtures/domain';
+import { EXPEDITION_FIXTURES, EXPEDITION_GLADIATORS } from '../fixtures/expedition-ids';
+import { lookFor } from '../../src/game/actors';
 import { ownBuild } from '../../src/features/character/profile-card';
 import { cardFighter, comparisonRows, dummyFighter, presetSetup } from '../../src/features/practice/practice';
 import { noHorizontalScroll } from './a11y-helpers';
-import { menuDialog, openMenu, quietArrivals, touchLayout } from './shell-helpers';
+import { SLOT_MS, emptyWorld, routeLiveReads, seedSession } from './live-routes';
+import { creationDialog, expectOwnerShown, menuDialog, openMenu, quietArrivals, touchLayout } from './shell-helpers';
 
 // Patch 1.9 Task 18 (additions spec section 3, the approved practice mockups): a gold ⚔ Practice fight button under Stats in My gladiator
 // opens the dummy dialog; ⚔ Fight runs a local fight under the Arena's rules and plays it in the replay viewer over the camp, one history
 // entry deep. Nothing is sent or saved. The fixture preview's Aster: a Guardian, level 1, 2 points in each attribute, nothing worn.
+// Task 19: ⚔ Spar a copy on any gladiator's card (your own too: a mirror) fights a copy of the build the card shows, at once, in the same viewer.
 const production = process.env.PLAYWRIGHT_STATIC === 'true';
 /** The SDD workspace, when the run should save the review screenshots there. */
 const shotDir = process.env.PRACTICE_SHOT_DIR;
@@ -31,6 +38,8 @@ const hook = async (page: Page) => (await page.evaluate(() => window.__cloudiato
 const replayReady = (page: Page) => page.waitForFunction(() => window.__cloudiatorReplay !== undefined, null, { timeout: 45_000 });
 const seedOf = (page: Page) => resultScene(page).getAttribute('data-practice-seed');
 const box = async (locator: Locator) => (await locator.boundingBox())!;
+/** Both fighters' full health in the shown replay, from their health meters. */
+const maxHealths = (page: Page) => resultScene(page).getByRole('meter').evaluateAll(meters => meters.map(meter => meter.getAttribute('aria-valuemax')));
 
 /** Every request to the game's Edge Functions or database (a command, a write): practice must send none. */
 function watchGateway(page: Page) {
@@ -281,7 +290,9 @@ test.describe('practice fights from My gladiator (fixture)', () => {
     await expect(card.locator('p.eyebrow')).toHaveText(touch ? [] : ['RESULT · PRACTICE']);
     await expect(card.getByText(`${winner} wins`, { exact: true })).toBeVisible();
     await expect(card.getByText(new RegExp(`^(${loser} is defeated\\.|Time ran out .*|.*tie-break chose ${winner}\\.)$`))).toBeVisible();
-    await expect(card.getByRole('list').getByRole('listitem')).toHaveText(['No rewards · no rating · not saved']);
+    // Task 19 (Task 18 review): the chip list is the practice's, not "Rewards".
+    await expect(card.getByRole('list', { name: 'Practice', exact: true }).getByRole('listitem')).toHaveText(['No rewards · no rating · not saved']);
+    await expect(card.getByRole('list', { name: 'Rewards' })).toHaveCount(0);
     await expect(card.getByRole('button')).toHaveText([touch ? '↺ Again' : '↺ Watch again', '⚔ Fight again', 'Change dummy']);
     await expect(card.getByRole('button', { name: 'Fight again', exact: true })).toHaveCSS('background-color', 'rgb(242, 198, 107)');
     const result = scene.getByRole('region', { name: 'Result', exact: true });
@@ -304,10 +315,14 @@ test.describe('practice fights from My gladiator (fixture)', () => {
     await expect(card).toHaveCount(0);
     expect(await seedOf(page)).toBe(first);
 
-    // Fight again: a new roll with the same builds.
+    // Fight again: a new roll with the same builds, and no new history entry (Task 18 review).
+    const builds = await maxHealths(page);
+    const entries = await page.evaluate(() => history.length);
     await skipToEnd(page);
     await card.getByRole('button', { name: 'Fight again', exact: true }).click();
     await expect.poll(() => seedOf(page)).not.toBe(first);
+    expect(await maxHealths(page)).toEqual(builds);
+    expect(await page.evaluate(() => history.length)).toBe(entries);
     await replayReady(page);
     await expect(card).toHaveCount(0);
     const again = await hook(page);
@@ -401,5 +416,253 @@ test.describe('practice fights from My gladiator (fixture)', () => {
     const card = scene.locator('[data-end-card]');
     await expect(card.getByRole('button')).toHaveText(['↺ Again', '⚔ Fight again', 'Change dummy']);
     for (const button of await card.getByRole('button').all()) expect((await box(button)).height).toBeGreaterThanOrEqual(44);
+  });
+});
+
+// ---- Task 19: Spar a copy, from a gladiator's card -------------------------------------------------------------------------------------
+
+const profileCard = (page: Page, name: string) => page.getByRole('dialog', { name: `Profile: ${name}`, exact: true });
+const sparButton = (card: Locator) => card.getByRole('button', { name: 'Spar a copy', exact: true });
+/** The fixture camp, ready. */
+async function openCamp(page: Page, url = '/game/?mode=fixture') {
+  await page.goto(url);
+  await page.waitForFunction(() => window.__cloudiatorCamp?.state()?.ready === true, null, { timeout: 45_000 });
+}
+/** A gladiator's card from the Gladiators list (`own`: the viewer's own row). */
+async function openCard(page: Page, name: string): Promise<Locator> {
+  const roster = await openMenu(page, 'Gladiators');
+  const row = roster.getByRole('button', { name: `Profile: ${name}`, exact: true }).first();
+  await row.scrollIntoViewIfNeeded();
+  await row.click();
+  await expect(profileCard(page, name)).toBeVisible();
+  return profileCard(page, name);
+}
+/** The card's action buttons in order. */
+const actionTexts = (card: Locator) => card.locator('[data-card-actions] button').evaluateAll(nodes => nodes.map(node => node.textContent ?? ''));
+/** The close-up's drawn fighters (the fixture build's battle hook), once the scene is ready. */
+async function drawnFighters(page: Page) {
+  await page.waitForFunction(() => window.__cloudiatorBattle?.debug()?.ready === true, null, { timeout: 45_000 });
+  return page.evaluate(() => window.__cloudiatorBattle!.debug()!.fighters.map(f => ({ name: f.name, kind: f.kind, layers: f.layers })));
+}
+const tintOf = (layers: { id: string; tint: number | null }[], ids: string[]) => layers.find(layer => ids.includes(layer.id))?.tint ?? null;
+
+test.describe('Spar a copy from a gladiator\'s card (fixture)', () => {
+  test.skip(production, 'The camp harness runs on the fixture preview only.');
+  test.beforeEach(async ({ context }) => { await quietArrivals(context); });
+
+  test('Lucilla\'s card: ⚔ Spar a copy after Follow fights a copy of her build and look at once; Back, Escape and the end card return to her card', async ({ page }, info) => {
+    const sent = watchGateway(page);
+    await openCamp(page);
+    const touch = await touchLayout(page);
+    const lucilla = await openCard(page, 'Lucilla');
+    const stats = lucilla.getByRole('region', { name: 'Stats', exact: true });
+    await expect(stats).toContainText('Health');
+    const spar = sparButton(lucilla);
+    await expect(spar).toHaveText('⚔ Spar a copy');
+    await expect(spar).toBeEnabled();
+    const actions = await actionTexts(lucilla);
+    expect(actions.indexOf('⚔ Spar a copy')).toBe(actions.indexOf('Follow') + 1);
+    const health = Number(await stats.getByRole('definition').first().textContent());
+    const actor = (await page.evaluate(() => window.__cloudiatorCamp!.world()!.actors.find(a => a.name === 'Lucilla')))!;
+    await shot(page, info.project.name === 'mobile' ? 'task-19-card-phone' : 'task-19-card-desktop');
+
+    const entries = await page.evaluate(() => history.length);
+    await spar.click();
+    const scene = resultScene(page);
+    await expect(scene).toBeVisible();
+    await expect(practiceDialog(page)).toHaveCount(0);
+    expect(await page.evaluate(() => history.length)).toBe(entries + 1);
+    await replayReady(page);
+    await expect(scene.getByRole('button', { name: 'Back to Camp', exact: true })).toHaveText('← Camp');
+    await expect(scene.locator('header p.eyebrow')).toHaveText('PRACTICE · SPAR A COPY · ARENA RULES');
+    await expect(scene.getByRole('heading', { level: 2, name: 'Aster vs Lucilla (copy)', exact: true })).toBeVisible();
+    await expect(scene.getByText('Practice — not saved', { exact: true })).toBeVisible();
+    const kinds = await scene.locator('[data-fighter-kind]').evaluateAll(nodes => nodes.map(node => (node as HTMLElement).innerText));
+    expect(kinds).toEqual(['GUARDIAN', actor.classId.toUpperCase()]);
+    // The card's build under the Arena's rules: its health is the card's; the copy is drawn in Lucilla's look.
+    expect((await maxHealths(page))[1]).toBe(String(health));
+    const [you, copy] = await drawnFighters(page);
+    expect(you).toMatchObject({ name: 'Aster', kind: 'gladiator' });
+    expect(copy).toMatchObject({ name: 'Lucilla (copy)', kind: 'gladiator' });
+    const look = lookFor(actor.appearance, actor.gladiatorId, []).tint;
+    expect(tintOf(copy.layers, ['body', 'body-female'])).toBe(look.skin);
+    expect(tintOf(copy.layers, ['cloth', 'cloth-female'])).toBe(look.cloth);
+
+    await skipToEnd(page);
+    const card = scene.locator('[data-end-card]');
+    await expect(card.locator('p.eyebrow')).toHaveText(touch ? [] : ['RESULT · PRACTICE']);
+    await expect(card.getByRole('list', { name: 'Practice', exact: true }).getByRole('listitem')).toHaveText(['No rewards · no rating · not saved']);
+    await expect(card.getByRole('button')).toHaveText([touch ? '↺ Again' : '↺ Watch again', '⚔ Fight again', '← Camp']);
+    await expect(card.getByRole('button', { name: 'Camp', exact: true })).toBeVisible();
+    await expect(scene.getByRole('region', { name: 'Result', exact: true })).toContainText(NOTE);
+    await shot(page, info.project.name === 'mobile' ? 'task-19-end-phone' : 'task-19-end-desktop');
+
+    // Fight again: the same two builds, a new roll, no new history entry.
+    const seed = await seedOf(page);
+    const builds = await maxHealths(page);
+    await card.getByRole('button', { name: 'Fight again', exact: true }).click();
+    await expect.poll(() => seedOf(page)).not.toBe(seed);
+    expect(await maxHealths(page)).toEqual(builds);
+    expect(await page.evaluate(() => history.length)).toBe(entries + 1);
+
+    // Each way out returns to the card, with the focus on ⚔ Spar a copy.
+    const returned = async () => {
+      await expect(scene).toHaveCount(0);
+      await expect(lucilla).toBeVisible();
+      await expect(spar).toBeFocused();
+    };
+    await skipToEnd(page);
+    await card.getByRole('button', { name: 'Camp', exact: true }).click();
+    await returned();
+    await spar.click();
+    await replayReady(page);
+    await scene.getByRole('button', { name: 'Back to Camp', exact: true }).click();
+    await returned();
+    await spar.click();
+    await replayReady(page);
+    await page.keyboard.press('Escape');
+    await returned();
+    await spar.click();
+    await replayReady(page);
+    await page.evaluate(() => history.back());
+    await returned();
+    expect(await page.evaluate(() => history.length)).toBe(entries + 1);
+    // Lucilla is not told: nothing was sent.
+    expect(sent).toEqual([]);
+  });
+
+  test('your own card spars a mirror: Aster vs Aster (copy), both drawn (Review Focus 2)', async ({ page }) => {
+    const sent = watchGateway(page);
+    await openCamp(page);
+    const aster = await openCard(page, 'Aster');
+    await expect(aster).toContainText('YOUR GLADIATOR');
+    await sparButton(aster).click();
+    const scene = resultScene(page);
+    await expect(scene).toBeVisible();
+    await replayReady(page);
+    await expect(scene.getByRole('heading', { level: 2, name: 'Aster vs Aster (copy)', exact: true })).toBeVisible();
+    const kinds = await scene.locator('[data-fighter-kind]').evaluateAll(nodes => nodes.map(node => (node as HTMLElement).innerText));
+    expect(kinds).toEqual(['GUARDIAN', 'GUARDIAN']);
+    const drawn = await drawnFighters(page);
+    expect(drawn.map(f => [f.name, f.kind])).toEqual([['Aster', 'gladiator'], ['Aster (copy)', 'gladiator']]);
+    expect(drawn[1].layers).toEqual(drawn[0].layers);
+    expect(drawn[0].layers.length).toBeGreaterThan(0);
+    // The fight runs to its end, between two participants with their own ids.
+    await skipToEnd(page);
+    expect(['practice-you', 'practice-opponent']).toContain((await hook(page)).winnerId);
+    await expect(scene.locator('[data-end-card]')).toContainText(/^(RESULT · PRACTICE)?Aster( \(copy\))? wins/);
+    await page.keyboard.press('Escape');
+    await expect(scene).toHaveCount(0);
+    await expect(sparButton(aster)).toBeFocused();
+    expect(sent).toEqual([]);
+  });
+
+  test('a card without a build offers it disabled; a visitor is offered none', async ({ page }) => {
+    await openCamp(page);
+    const xanthe = await openCard(page, 'Xanthe');
+    await expect(xanthe.getByRole('region', { name: 'Stats', exact: true })).toContainText('Not available');
+    await expect(sparButton(xanthe)).toBeDisabled();
+
+    await openCamp(page, '/game/?mode=fixture&as=visitor');
+    const lucilla = await openCard(page, 'Lucilla');
+    await expect(lucilla.getByRole('region', { name: 'Stats', exact: true })).toContainText('Health');
+    await expect(lucilla.getByRole('button', { name: 'Follow', exact: true })).toBeVisible();
+    await expect(sparButton(lucilla)).toHaveCount(0);
+  });
+});
+
+// The arrival banner wants the preview's arrivals unannounced, so this case does not quiet them.
+test.describe('the arrival banner under a practice fight (fixture)', () => {
+  test.skip(production, 'The camp harness runs on the fixture preview only.');
+
+  test('an arrival is not shown under a practice fight: its banner waits for the camp to come back (Task 18 review)', async ({ page }) => {
+    await page.goto('/game/?mode=fixture');
+    const banner = page.locator('[data-arrival-slot]').getByRole('button', { name: /^Find / });
+    await expect(banner).toBeVisible({ timeout: 45_000 });
+    await openMenu(page, 'My gladiator');
+    await expect(practiceButton(page)).toBeVisible({ timeout: 45_000 });
+    const dialog = await openPractice(page);
+    await fightButton(dialog).click();
+    await expect(resultScene(page)).toBeVisible();
+    await expect(page.locator('[data-arrival-slot]').getByRole('button', { name: /^Find / })).toHaveCount(0);
+    await resultScene(page).getByRole('button', { name: 'Back to My gladiator', exact: true }).click();
+    await expect(resultScene(page)).toHaveCount(0);
+    await expect(page.locator('[data-arrival-slot]').getByRole('button', { name: /^Find / })).toBeVisible();
+  });
+});
+
+// ---- Live: an account with no gladiator, a card still loading, and the away button under a practice fight ---------------------------------
+
+const MIN = 60_000;
+const WOODLAND = JSON.parse(readFileSync('tests/fixtures/expeditions/woodland.json', 'utf8')) as RevealedTimeline;
+const TRIP_ID = EXPEDITION_FIXTURES.woodland.activityId;
+
+test.describe('practice in the live camp', () => {
+  test.skip(production, 'Live UI uses the development-only intercepted Supabase transport.');
+
+  /** A camp with Aster (away on the Woodland Path when `away`) and Lucilla, read live; `owner` null is an account with no gladiator. */
+  async function live(context: BrowserContext, { owner, away = false }: { owner: OwnerState | null; away?: boolean }) {
+    await seedSession(context);
+    await quietArrivals(context);
+    const start = WOODLAND.stages[0].startedAtMs;
+    const at = away ? start + 30 * MIN : worldFixture.serverNowMs;
+    const aster: PublicActor = away ? { ...worldFixture.actors[0], gladiatorId: EXPEDITION_GLADIATORS.aster.id, location: 'expedition:woodland', activityId: TRIP_ID,
+      activityStatus: 'active', startsAtMs: start, endsAtMs: start + SLOT_MS, visibleStage: null, resting: false } : worldFixture.actors[0];
+    const lucilla: PublicActor = { ...worldFixture.actors[0], gladiatorId: '6c1f0d2e-0000-4000-8000-00000000c0de', name: 'Lucilla', classId: 'duelist', location: 'training' };
+    const world: WorldSnapshot = { ...emptyWorld(at), revision: 'practice-live-1', actors: [aster, lucilla] };
+    const profiles = Object.fromEntries([aster, lucilla].map(actor => [actor.gladiatorId, { actor, combatStrength: null, rating: 1000, prestige: [],
+      build: { stance: 'balanced', allocations: { strength: 2, agility: 2, vitality: 2, endurance: 2, precision: 2 },
+        equipment: { weapon: null, offHand: null, head: null, body: null, feet: null } } }]));
+    const shown = owner && away ? { ...owner, processedSlotIndex: Math.floor(start / SLOT_MS),
+      currentActivity: { id: TRIP_ID, kind: 'expedition' as const, status: 'active' as const, startsAtMs: start, endsAtMs: start + SLOT_MS, label: 'Woodland Path' } } : owner;
+    const { summary, ...timeline } = structuredClone(WOODLAND);
+    void summary;
+    await routeLiveReads(context, { world, owner: shown, profiles: profiles as never, timelines: { [TRIP_ID]: timeline }, serverNowMs: () => at });
+    return at;
+  }
+
+  test('an account with no gladiator is offered no ⚔ Spar a copy', async ({ page, context }) => {
+    await live(context, { owner: null });
+    await page.goto('/game/');
+    await expect(creationDialog(page)).toBeVisible({ timeout: 45_000 });
+    await creationDialog(page).getByRole('button', { name: 'Not now', exact: true }).click();
+    const lucilla = await openCard(page, 'Lucilla');
+    await expect(lucilla.getByRole('region', { name: 'Stats', exact: true })).toContainText('Health');
+    await expect(sparButton(lucilla)).toHaveCount(0);
+  });
+
+  test('a card whose build has not loaded offers ⚔ Spar a copy disabled until it has', async ({ page, context }) => {
+    await live(context, { owner: structuredClone(ownerFixture) });
+    let release!: () => void;
+    const loaded = new Promise<void>(resolve => { release = resolve; });
+    await page.route(/\/rest\/v1\/public_profile_reads/, async route => { await loaded; await route.fallback(); });
+    await page.goto('/game/');
+    await expectOwnerShown(page, 'Aster');
+    const lucilla = await openCard(page, 'Lucilla');
+    await expect(lucilla.getByRole('region', { name: 'Stats', exact: true })).toContainText('Loading…');
+    await expect(sparButton(lucilla)).toBeDisabled();
+    release();
+    await expect(lucilla.getByRole('region', { name: 'Stats', exact: true })).toContainText('Health');
+    await expect(sparButton(lucilla)).toBeEnabled();
+  });
+
+  test('the away button waits under a practice fight and comes back with the camp (Task 18 review)', async ({ page, context }) => {
+    const at = await live(context, { owner: structuredClone(ownerFixture), away: true });
+    await page.goto('/game/');
+    await expectOwnerShown(page, 'Aster');
+    await page.waitForFunction(() => window.__cloudiatorShell?.clock.synced() === true, null, { timeout: 45_000 });
+    await page.evaluate(ms => window.__cloudiatorShell!.clock.freeze(ms), at);
+    const away = page.getByTestId('away-button');
+    await expect(away).toBeVisible({ timeout: 45_000 });
+    await openMenu(page, 'My gladiator');
+    const dialog = await openPractice(page);
+    await fightButton(dialog).click();
+    await expect(resultScene(page)).toBeVisible();
+    await expect(away).toHaveCount(0);
+    await page.keyboard.press('Escape');
+    await expect(resultScene(page)).toHaveCount(0);
+    // Back on the camp it is there again. A phone keeps it out of sight while its menu sheet or row of icons is open, as always.
+    await expect(away).toHaveCount(1);
+    if (!(await touchLayout(page))) await expect(away).toBeVisible();
   });
 });

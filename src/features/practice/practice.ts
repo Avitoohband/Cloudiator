@@ -3,8 +3,8 @@
 // stored or counted (no rating, record, renown or XP).
 import type { Attributes, ClassId, EquipmentSlot, Stance } from '@contracts/commands';
 import type { BattleLog } from '@contracts/events';
-import type { OwnerState } from '@contracts/reads';
-import type { Appearance } from '@domain/appearance';
+import type { OwnerState, PublicActor } from '@contracts/reads';
+import { validAppearance, type Appearance } from '@domain/appearance';
 import { CATALOG_V1 } from '@domain/catalog-v1';
 import { criticalProbability, hitProbability, makeFighter, simulateBattle } from '@domain/combat';
 import { trainingCap } from '@domain/economy';
@@ -147,6 +147,14 @@ export const DUMMY_LOOK: Appearance = { body: 'male', hair: 'bald', skin: 2, hai
 /** The owner's side: its current build (what My gladiator shows) under the Arena's rules, and its own look. */
 export const ownSide = (owner: OwnerState): PracticeSide => ({
   gladiatorId: owner.gladiatorId, name: owner.name, look: owner.appearance, snapshot: cardFighter(owner.currentBuild.classId, ownBuild(owner)),
+});
+/**
+ * A copy of a gladiator from its card (Task 19, Spar a copy): the build the card shows (points, gear, stance) under the Arena's rules, and
+ * the gladiator's look, named "<name> (copy)". Your own card makes a mirror: both sides then share one gladiator id.
+ */
+export const copySide = (actor: Pick<PublicActor, 'gladiatorId' | 'name' | 'classId' | 'appearance'>, build: PublicBuild): PracticeSide => ({
+  gladiatorId: actor.gladiatorId, name: `${actor.name} (copy)`, look: validAppearance(actor.appearance) ? actor.appearance : null,
+  snapshot: cardFighter(actor.classId, build),
 });
 /** The training dummy's side; it has no gladiator. */
 export const dummySide = (setup: DummySetup): PracticeSide => ({ gladiatorId: null, name: DUMMY_NAME, look: DUMMY_LOOK, snapshot: dummyFighter(setup) });

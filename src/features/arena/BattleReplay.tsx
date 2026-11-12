@@ -609,7 +609,7 @@ function BattlePlayer({ battle, summary, keptUntil, bridge: external, level, vie
           {!compact && <p className="eyebrow">{practice ? PRACTICE_RESULT : 'RESULT'}</p>}
           <p className={styles.endVerdict}>{verdict.verdict}</p>
           <p className={styles.endReason}>{verdict.reason}</p>
-          {chips.length > 0 && <ul className={styles.chips} aria-label="Rewards">{chips.map(chip => <li key={chip}>{chip}</li>)}</ul>}
+          {chips.length > 0 && <ul className={styles.chips} aria-label={practice ? 'Practice' : 'Rewards'}>{chips.map(chip => <li key={chip}>{chip}</li>)}</ul>}
           <div className={styles.endActions}>
             <button type="button" onClick={restart}><IconText text={againLabel(compact)} /></button>
             {practice ? <>

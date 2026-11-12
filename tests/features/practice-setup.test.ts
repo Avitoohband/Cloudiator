@@ -1,8 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import { ownerFixture } from '../fixtures/domain';
 import {
-  DUMMY_LOOK, DUMMY_NAME, comparisonRows, dummyFighter, dummyLoad, dummySide, ownSide, practiceFight, presetSetup, runPractice, type DummySetup,
+  DUMMY_LOOK, DUMMY_NAME, cardFighter, comparisonRows, copySide, dummyFighter, dummyLoad, dummySide, ownSide, practiceFight, presetSetup, runPractice, type DummySetup,
 } from '@/features/practice/practice';
+import { ownBuild } from '@/features/character/profile-card';
+import type { PublicBuild } from '@/lib/api/reads';
 import {
   GEAR_CHOICES, PRESET_ORDER, changeLevel, dummySubline, fightable, footerText, gearLevels, overloadText, pointsHelp, pointsText, presetLabel,
   summaryLine, withGear, withGearLevel, withPoint, withPreset, withStance,
@@ -130,5 +132,24 @@ describe('sides and fights', () => {
     const again = practiceFight('dummy', you, dummy);
     expect(again.seed).toMatch(/^[0-9a-f]{16}$/);
     expect(again.seed).not.toBe(fight.seed);
+  });
+
+  it('copies a gladiator from its card: its published build under Arena rules, its look, "(copy)" after its name', () => {
+    const build: PublicBuild = { stance: 'offensive', allocations: { strength: 5, agility: 4, vitality: 2, endurance: 1, precision: 2 },
+      equipment: { weapon: null, offHand: null, head: null, body: null, feet: null } };
+    const look = { body: 'female', hair: 'long', skin: 3, hairColor: 2, cloth: 1 } as const;
+    const lucilla = { gladiatorId: 'lucilla-id', name: 'Lucilla', classId: 'duelist' as const, appearance: look };
+    expect(copySide(lucilla, build)).toEqual({ gladiatorId: 'lucilla-id', name: 'Lucilla (copy)', look, snapshot: cardFighter('duelist', build) });
+    expect(copySide({ ...lucilla, appearance: null }, build).look).toBeNull();
+  });
+  it('spars a mirror: one gladiator twice, told apart by the participant ids (Review Focus 2)', () => {
+    const you = ownSide(ownerFixture);
+    const copy = copySide({ gladiatorId: ownerFixture.gladiatorId, name: 'Aster', classId: 'guardian', appearance: ownerFixture.appearance }, ownBuild(ownerFixture));
+    expect(copy.name).toBe('Aster (copy)');
+    expect(copy.snapshot).toEqual(you.snapshot);
+    const fight = practiceFight('spar', you, copy, 'mirror');
+    expect(fight.log.participants.map(p => [p.id, p.gladiatorId, p.name])).toEqual([
+      ['practice-you', ownerFixture.gladiatorId, 'Aster'], ['practice-opponent', ownerFixture.gladiatorId, 'Aster (copy)']]);
+    expect(['practice-you', 'practice-opponent']).toContain(fight.log.winnerId);
   });
 });

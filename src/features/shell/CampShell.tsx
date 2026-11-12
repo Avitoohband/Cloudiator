@@ -43,7 +43,8 @@
 //
 // Patch 1.9 Task 18: practice fights. My gladiator's ⚔ Practice fight opens the dummy dialog, and ⚔ Fight shows the fight over the camp like a
 // scene, with one history entry of its own and the camp paused beneath (`usePractice`: the state, kept here so Change dummy reopens the dialog
-// as it was). Nothing is sent or saved.
+// as it was). Nothing is sent or saved. Like a scene, a practice fight holds back the arrival banner and the away button until the camp is back
+// (Task 19). Task 19: a player's profile cards offer ⚔ Spar a copy, which starts a spar at once.
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties } from 'react';
 import type { Phase, WearTitleValue } from '@contracts/commands';
 import type { PublicActivitySummary } from '@contracts/events';
@@ -370,7 +371,7 @@ export function CampShell({ fixture, previewAs, previewResting = false, previewB
   const shellRef = useRef<HTMLDivElement>(null);
   useFocusRescue(shellRef, focusCamp);
 
-  // Practice fights (Task 18): the owner's, while one is shown the camp is paused beneath it as under a scene.
+  // Practice fights (Task 18): the owner's; while one is shown the camp is paused beneath it, and its banner and away button wait, as under a scene.
   const practice = usePractice(viewer === 'player' ? owner : null);
   const practising = practice.fight !== null;
 
@@ -554,7 +555,7 @@ export function CampShell({ fixture, previewAs, previewResting = false, previewB
   // not while a scene covers the camp. Find is the Gladiators list's Find: the camp view's centre, the menu closed, the camp keyboard.
   const arrivals = useArrivals(world, ownerId);
   const place = useBannerPlace(shellRef, game.viewer, open, prefs.place);
-  const arrival = arrivals.banner !== null && scene === null && game.viewer !== 'loading' && !(place.coversPanel && open !== null) ? arrivals.banner : null;
+  const arrival = arrivals.banner !== null && scene === null && !practising && game.viewer !== 'loading' && !(place.coversPanel && open !== null) ? arrivals.banner : null;
   const { dismiss: dismissArrival } = arrivals;
   const arrivalSlot = (
     <ArrivalSlot stacked={place.stacked}>
@@ -628,7 +629,7 @@ export function CampShell({ fixture, previewAs, previewResting = false, previewB
           </div>}
         </div>
       </div>
-      {away.state && scene === null && <AwayButton state={away.state} onOpen={openFromAway} onClose={away.close} />}
+      {away.state && scene === null && !practising && <AwayButton state={away.state} onOpen={openFromAway} onClose={away.close} />}
       {menus.map(menu => (menu.id === open || menu.id === 'arena') && (
         <MenuSurface key={menu.id} menu={menu} open={menu.id === open} onClose={() => close(menu.id)}>{content(menu.id)}</MenuSurface>
       ))}
@@ -636,7 +637,8 @@ export function CampShell({ fixture, previewAs, previewResting = false, previewB
         nowMs={nowMs}
         following={following} menuPlace={prefs.place} onClose={() => closeCard(true)} onOpenMenu={id => { closeCard(false); show(id); }}
         onFollow={id => { bridge.emit('follow-character', { gladiatorId: following === id ? null : id }); closeCard(false); handBack(); }}
-        onWatch={(activityId, gladiatorId) => { closeCard(false); bridge.emit('open-arena', { activityId, gladiatorId }); }} />}
+        onWatch={(activityId, gladiatorId) => { closeCard(false); bridge.emit('open-arena', { activityId, gladiatorId }); }}
+        onSpar={viewer === 'player' && owner ? practice.spar : undefined} />}
       <main id="main" className={styles.camp} data-camp-view="" tabIndex={-1}
         onPointerDown={event => { press.current = { x: event.clientX, y: event.clientY }; }}
         onPointerUp={event => {

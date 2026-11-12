@@ -46,10 +46,10 @@ Project folders under `D:\Avi\Projects\Animation\Cloudiator\`.
 - My gladiator and gladiator cards show the extra damage of a critical hit, and how much renown armor and weapons add in the Arena.
 - Sleeping gladiators take off their armour.
 - Each Wiki topic shows its own YouTube video guide.
+- Practice fights: test your build against a dummy with stats you choose, or spar a copy of any gladiator. No stamina, no slot, no rating, nothing saved.
 
 ### Planned for 1.9 (added 2026-11-12, not built yet)
 
-- Practice fights: test your build against a dummy with stats you choose, or spar a copy of any gladiator. No stamina, no slot, no rating.
 - A Feedback button: send a bug report or an idea from the game, and read the team's answer.
 - Buy back any of your last 10 sold items until the next game day, for the price you sold it at.
 

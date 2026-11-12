@@ -6,9 +6,11 @@
 // (the address stays the camp's): the browser's Back, the result's Back button and Escape all leave through that entry, so a phone's Back
 // closes the fight instead of leaving the camp. Each entry carries a fresh mark, so an entry left by a reload, or reached with Forward
 // after the fight was closed, opens nothing. When the dialog or the result closes, the focus goes back to ⚔ Practice fight.
+// Task 19: ⚔ Spar a copy on a gladiator's card starts a spar at once (no dialog) with the same entry; its way back says Camp, its end card
+// offers ← Camp instead of Change dummy, and the focus goes back to the card's ⚔ Spar a copy.
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { OwnerState } from '@contracts/reads';
-import { dummySide, ownSide, practiceFight, practiceSeed, presetSetup, type DummySetup, type PracticeFight } from './practice';
+import { dummySide, ownSide, practiceFight, practiceSeed, presetSetup, type DummySetup, type PracticeFight, type PracticeSide } from './practice';
 import { fightable } from './practice-setup';
 import { PracticeDialog } from './PracticeDialog';
 import { PracticeResult } from './PracticeResult';
@@ -16,8 +18,9 @@ import { PracticeResult } from './PracticeResult';
 /** Our mark on the result's history entry. */
 const MARK = 'cloudiatorPractice';
 const markOf = (state: unknown): unknown => (state && typeof state === 'object' ? (state as Record<string, unknown>)[MARK] : undefined);
-/** My gladiator's ⚔ Practice fight, which opened the dialog. */
-const focusPracticeButton = () => document.querySelector<HTMLElement>('[data-practice-button]')?.focus({ preventScroll: true });
+/** What opened the fight, which takes the focus back: My gladiator's ⚔ Practice fight, or the card's ⚔ Spar a copy. */
+const OPENER: Record<PracticeFight['kind'], string> = { dummy: '[data-practice-button]', spar: '[data-spar-button]' };
+const focusOpener = (kind: PracticeFight['kind']) => document.querySelector<HTMLElement>(OPENER[kind])?.focus({ preventScroll: true });
 
 export type PracticeState = {
   /** The dummy as last set up for this owner (null before the first opening). */
@@ -31,6 +34,8 @@ export type PracticeState = {
   cancel(): void;
   /** ⚔ Fight: a new fight with the owner's current build; nothing happens while the dummy cannot fight. */
   start(): void;
+  /** ⚔ Spar a copy: a new fight with the owner's current build against a card's copy. */
+  spar(copy: PracticeSide): void;
   again(): void;
   back: { label: string; go(): void };
   change: { label: string; go(): void };
@@ -50,6 +55,8 @@ export function usePractice(owner: OwnerState | null): PracticeState {
   /** Change dummy: the dialog opens when the entry has been left. */
   const reopen = useRef(false);
   const [focusRequest, setFocusRequest] = useState(0);
+  /** The kind of the last fight shown: its opener takes the focus back. */
+  const opener = useRef<PracticeFight['kind']>('dummy');
   const setup = saved && saved.gladiatorId === ownerId ? saved.setup : null;
 
   const open = useCallback(() => {
@@ -63,19 +70,25 @@ export function usePractice(owner: OwnerState | null): PracticeState {
     const current = ownerRef.current;
     if (current) setSaved({ gladiatorId: current.gladiatorId, setup: next });
   }, []);
-  const cancel = useCallback(() => { setDialogOpen(false); setFocusRequest(n => n + 1); }, []);
+  const cancel = useCallback(() => { opener.current = 'dummy'; setDialogOpen(false); setFocusRequest(n => n + 1); }, []);
 
-  const start = useCallback(() => {
+  /** Shows a new fight over the camp in a history entry of its own (none while one is shown). */
+  const begin = useCallback((kind: PracticeFight['kind'], opponent: () => PracticeSide) => {
     const current = ownerRef.current;
-    if (!current || !setup || !fightable(setup) || token.current !== null) return;
+    if (!current || token.current !== null) return;
     let next: PracticeFight;
-    try { next = practiceFight('dummy', ownSide(current), dummySide(setup)); } catch { return; }
+    try { next = practiceFight(kind, ownSide(current), opponent()); } catch { return; }
     token.current = practiceSeed();
     leaving.current = false;
+    opener.current = kind;
     window.history.pushState({ [MARK]: token.current }, '');
     setDialogOpen(false);
     setFight(next);
-  }, [setup]);
+  }, []);
+  const start = useCallback(() => {
+    if (setup && fightable(setup)) begin('dummy', () => dummySide(setup));
+  }, [setup, begin]);
+  const spar = useCallback((copy: PracticeSide) => begin('spar', () => copy), [begin]);
   const fightRef = useRef(fight);
   useLayoutEffect(() => { fightRef.current = fight; });
   const again = useCallback(() => {
@@ -107,7 +120,7 @@ export function usePractice(owner: OwnerState | null): PracticeState {
     return () => window.removeEventListener('popstate', onPop);
   }, []);
   // After the dialog or the result has gone, the focus goes back to the button that opened the dialog.
-  useEffect(() => { if (focusRequest) focusPracticeButton(); }, [focusRequest]);
+  useEffect(() => { if (focusRequest) focusOpener(opener.current); }, [focusRequest]);
   // Another owner (a sign-out, another account): nothing of the last one's practice stays open.
   const shownFor = useRef(ownerId);
   useEffect(() => {
@@ -118,9 +131,11 @@ export function usePractice(owner: OwnerState | null): PracticeState {
     close();
   }, [ownerId, close]);
 
-  const back = useMemo(() => ({ label: 'My gladiator', go: close }), [close]);
-  const change = useMemo(() => ({ label: 'Change dummy', go: () => { reopen.current = true; close(); } }), [close]);
-  return { setup, dialogOpen, fight, open, edit, cancel, start, again, back, change };
+  // A dummy goes back to My gladiator, and its end card offers Change dummy; a spar goes back to the camp (its card), both ways.
+  const sparring = fight?.kind === 'spar';
+  const back = useMemo(() => ({ label: sparring ? 'Camp' : 'My gladiator', go: close }), [sparring, close]);
+  const change = useMemo(() => (sparring ? { label: '← Camp', go: close } : { label: 'Change dummy', go: () => { reopen.current = true; close(); } }), [sparring, close]);
+  return { setup, dialogOpen, fight, open, edit, cancel, start, spar, again, back, change };
 }
 
 /** The dialog over My gladiator and the fight over the camp. */

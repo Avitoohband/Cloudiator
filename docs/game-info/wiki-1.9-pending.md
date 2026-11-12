@@ -52,6 +52,12 @@ A critical hit deals 50% more damage than a normal hit.
 
 In the Arena and tournaments, renown armor counts 10% more and a renown weapon deals 10% more.
 
+## Practice fights
+
+Practice fights: test your build against a dummy with stats you choose, or spar a copy of any gladiator. No stamina, no slot, no rating, nothing saved.
+
+Practice uses Arena rules: renown gear counts 10% more.
+
 ## Also
 
 - Renown now uses a gold laurel icon, in the corner chip too. Update any Wiki text or picture that shows the old icon.

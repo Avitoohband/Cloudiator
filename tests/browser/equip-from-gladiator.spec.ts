@@ -405,6 +405,95 @@ test.describe('equip from My gladiator (live)', () => {
     expect(await focusDrops(page)).toEqual([]);
   });
 
+  test('an open picker leaves nothing it covers reachable: Tab from Wear never lands under it, and closing it restores the Tab order', async ({ page, context }, info) => {
+    // Final review (Important 1): on the desktop the popover lies over "At the next slot" (Undo, Cancel changes), the outcome line, Retry
+    // and the top of the build planner; Tab from Wear reached them unseen and Enter fired them blind. On a phone the sheet hides them.
+    if (info.project.name === 'mobile') await page.setViewportSize({ width: 360, height: 740 });
+    const sword = piece('sword:1:common'), spare = piece('sword:1:common'), uncommon = piece('sword:1:uncommon');
+    const flow = await gearFlow(context, state => {
+      state.inventory = [sword, spare, uncommon];
+      state.currentBuild.equipment = { ...state.currentBuild.equipment, weapon: sword.id };
+    });
+    await page.goto('/game/');
+    const menu = await openMenu(page, 'My gladiator');
+    const weapon = slotButton(menu, 'Weapon'), worn = wornRegion(menu), dialog = picker(menu, 'Weapon');
+    // A queued change (Undo, Cancel changes) and then a transient refusal (its outcome and Retry), all under the slot row.
+    await weapon.click();
+    await pick(dialog, spare).click();
+    await wearButton(dialog).click();
+    await expect(pendingBox(menu)).toBeVisible();
+    flow.reject('processing');
+    await weapon.click();
+    await pick(dialog, uncommon).click();
+    await wearButton(dialog).click();
+    await expect(worn.getByRole('button', { name: 'Retry request', exact: true })).toBeVisible();
+    flow.reject('');
+    await weapon.click();
+    await pick(dialog, uncommon).click();
+    await wearButton(dialog).focus();
+    /** Where the focus is: in the picker, elsewhere in the menu over (`covered`) or clear of the picker's box, or out of the menu. */
+    const where = () => page.evaluate(() => {
+      const active = document.activeElement as HTMLElement | null, box = document.querySelector('[role="dialog"][aria-label="Change Weapon"]');
+      const menu = box?.closest('[data-menu-surface]');
+      if (!active || !box || !menu) return { at: 'gone', name: '' };
+      const name = active.getAttribute('aria-label') ?? active.textContent?.trim().slice(0, 40) ?? '';
+      if (box.contains(active)) return { at: 'picker', name };
+      if (!menu.contains(active)) return { at: 'outside', name };
+      const a = active.getBoundingClientRect(), b = box.getBoundingClientRect();
+      return { at: a.left < b.right && a.right > b.left && a.top < b.bottom && a.bottom > b.top ? 'covered' : 'clear', name };
+    });
+    /** The controls the desktop popover lies over. */
+    const COVERED = /^(Undo Weapon change|Cancel changes|Retry request)$/;
+    const steps: { at: string; name: string }[] = [];
+    for (let i = 0; i < 30; i += 1) {
+      await page.keyboard.press('Tab');
+      const step = await where();
+      steps.push(step);
+      if (step.at === 'outside' || step.at === 'gone') break;
+    }
+    expect(steps.filter(step => step.at === 'covered'), JSON.stringify(steps)).toEqual([]);
+    expect(steps.filter(step => COVERED.test(step.name)), JSON.stringify(steps)).toEqual([]);
+    expect(steps.at(-1)?.at, JSON.stringify(steps)).toBe('outside');
+    // Escape closes the picker: the slot has the focus, and Tab reaches Undo, Cancel changes and Retry again.
+    await wearButton(dialog).focus();
+    await page.keyboard.press('Escape');
+    await expect(dialog).toHaveCount(0);
+    await expect(weapon).toBeFocused();
+    const names: string[] = [];
+    for (let i = 0; i < 15 && names.at(-1) !== 'Retry request'; i += 1) {
+      await page.keyboard.press('Tab');
+      names.push(await page.evaluate(() => document.activeElement?.getAttribute('aria-label') ?? document.activeElement?.textContent?.trim() ?? ''));
+    }
+    expect(names.filter(name => COVERED.test(name)), JSON.stringify(names)).toEqual(['Undo Weapon change', 'Cancel changes', 'Retry request']);
+  });
+
+  test('Escape that closes the Load tooltip leaves the picker open', async ({ page, context, hasTouch }, info) => {
+    // Final review (Minor 11). On a phone the sheet hides the Load row, so this is the desktop's.
+    test.skip(hasTouch || info.project.name === 'mobile', 'The phone sheet covers the Load heading.');
+    const sword = piece('sword:1:common'), spare = piece('sword:1:common');
+    await gearFlow(context, state => {
+      state.inventory = [sword, spare];
+      state.currentBuild.equipment = { ...state.currentBuild.equipment, weapon: sword.id };
+    });
+    await page.goto('/game/');
+    const menu = await openMenu(page, 'My gladiator');
+    const weapon = slotButton(menu, 'Weapon'), dialog = picker(menu, 'Weapon');
+    const load = wornRegion(menu).getByRole('button', { name: 'Load', exact: true });
+    await weapon.focus();
+    await page.keyboard.press('Enter');
+    await expect(dialog).toBeVisible();
+    // By keyboard, back from the picker to the Load label: its tooltip opens.
+    for (let i = 0; i < 10 && !(await load.evaluate(el => el === document.activeElement)); i += 1) await page.keyboard.press('Shift+Tab');
+    await expect(load).toBeFocused();
+    await expect(menu.getByRole('tooltip')).toBeVisible();
+    await page.keyboard.press('Escape');
+    await expect(menu.getByRole('tooltip')).toHaveCount(0);
+    await expect(dialog).toBeVisible();
+    await page.keyboard.press('Escape');
+    await expect(dialog).toHaveCount(0);
+    await expect(weapon).toBeFocused();
+  });
+
   test('the card and Wear stay on the chosen one of two same-name pieces as hover and keyboard focus move', async ({ page, context, hasTouch }, info) => {
     // AGENTS.md "Detail cards that apply an item": Sword level 1 (a stack of two) and Sword level 5, with different ids and stats.
     if (info.project.name === 'mobile') await page.setViewportSize({ width: 360, height: 740 });

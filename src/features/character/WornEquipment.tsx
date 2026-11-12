@@ -8,8 +8,9 @@
 // change shows a NEXT tag on its slot and a row in "At the next slot", with Undo and Cancel changes. The card and its Wear always follow
 // the CHOSEN tile (the AGENTS.md detail-card rule): hover and keyboard focus move nothing but the focus ring.
 // Desktop: a popover laid over the panel under the slot row (nothing below it moves), with a caret at the slot, the grid on the left and
-// the card with Wear on the right (two columns from 560 px). Touch (the shell's compact query): a sheet over the panel body with Back and a
-// Wear bar at its foot; what it covers is hidden. A keyboard command whose control leaves (Retry, Cancel changes) gives the focus to its
+// the card with Wear on the right (two columns from 560 px); what follows it ("At the next slot", the outcome, Retry and the panel's build
+// planner) is inert while it is open, so Tab from Wear never lands under it. Touch (the shell's compact query): a sheet over the panel body
+// with Back and a Wear bar at its foot; what it covers is hidden. A keyboard command whose control leaves (Retry, Cancel changes) gives the focus to its
 // outcome line (`useOutcomeFocus`, as the Inventory does); Wear, Undo and Remove give it back to the slot.
 import { useEffect, useId, useLayoutEffect, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
 import type { EquipmentSlot } from '@contracts/commands';
@@ -62,7 +63,7 @@ export function WornEquipment({ owner, gateway, refresh, clock, preview = false,
   clock: DisplayClock;
   /** The fixture preview: the picker opens to compare, and its commands are unavailable. */
   preview?: boolean;
-  /** Whether a picker is open, for the panel to hide what a phone's sheet covers. */
+  /** Whether a picker is open, for the panel to make inert what the picker covers (and hide what a phone's sheet covers). */
   onPicking?(open: boolean): void;
   /** The panel's help on the Load heading (Patch 1.9 Task 10): the row's props, the label (a button with its tooltip) and a class for the row. */
   loadHelp?: { row: HintRowProps; label: ReactNode; className: string };
@@ -90,6 +91,8 @@ export function WornEquipment({ owner, gateway, refresh, clock, preview = false,
   const { outcome: outcomeRef, begin, end, target } = useOutcomeFocus(busy);
   const wearing = equipmentSlots.some(slot => worn[slot] !== null);
   const inspectedItem = inspected && pieceOf(worn[inspected]);
+  /** An open picker lies over what follows the slot row (a phone's sheet also hides it): inert meanwhile. */
+  const covered = open !== null;
 
   useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
   useEffect(() => { onPicking?.(open !== null); }, [open, onPicking]);
@@ -165,7 +168,7 @@ export function WornEquipment({ owner, gateway, refresh, clock, preview = false,
     } finally { sending.current = false; end(); if (mounted.current) setBusy(false); }
   }
 
-  /** Opens the picker over the panel. The last outcome (and its Retry) stays until the next command, so nothing below the slots moves. */
+  /** Opens the picker over the panel. The last outcome (and its Retry) stays until the next command, so nothing below the slots moves; it is inert under the picker. */
   function openPicker(slot: EquipmentSlot) {
     setOpen(slot); setChosen(null); setStop(null);
   }
@@ -311,7 +314,8 @@ export function WornEquipment({ owner, gateway, refresh, clock, preview = false,
 
   return <section className={`${inspection.worn} ${styles.worn}`} aria-labelledby={headingId} data-wearing={wearing || undefined} data-picking={open ? '' : undefined}
     onKeyDown={event => {
-      if (event.key !== 'Escape' || !open) return;
+      // An Escape already handled (the Load tooltip closing) is not the picker's.
+      if (event.key !== 'Escape' || !open || event.isDefaultPrevented()) return;
       // Escape closes the picker, not the menu: the shell leaves a handled Escape alone.
       event.preventDefault();
       closePicker(open);
@@ -340,14 +344,15 @@ export function WornEquipment({ owner, gateway, refresh, clock, preview = false,
         </button>;
       })}
     </div>
-    {/* The picker is laid over what follows (its place in the order keeps Tab from the slot row into it); the details stay in place under it. */}
+    {/* The picker is laid over what follows (its place in the order keeps Tab from the slot row into it); the details stay in place under it,
+        and what follows is inert meanwhile, so neither Tab nor a click reaches a control under it. */}
     {open && renderPicker(open)}
     <div className={styles.details} data-covered={open ? '' : undefined}>
       <EquipmentDetails label="Worn equipment details" item={inspectedItem} detailsRef={detail}
         empty={inspected ? (worn[inspected] ? 'This equipment is unavailable.' : 'No equipment worn in this slot.')
           : wearing ? 'Choose a slot to see its stats and weight, or to change it.' : 'No equipment worn. Choose a slot to wear something from your inventory.'} />
     </div>
-    {changed.length > 0 && <section className={styles.pending} aria-labelledby={pendingId}>
+    {changed.length > 0 && <section className={styles.pending} aria-labelledby={pendingId} inert={covered}>
       <h4 id={pendingId}>At the next slot</h4>
       {changed.map(slot => {
         const then = pieceOf(next[slot]), pushed = slot === 'offHand' && isTwoHanded(pieceOf(next.weapon));
@@ -360,7 +365,7 @@ export function WornEquipment({ owner, gateway, refresh, clock, preview = false,
       <p>{pendingNote(effective)}{keepsOtherChanges(owner) && ' Cancel changes puts the gear back; your other queued build changes stay.'}</p>
       <button type="button" className={`${styles.small} ${styles.cancel}`} disabled={preview} {...busyProps} onClick={cancel}>Cancel changes</button>
     </section>}
-    {outcome && <p ref={outcomeRef} className={outcome.role === 'alert' ? styles.alert : styles.message} role={outcome.role} tabIndex={-1} {...target}>{outcome.text}</p>}
-    {retry && <button type="button" className={styles.small} {...busyProps} onClick={() => { if (attempt.current && !sending.current) void send(attempt.current, success.current); }}>Retry request</button>}
+    {outcome && <p ref={outcomeRef} className={outcome.role === 'alert' ? styles.alert : styles.message} role={outcome.role} tabIndex={-1} inert={covered} {...target}>{outcome.text}</p>}
+    {retry && <button type="button" className={styles.small} inert={covered} {...busyProps} onClick={() => { if (attempt.current && !sending.current) void send(attempt.current, success.current); }}>Retry request</button>}
   </section>;
 }

@@ -193,7 +193,8 @@ export function CharacterPanel({ viewer, session, owner, ownerError, slotIndex, 
   location?: string | null;
 }) {
   const retry = () => { void refreshOwner().catch(() => undefined); };
-  // Patch 1.9: a Worn equipment slot opens the equip picker; on a phone it is a sheet over the panel body, and what it covers is hidden.
+  // Patch 1.9: a Worn equipment slot opens the equip picker. The build planner is inert while it is open (the desktop popover lies over its
+  // top, so Tab from the picker must not land there); on a phone the picker is a sheet over the panel body, and what it covers is hidden.
   const [picking, setPicking] = useState(false);
   // One set of help tooltips for the whole panel (the stamina, attribute and stat labels and the Worn equipment's Load): one is open at a time.
   const hints = useStatHints({ buttonClass: styles.hintButton, tipClass: styles.hint, aboveClass: styles.hintAbove, numbersClass: styles.hintNumbers });
@@ -203,7 +204,7 @@ export function CharacterPanel({ viewer, session, owner, ownerError, slotIndex, 
         titles={titles} covered={picking} rules={rules} location={location} hints={hints} />
       <WornEquipment key={`worn-${owner.gladiatorId}`} owner={owner} gateway={gateway} refresh={refreshOwner} clock={clock} preview={fixture} onPicking={setPicking}
         loadHelp={{ row: hints.hintRow('Load'), label: hints.hintLabel('Load', loadHelp, statNumbers.Load), className: styles.loadRow }} />
-      <div className={styles.planner} data-covered={picking || undefined}>
+      <div className={styles.planner} data-covered={picking || undefined} inert={picking}>
         {fixture ? <p className="panel-notice">This preview cannot change the build.</p>
           : <BuildPanel key={owner.gladiatorId} owner={owner} gateway={gateway} refresh={refreshOwner} clock={clock} />}
       </div>

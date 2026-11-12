@@ -7,6 +7,7 @@ import type { ItemInstance, OwnerState } from '@contracts/reads';
 import { CATALOG_V1 } from '@domain/catalog-v1';
 import { criticalProbability, makeFighter } from '@domain/combat';
 import { RULES_V1 } from '@domain/rules-v1';
+import type { BuildSnapshot } from '@domain/types';
 import { deriveStats } from '@domain/stats';
 import type { ArenaRecord, PublicBuild } from '../../lib/api/reads';
 import { calendarDays, dateText } from '../../lib/time-format';
@@ -26,11 +27,16 @@ const itemOf = (slot: EquipmentSlot, gear: PublicBuild['equipment'][EquipmentSlo
   ...gear, id: `card-${slot}`, ownerId: 'card', quantity: 1, origin: gear.catalogId.endsWith(':renown') ? 'renown' : 'shop', binding: 'tradable', reservation: null,
 };
 
+/** The published build as the rules read it (the snapshot `cardStats` and the practice fights derive from). */
+export function cardSnapshot(classId: ClassId, build: PublicBuild): BuildSnapshot {
+  const equipment = Object.fromEntries(GEAR_SLOTS.map(slot => [slot, itemOf(slot, build.equipment[slot])])) as Record<EquipmentSlot, ItemInstance | null>;
+  return { rulesVersion: RULES_V1.version, classId, stance: build.stance, allocations: { ...build.allocations }, equipment };
+}
+
 /** The build's stats as the card says them; null when the rules refuse the build (an unknown stance or class, a bad point). */
 export function cardStats(classId: ClassId, build: PublicBuild): CardStats | null {
   try {
-    const equipment = Object.fromEntries(GEAR_SLOTS.map(slot => [slot, itemOf(slot, build.equipment[slot])])) as Record<EquipmentSlot, ItemInstance | null>;
-    const snapshot = { rulesVersion: RULES_V1.version, classId, stance: build.stance, allocations: { ...build.allocations }, equipment };
+    const snapshot = cardSnapshot(classId, build);
     const derived = deriveStats(snapshot, RULES_V1);
     const fighter = makeFighter(snapshot, 'expedition', RULES_V1);
     const arena = makeFighter(snapshot, 'arena', RULES_V1);

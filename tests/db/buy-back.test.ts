@@ -182,6 +182,24 @@ describe('buy back', () => {
     expect(await send(me.token, buyBack(shieldSale))).toEqual({ ok: false, code: 'insufficient-funds' });
   });
 
+  it('counts held fees against the price: money that covers it with too little spendable gold is insufficient-funds', async () => {
+    const me = await fighter(0);
+    const sword = await me.add('sword:5:rare');
+    const saleId = await me.sold(sword);
+    // 50 gold covers the price of 39, but a held 20-gold fee (operator setup: a queued build's, as the server held one before
+    // the 2026-10-28 release) leaves 30 to spend, as a shop purchase counts it.
+    await sql`update public.wallets set money=50 where gladiator_id=${me.gid}`;
+    const fee = randomUUID();
+    await sql`insert into public.reservations(gladiator_id,operation_id,money,renown,status) values(${me.gid},${fee},20,0,'held')`;
+    expect(await send(me.token, buyBack(saleId))).toEqual({ ok: false, code: 'insufficient-funds' });
+    expect([await me.money(), await me.item(sword.id)]).toEqual([50, undefined]);
+    expect((await me.state()).buyBack.map(row => row.saleId)).toEqual([saleId]);
+    // Once the fee is no longer held, the same gold buys it back (a new operation: the refusal was recorded under the first).
+    await sql`update public.reservations set status='refunded' where gladiator_id=${me.gid} and operation_id=${fee}`;
+    expect(await send(me.token, buyBack(saleId))).toMatchObject({ ok: true, value: { itemId: sword.id, moneyDebit: 39 } });
+    expect(await me.money()).toBe(11);
+  });
+
   it('never offers or stores a salvage sale', async () => {
     const me = await fighter();
     const stack = await me.addSalvage(12);

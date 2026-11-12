@@ -108,9 +108,11 @@ export const TABLE_CLASSES: Readonly<Record<string, { retention: Retention; wind
   'public.world_actors': { retention: 'player' }, 'private.market_listings': { retention: 'player' }, 'public.market_offers': { retention: 'player' },
   // Task 23.8: one signal per owner and one rest row per character that has rested.
   'private.owner_signals': { retention: 'player' }, 'public.character_rests': { retention: 'player' },
-  // M25: the operator's game messages (a handful of rows, posted by hand and kept) and each account's read marks (at most one per
-  // account and message, so bounded by the players and the few messages: tiny, kept).
-  'public.game_messages': { retention: 'singleton' }, 'public.message_reads': { retention: 'player' },
+  // M25: the operator's game messages (a handful of broadcasts, posted by hand and kept) and each account's read marks (at most one
+  // per account and message, so bounded by the players and the messages: tiny, kept). Patch 1.9 (M34): the table also holds one
+  // team reply per answered feedback, for its account only (an editor answers each by hand, at most one per feedback, and feedback
+  // is at most 5 an account and game day), so it grows with the players, not per game slot: a player table.
+  'public.game_messages': { retention: 'player' }, 'public.message_reads': { retention: 'player' },
   // M25: one "notifications seen up to" time per account that has asked, never more.
   'public.notification_marks': { retention: 'player' },
   // Patch 1.9 (M34): each account's feedback (at most 5 a game day, sent by hand: tiny, kept with the account), and each

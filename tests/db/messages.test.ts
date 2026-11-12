@@ -192,6 +192,43 @@ describe('game messages', () => {
     expect(await inboxOf(other.id)).toMatchObject({ unread: 1, readIds: [] });
   });
 
+  // M35 (supabase/sql/29-team-reply-guard.sql) closes the gap M34's column grant left: the backend (service_role) may insert a
+  // current team reply only, never a broadcast and never back-dated or ahead of the database clock. The operator still posts.
+  it('lets the backend insert only a current team reply for one account, and the operator still post and hide broadcasts (M35)', async () => {
+    const me = await player('Guarded Reply');
+    const asBackend = (kind: string, recipient: string | null, at: string) => sql.begin(async tx => {
+      await tx.unsafe('set local role service_role');
+      return tx.unsafe(`insert into public.game_messages(kind,title,preview,body,published_at_ms,recipient_id)
+        values('${kind}','Forged','Forged','[{"p":"Forged"}]',${at},${recipient === null ? 'null' : `'${recipient}'`}) returning id`);
+    });
+    const now = 'floor(extract(epoch from clock_timestamp())*1000)::bigint';
+    const refused: [string, string, string | null, string][] = [
+      ['an admin broadcast', 'admin', null, now], ['a patch note', 'patch-notes', null, now], ['an admin note to one account', 'admin', me.id, now],
+      ['a team reply to nobody', 'team-reply', null, now],
+      ['a team reply back-dated 10 minutes', 'team-reply', me.id, `${now}-600000`], ['a team reply back-dated 6 s', 'team-reply', me.id, `${now}-6000`],
+      ['a team reply dated 2 s ahead', 'team-reply', me.id, `${now}+2000`], ['a team reply at time 0', 'team-reply', me.id, '0'],
+    ];
+    for (const [label, kind, recipient, at] of refused) {
+      await expect(asBackend(kind, recipient, at), label).rejects.toMatchObject({ code: '42501', message: 'backend may insert only a current team reply' });
+    }
+    // Through the Data API with the backend's key as well.
+    const { error } = await admin.from('game_messages').insert({ kind: 'admin', title: 'Forged', preview: 'Forged', body: [{ p: 'Forged' }], published_at_ms: await dbNow() });
+    expect(error?.code).toBe('42501');
+    expect(await messageCount()).toBe(0);
+    // A current team reply for one account still goes in (review_feedback's own insert), as the database clock dates it.
+    const [{ id }] = await asBackend('team-reply', me.id, now);
+    expect((await sql`select kind, recipient_id::text from public.game_messages where id=${id}`)[0]).toEqual({ kind: 'team-reply', recipient_id: me.id });
+    // The operator (postgres) posts and hides broadcasts as before, and is not held to the backend's window.
+    const posted = await post({ kind: 'admin', title: 'From Avi' });
+    expect(await hide(posted)).toBe(true);
+    await sql`insert into public.game_messages(kind,title,preview,body,published_at_ms,recipient_id) values('team-reply','Old','Old','[{"p":"Old"}]',0,${me.id})`;
+    expect(await messageCount()).toBe(3);
+    // The guard: an invoker function with an empty search path that no API role may execute (a trigger needs no EXECUTE to fire).
+    for (const role of ['anon', 'authenticated', 'service_role']) {
+      expect((await sql`select has_function_privilege(${role}::name, 'private.guard_team_reply()', 'EXECUTE') as ok`)[0].ok, role).toBe(false);
+    }
+  });
+
   it('accepts the limits and stores the text as data, character for character', async () => {
     const markup = '<b>x</b> <script>alert(1)</script> &amp; "quotes" \\ back\\slash \n newline';
     const accepted: [string, Partial<Posted>][] = [

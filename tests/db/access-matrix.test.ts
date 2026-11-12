@@ -5,7 +5,7 @@ import { randomUUID } from 'node:crypto';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { sql, admin, account, anonymous, resetIdentity, creation } from '../fixtures/db.ts';
 import { createDatabase } from '../../supabase/functions/_shared/backend/database.ts';
-import { OPEN, PUBLIC_TOURNAMENT_COLUMNS, ECONOMY_OWNER_ONLY, TITLE_TABLES, TITLE_FUNCTIONS, TITLE_TRIGGER_FUNCTIONS,
+import { OPEN, RECIPIENT_ROWS, PUBLIC_TOURNAMENT_COLUMNS, ECONOMY_OWNER_ONLY, TITLE_TABLES, TITLE_FUNCTIONS, TITLE_TRIGGER_FUNCTIONS,
   TITLES_OWNER_ONLY, AWARDS_OWNER_ONLY } from '../fixtures/access.ts';
 
 // Task 23.1 (M17): the release access matrix. Every expectation is derived from the catalog through the exported operator
@@ -93,15 +93,16 @@ async function rolledBack<T>(statements: string[], read: (tx: postgres.Transacti
 /** The audit as seen inside a transaction that first runs `statements` and always rolls back. */
 const auditAfter = (...statements: string[]) => rolledBack(statements, async tx => toRows(await tx.unsafe(AUDIT)));
 /**
- * Every permissive SELECT (or ALL) policy for authenticated or PUBLIC on a table outside the OPEN projections whose USING
- * expression does not reference auth.uid(): such a policy would show one account another owner's rows. Run with `db`.
+ * Every permissive SELECT (or ALL) policy for authenticated or PUBLIC on a table outside the OPEN projections (or on one of them
+ * that also holds an account's own rows, RECIPIENT_ROWS) whose USING expression does not reference auth.uid(): such a policy would
+ * show one account another owner's rows. Run with `db`.
  */
 async function unfilteredOwnerPolicies(db: postgres.Sql | postgres.TransactionSql) {
   return (await db`select n.nspname||'.'||c.relname||'.'||p.polname as policy
     from pg_policy p join pg_class c on c.oid=p.polrelid join pg_namespace n on n.oid=c.relnamespace
     where n.nspname in ('public','private') and p.polpermissive and p.polcmd in ('r','*')
       and (0 = any(p.polroles) or 'authenticated'::regrole = any(p.polroles))
-      and not (n.nspname = 'public' and c.relname = any(${OPEN}))
+      and not (n.nspname = 'public' and c.relname = any(${OPEN.filter(o => !(RECIPIENT_ROWS as readonly string[]).includes(o))}))
       and strpos(coalesce(pg_get_expr(p.polqual, p.polrelid), ''), 'auth.uid()') = 0
     order by 1`).map(r => r.policy as string);
 }
@@ -623,7 +624,7 @@ describe('release access matrix', () => {
       `function ${AWARDS_OWNER_ONLY.function} service_role EXECUTE`].sort());
   });
 
-  it('keeps feedback and NPC sales owner-read, and a team reply readable by its recipient only (M34)', async () => {
+  it("keeps feedback and NPC sales owner-read, a team reply its recipient's, and the backend's message inserts guarded (M34, M35)", async () => {
     const rows = await audit();
     const clients = (relation: string) => lines(rows.filter(r => relationOf(r.object) === relation && r.grantee !== 'service_role'))
       .map(l => l.replace(/ md5:[0-9a-f]{32}$/, ''));
@@ -644,6 +645,14 @@ describe('release access matrix', () => {
     expect(policies.find(p => p.relation === 'game_messages')!.qual).toMatch(/recipient_id IS NULL\) OR \(recipient_id = \( SELECT auth\.uid\(\)/);
     // Their identity sequences are the owner's alone.
     expect(lines(rows.filter(r => r.section === 'sequence' && /^public\.(feedback|npc_sales)_id_seq$/.test(r.object)))).toEqual([]);
+    // M35: the backend's column INSERT on game_messages is for a current team reply only. The guard is an invoker trigger function
+    // with an empty search path that no API role may call (service_role included), run before every insert into the table.
+    expect(await sql`select p.prosecdef as definer, p.proconfig as config, p.proacl::text as acl from pg_proc p
+      where p.oid=to_regprocedure('private.guard_team_reply()')`).toEqual([{ definer: false, config: ['search_path=""'], acl: '{postgres=X/postgres}' }]);
+    expect(rows.filter(r => r.object === 'private.guard_team_reply()')).toEqual([]);
+    expect(await sql`select t.tgname, t.tgenabled::text as enabled, pg_get_triggerdef(t.oid) as definition from pg_trigger t
+      where t.tgrelid='public.game_messages'::regclass and not t.tgisinternal and t.tgname='guard_team_reply'`).toEqual([{ tgname: 'guard_team_reply',
+      enabled: 'O', definition: 'CREATE TRIGGER guard_team_reply BEFORE INSERT ON public.game_messages FOR EACH ROW EXECUTE FUNCTION private.guard_team_reply()' }]);
   });
 
   it('defines no SECURITY DEFINER function and pins search_path on every function', async () => {
@@ -864,11 +873,15 @@ describe('release access matrix', () => {
       await sql`insert into public.npc_sales(gladiator_id,item_id,item,price,sold_at_ms,sale_receipt_id)
         select ${gid},x.id,i.item||jsonb_build_object('id',x.id::text,'reservation',null),10,0,${receipt}
         from public.item_instances i cross join (select gen_random_uuid() as id) x where i.gladiator_id=${gid} order by i.id desc limit 1`;
+      // And a team reply to that account, as review_feedback posts one (the operator writes it here): its recipient's alone.
+      await sql`insert into public.game_messages(kind,title,preview,body,published_at_ms,recipient_id)
+        values('team-reply','Answer to your idea','Thanks.','[{"p":"Thanks."}]',0,${ownerId})`;
       return [activityId];
     };
     const [ownerActivities, otherActivities] = [await seed(owner.gid, owner.owner.id), await seed(other.gid, other.owner.id)];
     // Every relation a signed-in player may read that is not an open projection: the owner-filtered state.
-    const owned = (await signedInReadable()).filter(r => !OPEN.includes(r.name));
+    // M34: game_messages is OPEN for its broadcasts but holds each recipient's team replies too, so it is probed as owner state.
+    const owned = (await signedInReadable()).filter(r => !OPEN.includes(r.name) || (RECIPIENT_ROWS as readonly string[]).includes(r.name));
     expect(owned.length).toBeGreaterThan(0);
     const holding = (read: Record<string, string>, ids: string[]) =>
       Object.entries(read).filter(([, text]) => ids.some(id => text.includes(id))).map(([name]) => name).sort();

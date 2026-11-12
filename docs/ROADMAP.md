@@ -18,7 +18,7 @@ Updated 2026-11-11. Production is **1.8.1**. Patches 1.9 to 1.11 follow Avi's 20
 | 1.7.1 | Live | Hand-given Game Master and High Ground titles, visible in the picker for holders. |
 | 1.8 | Live | Party dungeons, hired fighters and the Ludus Nimbus bot team, live viewing, dungeon replays, and four dungeon titles. |
 | 1.8.1 | Live | Clearer attack speed label and help for gladiator stats and attributes. |
-| 1.9 | In progress, not released (client only) | Game Info with Wiki and Future Updates, a square pixel-art inventory, shops as an icon grid, search and sort, stacked duplicates with Sell quantity, equip from My gladiator, a gold laurel renown icon, XP bar, stat help, Mark as read, menu pin, name and title toggles, and talking NPCs. |
+| 1.9 | In progress, not released (client only) | Game Info with Wiki and Future Updates, a square pixel-art inventory, shops as an icon grid, search and sort, stacked duplicates with Sell quantity, equip from My gladiator, a gold laurel renown icon, XP bar, stat help, Mark as read, a Settings menu with menu pin and position and name and title settings, talking NPCs, and sleeping on beds. |
 | 1.10 | Planned (economy and balance, server) | Salvage, buy back, daily login reward, stamina and health potions, much harder dungeon bosses, three Arena bouts an evening with varied opponents, and the forge. |
 | 1.11 | Planned (content) | Expeditions at levels 15, 20, 25 and 30, dungeons at 17, 22 and 27, gear tiers 15-30, and much more content. |
 
@@ -45,8 +45,10 @@ Avi's decisions of 2026-11-11. Nothing here needs a server change. Mockups were 
 - **Mark as read.** A tick on each message and Mark all for messages, and Mark all for notifications. Opening the Notifications tab still marks them seen, and the button clears the dots.
 - **XP bar.** It sits under Stamina, with a thin XP line in the corner chip. It shows whether your next expedition can level you up (a ghost segment and "up to" or "can" wording; the scheduled next expedition, else the best available one).
 - **Stat and attribute help.** New Attributes and Stats blocks in My gladiator with hover, focus or tap help in the profile card's words.
-- **Name and title toggles.** Always-on names and titles over gladiators in the camp. Mockup pending approval, planned for 1.9.
-- **Talking NPCs.** Click an NPC for a line about themselves. Mockup pending approval, planned for 1.9.
+- **Settings menu.** A ⚙ Settings panel holds the menu pin and position (Left, Bottom, Right) and the name and title settings.
+- **Names and titles.** In Settings: Off, When zoomed in, or Always, with Tidy for overlapping names. Off hides them entirely.
+- **Talking NPCs.** Click an NPC for one of 56 approved lines about themselves. The Weaponsmith's and Armorer's stalls open their shops.
+- **Sleeping on beds.** Resting gladiators lie straight on the bed with an eye cover and a floating ZzZ (built, review pending).
 - Plan: [Wiki list, menu and shop grid](superpowers/plans/2026-11-11-wiki-menu-and-shop-grid.md). Wiki text to change when 1.9 ships: [wiki-1.9-pending](game-info/wiki-1.9-pending.md).
 
 ## Patch 1.10 details (planned; economy and balance, server)

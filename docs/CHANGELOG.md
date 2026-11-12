@@ -37,7 +37,7 @@ Project folders under `D:\Avi\Projects\Animation\Cloudiator\`.
 - Wiki topics are one short scrolling list.
 - Shops are an icon grid with the same detail card as your inventory.
 - Search and sort your Inventory and the shops.
-- Pin the menu to the left, right or bottom of the screen on desktop. It is remembered in this browser.
+- A new Settings menu (⚙) pins the menu and places it on the left, bottom or right of the screen on desktop. It is remembered in this browser.
 - Wear or replace gear straight from the Worn equipment slots in My gladiator.
 - A new gold laurel marks renown, including in the corner chip.
 - Identical items show as one stack with a count. Sell lets you choose how many.
@@ -46,6 +46,7 @@ Project folders under `D:\Avi\Projects\Animation\Cloudiator\`.
 - My gladiator explains each attribute and stat when you hover, focus or tap it.
 - Click or tap a camp NPC to hear a line from them, and again for the next. The Weaponsmith's and Armorer's stalls open the shops.
 - Choose in Settings when names and titles show over the camp: Off, When zoomed in, or Always, even zoomed out.
+- Resting gladiators lie straight on their beds, with an eye cover and a floating ZzZ.
 
 ## 1.8.1 — Clearer gladiator stats (2026-11-11)
 

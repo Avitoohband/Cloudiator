@@ -13,7 +13,7 @@
     {
       "id": "menus",
       "title": "More room in menus",
-      "body": "Pin the menu to the left, right, or bottom of the screen on desktop, remembered in this browser. Wider menus and small previous and next arrows between sections are still planned. Controls stay usable on phones.",
+      "body": "A new Settings menu lets you pin the menu and place it on the left, bottom, or right of the screen on desktop, remembered in this browser. Wider menus and small previous and next arrows between sections are still planned. Controls stay usable on phones.",
       "patch": "1.9"
     },
     {
@@ -118,13 +118,19 @@
     {
       "id": "name-toggles",
       "title": "Names and titles in camp",
-      "body": "Turn on always-visible names and titles above gladiators in camp.",
+      "body": "In Settings, choose when names and titles show above gladiators in camp: Off, When zoomed in, or Always.",
       "patch": "1.9"
     },
     {
       "id": "talking-npcs",
       "title": "Talking NPCs",
-      "body": "Click an NPC in camp to hear a line about themselves.",
+      "body": "Click an NPC in camp to hear a line about themselves. The Weaponsmith's and Armorer's stalls open their shops.",
+      "patch": "1.9"
+    },
+    {
+      "id": "sleeping",
+      "title": "Sleeping on beds",
+      "body": "Resting gladiators lie straight on their beds, with an eye cover and a floating ZzZ.",
       "patch": "1.9"
     },
     {

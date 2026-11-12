@@ -65,7 +65,7 @@ Avi's decisions of 2026-11-11, and on 2026-11-12 "next patch should be a big one
 - **Real-money payments.** Avi asked for Stripe and Google Pay. Card and Google Pay checkout. **Provider check first**: the 2026-11-08 payments design found Stripe does not onboard Israeli sellers directly. *Recommended*: confirm Stripe for Avi's seller account at the start of 1.10; if it cannot onboard him, use PayPal (its sandbox plan is ready) or a merchant of record such as Xsolla, with Google Pay where that provider offers it. The first items stay the approved Supporter Banner and pet follower.
 - **Bag slots for real money or coupons** (Claude reads "bad slots" as bag slots). *Recommended*: extra bag slots are sold as convenience and can also be bought with renown, so free players are not locked out; coupons are redeem codes for gifts and promotions. This changes the approved payments rule from "cosmetics only" to "no combat power": update the payments design in the 1.10 spec.
 - **Feedback from the game.** A Feedback button sends a bug report or idea with a category; the team reads and answers them (ideas 30 and 39, player support with triage).
-- **Dungeon-only gear.** Boss chests drop gear that no shop or expedition offers, so the harder bosses are worth it.
+- **Drop-only gear above level 10.** Avi, 2026-11-12: items that cannot be bought in the store, above level 10 (12, 15 and more), with new armours and new weapons. Shops keep selling levels 1, 5 and 10 only; every tier above 10 is never sold. 1.10 adds a level 12 tier that drops only from dungeon boss chests (Troll Hall is level 12), including new kinds of weapons and armour with their own looks. *Recommended*: a new catalog version (catalog v1 stays for existing items), new art for the new kinds, and the exact list in the 1.10 design with mockups first. Level 15 and higher tiers arrive with the 1.11 content where they drop.
 - **Combat balance** from the 1.9 simulations: lower critical chance, a way to raise critical damage (a gear bonus or Precision), a real edge for two-handed weapons over one-handed with a shield, and renown weapons checked against gold ones.
 
 - **Salvage items.** Turn unused gear into salvage, including account-bound renown gear. The yield is 1 salvage at level 1, 2 at level 5 and 3 at level 10; uncommon gives +1 and rare +2.
@@ -82,7 +82,7 @@ Avi's decisions of 2026-11-11. Needs its own design and mockups.
 
 - Expeditions at levels 15, 20, 25 and 30.
 - Dungeons at levels 17, 22 and 27, plus The Deep at 15 (see Expeditions, roles, and strategy).
-- Gear tiers for levels 15 to 30.
+- Drop-only gear tiers for levels 15 to 30 (Avi, 2026-11-12: never sold in shops), with more new weapons and armour. They drop from The Deep, the new expeditions and the new dungeons.
 - "A lot more content", with the exact list settled in the design.
 
 ## Later patches and ideas

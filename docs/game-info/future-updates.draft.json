@@ -195,8 +195,8 @@
     },
     {
       "id": "dungeon-gear",
-      "title": "Dungeon-only gear",
-      "body": "Dungeon bosses drop gear you cannot buy or find anywhere else.",
+      "title": "Gear you cannot buy",
+      "body": "Gear above level 10 is never sold in shops. Level 12 weapons and armour, including new kinds with their own looks, drop only from dungeon bosses. Higher levels follow with 1.11.",
       "patch": "1.10"
     },
     {
@@ -208,7 +208,7 @@
     {
       "id": "more-content",
       "title": "Higher levels and more content",
-      "body": "New expeditions at levels 15, 20, 25, and 30, dungeons at levels 17, 22, and 27, gear for levels 15 to 30, and much more.",
+      "body": "New expeditions at levels 15, 20, 25, and 30, dungeons at levels 17, 22, and 27, drop-only gear for levels 15 to 30 with more new weapons and armour, and much more.",
       "patch": "1.11"
     },
     {

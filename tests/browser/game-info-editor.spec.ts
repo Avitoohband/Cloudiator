@@ -25,6 +25,8 @@ async function setup(page: Page, editor = true, rejectSave = false) {
     };
     const answer = (status: number, json: unknown) => route.fulfill({ status, json, headers: cors });
     if (!editor) return answer(403, { ok: false, code: 'forbidden' });
+    // Patch 1.9: an editor's panel also reads the Feedback tab's count (no feedback here).
+    if ((tab as string) === 'feedback') return answer(200, { ok: true, items: [], newCount: 0 });
     const draft = drafts[tab];
     if (rejectSave && action === 'save') return answer(400, { ok: false, code: 'invalid' });
     if (action !== 'read') {

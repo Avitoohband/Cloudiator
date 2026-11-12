@@ -1,11 +1,11 @@
 import type { ActivityId, ApiErrorCode, CommandResult, GameCommand, GladiatorId, LeagueId, PresenceResult } from '@contracts/commands';
 import type { BattleLog, PartyBattleLog, RevealedTimeline } from '@contracts/events';
 import type { Appearance } from '@domain/appearance';
-import type { MarketPage, OwnerState, ResultsPage, SeasonView, StandingRow, StandingsPage, TournamentView, WorldSnapshot } from '@contracts/reads';
+import type { MarketPage, OwnFeedback, OwnerState, ResultsPage, SeasonView, StandingRow, StandingsPage, TournamentView, WorldSnapshot } from '@contracts/reads';
 import type { PatchEntry } from '../patch';
 import { getBrowserClient } from './client';
 import {
-  GatewayReadError, parseDungeonFightRef, readBouts, readDungeonFight, readLooks, readMarket, readMessages, readNotifications, readOwner, readPatchNumbers, readPatches, readWorld, readRevision, readTimeline, readProfile,
+  GatewayReadError, parseDungeonFightRef, readBouts, readDungeonFight, readLooks, readMarket, readMessages, readNotifications, readOwnFeedback, readOwner, readPatchNumbers, readPatches, readWorld, readRevision, readTimeline, readProfile,
   readRecent, readRestAfter, readSeasons, readStandingOf, readStandings, readTournament, readTournamentLog, type BoutFilter, type BoutsPage, type NotificationsRead, type ProfileRead, type RevisionRead, type ShownMessage,
 } from './reads';
 export { GatewayReadError, type NotificationsRead, type ProfileRead, type RevisionRead, type ShownMessage } from './reads';
@@ -109,12 +109,17 @@ export interface GameGateway {
    * show is left out.
    */
   bouts(filter: BoutFilter, cursor?: string): Promise<BoutsPage>;
+  /**
+   * Patch 1.9 (M34): the signed-in account's own feedback, newest first (at most 50), for My feedback and what is left of 5 a game day.
+   * Owner-only: it needs a signed-in account. The fixture preview has none (it shows no feedback entry).
+   */
+  feedback?(): Promise<OwnFeedback[]>;
 }
 
 type BrowserClient = NonNullable<ReturnType<typeof getBrowserClient>>;
 
 const API_ERROR_CODES: readonly string[] = ['unauthenticated', 'invalid', 'conflict', 'processing', 'insufficient-funds', 'inventory-full', 'sold', 'expired',
-  'not-found', 'rate-limited', 'unavailable'] satisfies readonly ApiErrorCode[];
+  'not-found', 'rate-limited', 'unavailable', 'daily-limit'] satisfies readonly ApiErrorCode[];
 /** A typed business refusal from the command endpoint (`retryAfterMs` kept when the server sent one). */
 const isRefusal = (result: object): result is { ok: false; code: ApiErrorCode; retryAfterMs?: number } =>
   'ok' in result && result.ok === false && 'code' in result && typeof result.code === 'string' && API_ERROR_CODES.includes(result.code);
@@ -231,7 +236,7 @@ export function createLiveGateway(): GameGateway {
     async command<T>(input: GameCommand): Promise<CommandResult<T>> {
       // A presence has no receipt: it goes through `sendPresence`.
       if (!['create-character', 'edit-schedule', 'edit-day-schedule', 'queue-build', 'cancel-build', 'buy-shop', 'sell-item', 'discard-item', 'create-listing', 'cancel-listing',
-        'buy-listing', 'set-tournament-opt-in', 'change-appearance', 'wear-title', 'read-message', 'see-notifications'].includes(input.kind)) {
+        'buy-listing', 'set-tournament-opt-in', 'change-appearance', 'wear-title', 'read-message', 'see-notifications', 'send-feedback', 'buy-back'].includes(input.kind)) {
         return { ok: false, code: 'unavailable' };
       }
       const answer = await post(input);
@@ -270,6 +275,7 @@ export function createLiveGateway(): GameGateway {
     },
     owner: () => read(readOwner),
     notifications: () => read(readNotifications),
+    feedback: () => read(readOwnFeedback),
     bouts: (filter, cursor) => read(client => readBouts(client, filter, cursor)),
     world: () => publicRead(readWorld), revision: () => publicRead(readRevision),
     timeline: id => publicRead((client, account) => readTimeline(client, id, { ownerSummary: account !== null })),

@@ -218,3 +218,73 @@
   .gtext b { white-space: nowrap; }
   .play { width: 30px; height: 30px; font-size: 12px; }
 }
+
+/* ---- The owner's Feedback tab (patch 1.9, the approved mockup): New / Answered / All, then one card per item, newest first. */
+.tabs .count {
+  display: inline-block;
+  min-width: 20px;
+  height: 20px;
+  margin-left: 7px;
+  padding: 0 6px;
+  box-sizing: border-box;
+  border-radius: 999px;
+  background: #c62f24;
+  color: #fff;
+  font-size: 12px;
+  font-weight: 800;
+  line-height: 20px;
+  text-align: center;
+  vertical-align: middle;
+}
+
+.feedbackBar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; }
+.feedbackCount { color: #acb7cc; font-size: 12.5px; }
+
+.fseg { display: inline-flex; gap: 3px; padding: 3px; border: 1px solid #3a3946; border-radius: 10px; background: #26232e; }
+.panel .fseg button { min-height: 32px; padding: 0 12px; border: 0; border-radius: 7px; background: transparent; color: #e4d7c9; font-size: 13px; }
+.panel .fseg button[aria-pressed='true'] { background: #e6b450; color: #1b1408; font-weight: 700; }
+
+.feedbackList { display: grid; gap: 10px; margin: 10px 0 0; padding: 0; list-style: none; }
+.feedbackItem { padding: 11px 12px; border: 1px solid #3a3350; border-radius: 10px; background: #15111f; overflow-wrap: anywhere; }
+.feedbackItem[data-new] { border-color: #ae864a; }
+.feedbackTop { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; }
+.feedbackWho { font-weight: 700; }
+.feedbackHint { color: #acb7cc; font-size: 12.5px; }
+.feedbackWhen { margin-left: auto; color: #acb7cc; font-size: 12.5px; white-space: nowrap; }
+.panel .feedbackText { margin: 8px 0; white-space: pre-wrap; user-select: text; }
+.panel .feedbackDetails { padding: 7px 10px; border-radius: 8px; background: #1d1a2b; color: #b9b9d0; font-size: 12.5px; line-height: 1.55; }
+.feedbackDetails b { color: #e6e2f2; font-weight: 600; }
+.feedbackItem [data-feedback-answer] { margin-top: 8px; }
+.feedbackAnswer { margin-top: 9px; }
+.feedbackAnswer label { display: block; margin-bottom: 5px; font-weight: 600; }
+.feedbackAnswer textarea {
+  display: block;
+  width: 100%;
+  min-height: 84px;
+  box-sizing: border-box;
+  resize: vertical;
+  padding: 9px 10px;
+  border: 1px solid #7a86a0;
+  border-radius: 8px;
+  background: #101625;
+  color: #f3f0e5;
+  font: inherit;
+  line-height: 1.45;
+}
+.feedbackAnswer textarea:focus { outline: 2px solid #f2c66b; outline-offset: 1px; }
+.feedbackRow { display: flex; justify-content: space-between; gap: 10px; margin-top: 4px; color: #acb7cc; font-size: 12.5px; }
+.feedbackRow > :last-child { white-space: nowrap; }
+.feedbackActions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 9px; }
+.panel .gold, .panel .ghost { min-height: 36px; padding: 0 14px; border-radius: 8px; font: inherit; }
+.panel .gold { border: 1px solid #ae864a; background: #4b3726; color: #f2c66b; font-weight: 700; }
+.panel .gold:hover:not(:disabled) { background: #5a4430; }
+.panel .gold:disabled { border-color: #655847; background: #292526; color: #cbbfae; }
+.panel .ghost { border: 1px solid #655847; background: #292526; color: #e4d7c9; }
+.panel .feedbackProblem { margin-top: 8px; color: #ffb4a8; font-size: 13px; }
+.panel .feedbackState { padding: 18px 2px; color: #acb7cc; }
+.feedbackState button { min-height: 36px; margin-left: 6px; padding: 0 12px; border: 1px solid var(--glass-line); border-radius: 6px; background: transparent; }
+
+@media (hover: none), (max-width: 480px) {
+  .panel .gold, .panel .ghost, .panel .fseg button { min-height: 44px; }
+  .feedbackWhen { margin-left: 0; flex-basis: 100%; text-align: right; }
+}

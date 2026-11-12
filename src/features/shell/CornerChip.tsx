@@ -80,7 +80,8 @@ export function CornerChip({ viewer, session, owner, fixture, previewAs, clock, 
   clock: DisplayClock;
   /** The messages button's lists and marks (the shell's); a player without it, or a visitor, has no messages button. */
   messaging?: MessagingActions;
-  messagesRequest?: { tab: 'notifications'; n: number } | null;
+  /** Opens the messages panel on Notifications, or (patch 1.9) on My feedback. */
+  messagesRequest?: { tab: 'notifications' | 'feedback'; n: number } | null;
   /** The server's newest patch (the sync's): ahead of this build, the menu offers Reload. */
   latestPatch?: string | null;
   /** Opens the change-look dialog from the look note's Change look button (the messages panel closes first; the shell owns the dialog). */
@@ -101,7 +102,7 @@ export function CornerChip({ viewer, session, owner, fixture, previewAs, clock, 
   // The messages panel opened from the account menu's "Patch history ›" opens on the history, and gives the focus back to the account
   // button when it closes; opened from its own button, it opens on the lists and gives it back there.
   const [history, setHistory] = useState<{ patch: string | null } | undefined>(undefined);
-  const [requestedTab, setRequestedTab] = useState<{ tab: 'notifications'; n: number } | null>(null);
+  const [requestedTab, setRequestedTab] = useState<{ tab: 'notifications' | 'feedback'; n: number } | null>(null);
   const handledRequest = useRef<number | null>(null);
   const open = popover === 'account';
   const [signOutError, setSignOutError] = useState(false);

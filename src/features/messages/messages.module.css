@@ -443,6 +443,13 @@
   color: #d2c4ff;
 }
 
+/* Patch 1.9: the team's answer to the player's feedback (the approved mockup's green tag). */
+.team {
+  background: #173325;
+  border-color: #2f6b4a;
+  color: #9fe0b5;
+}
+
 .date {
   flex: none;
   color: #acb7cc;
@@ -968,6 +975,84 @@
 @media (hover: none), (max-width: 480px) {
   .wear,
   .choose {
+    min-height: 44px;
+  }
+}
+
+/* ---- Patch 1.9: the footer (Send feedback, and My feedback with a green count of answers not yet seen). */
+.foot {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 10px 8px 12px;
+  border-top: 1px solid #2f2c3a;
+  background: #17151d;
+}
+
+.sendFeedback {
+  min-height: 40px;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 0 14px;
+  border: 1px solid #ae864a;
+  border-radius: 8px;
+  background: #4b3726;
+  color: #f2c66b;
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.sendFeedback:hover { background: #5a4430; }
+
+.mineLink {
+  min-height: 40px;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: #f2dfae;
+  font: inherit;
+  font-weight: 600;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  cursor: pointer;
+}
+
+.mineLink:hover { background: rgba(255, 255, 255, 0.06); }
+
+.ping {
+  min-width: 20px;
+  height: 20px;
+  padding: 0 6px;
+  box-sizing: border-box;
+  border-radius: 999px;
+  background: #2f6b4a;
+  color: #fff;
+  font-size: 12px;
+  font-weight: 800;
+  line-height: 20px;
+  text-align: center;
+  text-decoration: none;
+}
+
+.footHint { color: #acb7cc; font-size: 12.5px; }
+
+.sendFeedback:focus-visible,
+.mineLink:focus-visible {
+  outline: 2px solid #f2c66b;
+  outline-offset: 1px;
+}
+
+@media (hover: none), (max-width: 480px) {
+  .sendFeedback,
+  .mineLink {
     min-height: 44px;
   }
 }

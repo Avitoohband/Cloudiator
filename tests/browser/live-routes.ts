@@ -7,7 +7,7 @@
 import { createHash, randomUUID } from 'node:crypto';
 import type { BrowserContext, Request, Route } from '@playwright/test';
 import type { ActivitySummary, RevealedTimeline } from '../../supabase/functions/_shared/contracts/events';
-import type { GameMessage, MarketListing, OwnerState, PublicActor, PublicProfile, ResultRow, SeasonView, StandingsPage, TournamentView, WorldSnapshot } from '../../supabase/functions/_shared/contracts/reads';
+import type { GameMessage, MarketListing, OwnFeedback, OwnerState, PublicActor, PublicProfile, ResultRow, SeasonView, StandingsPage, TournamentView, WorldSnapshot } from '../../supabase/functions/_shared/contracts/reads';
 import { CATALOG_V1 } from '../../supabase/functions/_shared/domain/catalog-v1';
 import { RULES_V1 } from '../../supabase/functions/_shared/domain/rules-v1';
 import type { PatchEntry } from '../../src/lib/patch';
@@ -103,6 +103,11 @@ export type LiveData = {
   bouts?: readonly RevealedTimeline[];
   /** The signed-in reader's owner state; null or absent is an account with no gladiator. */
   owner?: OwnerState | null;
+  /**
+   * Patch 1.9 (M34): the signed-in account's own feedback (the owner-only `feedback` rows, the six columns the client may read), in any
+   * order; none by default. A visitor is refused, as `anon` has no grant.
+   */
+  feedback?: readonly OwnFeedback[];
   /** When set, only this account can see the fixture owner and its activities. Other signed-in readers receive no owner rows. */
   ownerAccountId?: string;
   /** The server's current time; by default `world.serverNowMs` running on in real time from the call. */
@@ -175,6 +180,8 @@ export type LiveTransport = {
   setNotifications(notifications: readonly LiveNotification[]): void;
   /** Replaces the owner's settled bouts My bouts lists (another account's, or a bout was credited). */
   setBouts(bouts: readonly RevealedTimeline[]): void;
+  /** Replaces the account's own feedback (one was sent, read or answered). */
+  setFeedback(feedback: readonly OwnFeedback[]): void;
   /** Replaces the revision's published slot (a slot's publication), or restores the default with undefined. */
   setPublishedSlotIndex(published: ((serverNowMs: number) => number | null) | undefined): void;
   /** Answers a table's requests `ms` later (a slow page of a load). */
@@ -299,6 +306,7 @@ export async function routeLiveReads(context: BrowserContext, initial: LiveData)
     setRulesVersion: version => { data.rulesVersion = version; },
     setNotifications: notifications => { data.notifications = notifications; },
     setBouts: bouts => { data.bouts = bouts; },
+    setFeedback: feedback => { data.feedback = feedback; },
     setPublishedSlotIndex: published => { data.publishedSlotIndex = published; },
     delay: (table, ms) => { delays.set(table, ms); },
     hold: table => {
@@ -477,6 +485,9 @@ function tables({ world, owner, now, reader, data }: LiveState): Record<string, 
     // asked for, and the gladiator it embeds with its level and XP now and the count of results that settled after the server's now:
     // none here, every result a spec lists has been revealed) and the owner's bouts as `readBouts` selects them.
     activities: { private: true, rows: ownsRows ? activityRows(timelines, owner, data) : [] },
+    // Patch 1.9 (M34): the account's own feedback, the six columns its grant serves (RLS: `owner_id = auth.uid()`).
+    feedback: { private: true, rows: ownsRows ? (data.feedback ?? []).map(f => ({ id: f.id, category: f.category, text: f.text, status: f.status,
+      created_at_ms: f.createdAtMs, answered_at_ms: f.answeredAtMs })) : [] },
   };
 }
 

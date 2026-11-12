@@ -2,11 +2,12 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import type { ActivityId, Attributes, DungeonId, EquipmentSlot, GladiatorId, LeagueId, Stance } from '@contracts/commands';
 import type { ActivitySummary, BattleLog, CreditedRewards, ItemRarity, PartyBattleLog, PublicActivitySummary, RevealedStage, RevealedTimeline } from '@contracts/events';
 import type {
-  EarnedTitle, GameMessage, GameNotification, ItemInstance, MarketListing, MarketPage, MessageBlock, OwnerState, PrestigeAward, PublicActor, PublicProfile, ResultsPage, RevisionState, SeasonView, StandingRow, StandingsPage,
+  BuyBackEntry, EarnedTitle, GameMessage, GameNotification, ItemInstance, MarketListing, MarketPage, MessageBlock, OwnFeedback, OwnerState, PrestigeAward, PublicActor, PublicProfile, ResultsPage, RevisionState, SeasonView, StandingRow, StandingsPage,
   TournamentBout, TournamentEntrant, TournamentPlacement, TournamentView, WorldSnapshot,
 } from '@contracts/reads';
 import { validAppearance, type Appearance } from '@domain/appearance';
 import { CATALOG_V1 } from '@domain/catalog-v1';
+import { isFeedbackCategory } from '@domain/feedback';
 import { applyXp } from '@domain/inventory';
 import { RULES_V1 } from '@domain/rules-v1';
 import { titleById } from '@domain/titles';
@@ -25,7 +26,18 @@ function checked<T>(result: { data: T | null; error: { code?: string } | null; s
 export async function readOwner(client: SupabaseClient): Promise<OwnerState> {
   const row = checked<{ state: OwnerState }>(await client.from('owner_state').select('state').maybeSingle());
   if (!row.state || typeof row.state !== 'object') throw new GatewayReadError('unavailable');
-  return withTitles(row.state);
+  return withBuyBack(withTitles(row.state));
+}
+/**
+ * Patch 1.9 (M34): the owner's `buyBack` read defensively, as the titles are: missing (an older server) or malformed is `[]`, and a sale
+ * with a malformed id, item, price or time is dropped (Buy back never sends what it cannot show).
+ */
+function withBuyBack(state: OwnerState): OwnerState {
+  const raw = (state as unknown as { buyBack?: unknown }).buyBack;
+  const buyBack = Array.isArray(raw) ? raw.filter((entry): entry is BuyBackEntry => record(entry) && count(entry.saleId) && entry.saleId > 0 && record(entry.item)
+    && typeof entry.item.id === 'string' && typeof entry.item.catalogId === 'string' && record(entry.item.stats) && count(entry.price) && count(entry.soldAtMs)
+    && count(entry.expiresAtMs)) : [];
+  return { ...state, buyBack };
 }
 const TITLE_SOURCES: readonly string[] = ['history', 'result', 'season', 'shop', 'market', 'sale', 'joined', 'award'];
 /** The shown title of a published id: the id when this client's catalog knows it, else null (a newer server's id, junk, an older server's missing key). */
@@ -392,11 +404,32 @@ export async function readMessages(client: SupabaseClient): Promise<GameMessage[
   const messages: GameMessage[] = [];
   for (const row of rows.slice(0, MESSAGES_PAGE)) {
     const body = messageBlocks(row.body), id = Number(row.id), publishedAtMs = Number(row.published_at_ms);
-    if ((row.kind !== 'patch-notes' && row.kind !== 'admin') || (row.action !== null && row.action !== 'change-look') || typeof row.title !== 'string'
+    if ((row.kind !== 'patch-notes' && row.kind !== 'admin' && row.kind !== 'team-reply') || (row.action !== null && row.action !== 'change-look') || typeof row.title !== 'string'
       || typeof row.preview !== 'string' || body === null || !Number.isSafeInteger(id) || !Number.isSafeInteger(publishedAtMs)) continue;
     messages.push({ id, kind: row.kind, title: row.title, preview: row.preview, body, action: row.action, publishedAtMs });
   }
   return messages;
+}
+/** How many of the account's own feedback My feedback lists, newest first (5 a game day: today's are always among them). */
+const FEEDBACK_PAGE = 50;
+const FEEDBACK_STATUSES: readonly string[] = ['new', 'read', 'answered'];
+type FeedbackRow = { id: unknown; category: unknown; text: unknown; status: unknown; created_at_ms: unknown; answered_at_ms: unknown };
+/**
+ * Patch 1.9 (M34): the signed-in account's own feedback, newest first, from `public.feedback` (row security shows the account its own; the
+ * grant serves exactly these six columns, so `select('*')` would be refused). The team's answer is a `team-reply` message. A malformed row
+ * is left out rather than failing the list.
+ */
+export async function readOwnFeedback(client: SupabaseClient): Promise<OwnFeedback[]> {
+  const rows = checked(await client.from('feedback').select('id,category,text,status,created_at_ms,answered_at_ms')
+    .order('created_at_ms', { ascending: false }).order('id', { ascending: false }).limit(FEEDBACK_PAGE)) as unknown as FeedbackRow[];
+  const list: OwnFeedback[] = [];
+  for (const row of rows.slice(0, FEEDBACK_PAGE)) {
+    const id = Number(row.id), createdAtMs = Number(row.created_at_ms), answeredAtMs = row.answered_at_ms === null ? null : Number(row.answered_at_ms);
+    if (!Number.isSafeInteger(id) || id < 1 || !isFeedbackCategory(row.category) || typeof row.text !== 'string' || typeof row.status !== 'string'
+      || !FEEDBACK_STATUSES.includes(row.status) || !Number.isSafeInteger(createdAtMs) || (answeredAtMs !== null && !Number.isSafeInteger(answeredAtMs))) continue;
+    list.push({ id, category: row.category, text: row.text, status: row.status as OwnFeedback['status'], createdAtMs, answeredAtMs });
+  }
+  return list;
 }
 /** A message as the panel shows it: a patch note carries its patch number, an admin note or a note without a patch row null. */
 export type ShownMessage = GameMessage & { patch: string | null };

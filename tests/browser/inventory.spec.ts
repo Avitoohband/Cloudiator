@@ -417,7 +417,8 @@ test('shows the shop offers as an icon grid by level, locks pieces above the lev
   const shops = shopsRegion(menu);
   const filters = shops.getByRole('group', { name: 'Shop filters', exact: true });
   const currencies = shops.getByRole('group', { name: 'Shop currency', exact: true });
-  await expect(filters.getByRole('button')).toHaveText(['All', 'Weapons', 'Armor']);
+  // Patch 1.9 (Task 23): a fourth chip, Buy back (no sales here, so no count).
+  await expect(filters.getByRole('button')).toHaveText(['All', 'Weapons', 'Armor', 'Buy back']);
   await expect(filters.getByRole('button', { pressed: true })).toHaveText(['All']);
   await expect(currencies.getByRole('button')).toHaveText(['Gold', 'Renown']);
   await expect(currencies.getByRole('button', { pressed: true })).toHaveText(['Gold']);
@@ -920,7 +921,7 @@ for (const action of ['sell-item', 'discard-item', 'buy-shop', 'buy-banner'] as 
     // Success removes Sell, Discard and the owned cosmetic's Buy, but an equipment Buy survives. Focus follows that result.
     flow.reject('');
     await activate();
-    const outcome = panel.getByRole('status').filter({ hasText: action === 'sell-item' ? /^Sold Axe for \d+ gold\.$/ : action === 'discard-item' ? 'Item discarded.' : 'Purchase confirmed.' });
+    const outcome = panel.getByRole('status').filter({ hasText: action === 'sell-item' ? /^Sold for \d+ gold\. You can buy it back in Shops until the next game day\.$/ : action === 'discard-item' ? 'Item discarded.' : 'Purchase confirmed.' });
     await expect(outcome).toBeVisible();
     if (action === 'buy-shop') await expect(button).toBeFocused();
     else await expect(outcome).toBeFocused();
@@ -1647,7 +1648,7 @@ test('sells several pieces one at a time, shows the progress and the result, and
   await expect(sellButton(inv)).toHaveText(`Sell Light boots · ${bootsValue} gold`);
   await expect(quantityField(inv)).toHaveCount(0);
   await sellButton(inv).click();
-  await expect(details(inv).getByRole('status').filter({ hasText: `Sold Light boots for ${bootsValue} gold.` })).toBeVisible();
+  await expect(details(inv).getByRole('status').filter({ hasText: `Sold for ${bootsValue} gold. You can buy it back in Shops until the next game day.` })).toBeVisible();
   await expect(tile(inv, boots[0])).toHaveCount(0);
 });
 
@@ -1710,7 +1711,7 @@ test('a single piece keeps the plain Sell button and the existing refusal and re
   await expect(details(inv).getByRole('alert')).toContainText('processing');
   flow.reject('');
   await details(inv).getByRole('button', { name: 'Retry request' }).click();
-  await expect(details(inv).getByRole('status').filter({ hasText: `Sold Axe for ${value} gold.` })).toBeVisible();
+  await expect(details(inv).getByRole('status').filter({ hasText: `Sold for ${value} gold. You can buy it back in Shops until the next game day.` })).toBeVisible();
   expect(new Set(flow.commands.map(command => command.operationId)).size).toBe(1);
 });
 
@@ -1777,7 +1778,7 @@ test('discards one piece of a stack, and the card and the sold or worn piece are
   await expect(details(inv)).toContainText('Level 5 · common');
   await expect(sellButton(inv)).toHaveText(`Sell Sword · ${CATALOG_V1.items['sword:5:common'].npcSellValue} gold`);
   await sellButton(inv).click();
-  await expect(details(inv).getByRole('status').filter({ hasText: /^Sold Sword for/ })).toBeVisible();
+  await expect(details(inv).getByRole('status').filter({ hasText: `Sold for ${CATALOG_V1.items['sword:5:common'].npcSellValue} gold.` })).toBeVisible();
   expect(flow.commands.at(-1)).toMatchObject({ kind: 'sell-item', itemId: high.id, quantity: 1 });
   expect(flow.state.wallets.money).toBe(300 + CATALOG_V1.items['sword:5:common'].npcSellValue!);
   // Wear on the stack of two level 1 swords wears the piece the card shows (its first).
@@ -1801,7 +1802,7 @@ test('a transient refusal in the middle of a run stops it, and Sell again replay
   flow.refuseSale(0, '');
   await expect(sellButton(inv)).toBeEnabled();
   await sellButton(inv).click();
-  await expect(details(inv).getByRole('status').filter({ hasText: `Sold Light boots for ${bootsValue} gold.` })).toBeVisible();
+  await expect(details(inv).getByRole('status').filter({ hasText: `Sold for ${bootsValue} gold. You can buy it back in Shops until the next game day.` })).toBeVisible();
   expect(flow.commands.map(command => command.kind)).toEqual(['sell-item', 'sell-item', 'sell-item']);
   expect(flow.commands[2].operationId).toBe(flow.commands[1].operationId);
   expect(flow.commands[2]).toMatchObject({ itemId: boots[1].id });

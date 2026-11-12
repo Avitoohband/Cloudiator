@@ -4,11 +4,13 @@
 import type { GameMessage, GameNotification, Inbox } from '@contracts/reads';
 import type { NotificationsRead, ShownMessage } from '../../lib/api/reads';
 import type { PatchEntry } from '../../lib/patch';
+import type { FeedbackActions } from './feedback';
 export type { ShownMessage } from '../../lib/api/reads';
 
 /** Undefined while identity loads, null for a known visitor or missing gladiator. */
 type RequestIdentity = string | null | undefined;
-export type MessagesRequest = { tab: 'notifications'; n: number; account: RequestIdentity; owner: RequestIdentity };
+/** `feedback` opens the panel on My feedback (Settings → Help's "See my feedback", patch 1.9). */
+export type MessagesRequest = { tab: 'notifications' | 'feedback'; n: number; account: RequestIdentity; owner: RequestIdentity };
 
 /**
  * The request this account/owner may consume now. Bootstrap may adopt its first authenticated account, then its first owner;
@@ -38,6 +40,11 @@ export type MessagingActions = {
   loadNotifications(): Promise<NotificationsRead>;
   read(messageId: number): Promise<void>;
   seeNotifications(upToMs: number): Promise<void>;
+  /**
+   * Patch 1.9: Feedback (the footer's Send feedback and My feedback), for a signed-in account of the live game only; absent (a visitor, the
+   * fixture preview) shows no feedback entry.
+   */
+  feedback?: FeedbackActions;
 };
 
 /** The badge's text: the number, "9+" above 9, and nothing (null) at 0 or for a count that cannot be true. */
@@ -59,7 +66,7 @@ export const buttonName = (count: number): string => (count > 0 ? `Messages, ${c
 export const isUnread = (message: GameMessage, inbox: Inbox): boolean => message.publishedAtMs > inbox.sinceMs && !inbox.readIds.includes(message.id);
 
 const TAGS: Record<GameMessage['kind'], string> = { 'patch-notes': 'Patch notes', admin: 'Admin', 'team-reply': 'Team reply' };
-/** The tag a message shows: "Patch notes" (gold) or "Admin" (violet). */
+/** The tag a message shows: "Patch notes" (gold), "Admin" (violet) or, patch 1.9, "Team reply" (green: the team's answer to the player's feedback). */
 export const tagName = (kind: GameMessage['kind']): string => TAGS[kind];
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'] as const;

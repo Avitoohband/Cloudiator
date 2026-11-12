@@ -128,3 +128,39 @@
 @media (hover: none), (max-width: 480px) {
   .panel .scroll { height: 194px; }
 }
+
+/* ---- Buy back (patch 1.9, the approved mockup): a chip with a red count after All / Weapons / Armor, the same grid and card, the
+   sale's line, the time left, the reasons Buy back is off, and the green line after a buy back. */
+.bbChip { border-color: #6b5520 !important; }
+.chipCount {
+  display: inline-block;
+  min-width: 18px;
+  margin-left: 4px;
+  padding: 0 5px;
+  box-sizing: border-box;
+  border-radius: 99px;
+  background: #c62f24;
+  color: #fff;
+  font: 800 11px/17px system-ui, sans-serif;
+  text-align: center;
+}
+
+.soldLine { margin-top: 9px !important; }
+.soldLine b { color: var(--ink); }
+.soft { color: #acb7cc; }
+.small { font-size: .78rem !important; margin-top: 4px !important; }
+.buyBackNote { min-height: 1.1em; margin: 6px 0 0 !important; color: #ffd9a0; font-size: .78rem !important; }
+.panel .buy { display: inline-flex; align-items: center; justify-content: center; gap: 6px; }
+/* The mockup's Buy back is the card's full width. */
+.panel .buyBack { width: 100%; }
+.panel .buy:disabled { border: 1px solid #655847; border-radius: 6px; background: #292526; color: #cbbfae; }
+
+.empty { display: grid; place-items: center; gap: 8px; min-height: 100%; padding: 20px 14px; box-sizing: border-box; text-align: center; color: #b9b2a5; font-size: .9rem; }
+.emptyIcon { display: inline-block; opacity: .5; image-rendering: pixelated; background-repeat: no-repeat; }
+.emptyCard { padding: 12px; border: 1px solid #5f5750; border-radius: 10px; background: linear-gradient(145deg, #242733, #171b24 75%); color: #acb7cc; font-size: .85rem; }
+.emptyCard p { margin: 0; }
+
+/* The outcome of a buy back, above the card: green when it is done, the inventory's red line when it was refused. */
+.outcome p[role='status'] { margin: 0 0 8px; padding: 8px 10px; border: 1px solid #2f6b4a; border-radius: 8px; background: #132a1f; color: #d8f2e2; font-size: .85rem; }
+.outcome p[role='alert'] { margin: 0 0 8px; padding: 8px 10px; border: 1px solid #7a3535; border-radius: 8px; background: #2c1719; color: #ffd2cc; font-size: .85rem; }
+.outcome button { margin: 0 0 8px; }

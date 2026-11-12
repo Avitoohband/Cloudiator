@@ -46,7 +46,7 @@
 // as it was). Nothing is sent or saved. Like a scene, a practice fight holds back the arrival banner and the away button until the camp is back
 // (Task 19). Task 19: a player's profile cards offer ⚔ Spar a copy, which starts a spar at once.
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties } from 'react';
-import type { Phase, WearTitleValue } from '@contracts/commands';
+import type { Phase, SendFeedbackValue, WearTitleValue } from '@contracts/commands';
 import type { PublicActivitySummary } from '@contracts/events';
 import type { OwnerState } from '@contracts/reads';
 import { createLiveGateway, type GameGateway } from '../../lib/api/gateway';
@@ -90,6 +90,7 @@ import { isClick } from '../../game/camera';
 import { CornerChip } from './CornerChip';
 import { MenuRail } from './MenuRail';
 import { SettingsPanel } from './SettingsPanel';
+import type { FeedbackActions } from '../messages/feedback';
 import { DEFAULT_MENU_PREFS, useLabelPrefs, useMenuPrefs } from './menu-prefs';
 import { MenuSurface } from './MenuSurface';
 import { PatchNotice, reloadPage } from './PatchNotice';
@@ -432,7 +433,16 @@ export function CampShell({ fixture, previewAs, previewResting = false, previewB
   // command is refused (the fixture preview takes none) or the read fails; the panel never shows that, and asks again when the player
   // opens the same message or tab again.
   const { refreshOwner } = game;
+  // Patch 1.9: Feedback, for a signed-in account of the live game only (a visitor and the fixture preview show no feedback entry): the
+  // account's own feedback and one `send-feedback` through the live gateway, on the shared clock (the game day is server time).
+  const feedbackOn = !fixture && game.session.status === 'signed-in';
+  const feedback = useMemo<FeedbackActions | undefined>(() => (feedbackOn && gateway.feedback ? {
+    load: () => gateway.feedback!(),
+    send: command => gateway.command<SendFeedbackValue>(command),
+    clock,
+  } : undefined), [feedbackOn, gateway, clock]);
   const messaging = useMemo<MessagingActions | undefined>(() => reads ? {
+    feedback,
     watch: {
       kept: note => clock.synced() && replayKept(note.summary.replayExpiry, clock.now()),
       open: note => {
@@ -454,7 +464,12 @@ export function CampShell({ fixture, previewAs, previewResting = false, previewB
       if (!result.ok) throw new Error(result.code);
       await refreshOwner();
     },
-  } : undefined, [reads, refreshOwner, clock, openScene]);
+  } : undefined, [reads, refreshOwner, clock, openScene, feedback]);
+  // Settings → Help's "See my feedback": Settings closes and the messages panel opens on My feedback (a player with a gladiator only).
+  const openMyFeedback = useCallback(() => {
+    send('escape');
+    setMessagesRequest({ tab: 'feedback', n: ++messageRequests.current, account: requestAccount, owner: choiceKey });
+  }, [send, requestAccount, choiceKey]);
 
   // The change-look dialog (Task 7), opened by the look note's Change look button: the messages panel has closed by then, and the focus
   // goes back to the Messages button when the dialog does. A saved look is said by a status line that stays until it is dismissed, the
@@ -601,7 +616,8 @@ export function CampShell({ fixture, previewAs, previewResting = false, previewB
         onWatchBout={(tournamentId, boutId) => openScene({ kind: 'bout', tournamentId, boutId, from: 'tournaments' })} />;
       case 'results': return <ResultsMenu fixture={fixture} samples={samples} previewFailed={previewError} reads={reads} viewerId={ownerId} clock={clock}
         onWatch={watchResult} onOpen={openScene} bouts={bouts} choice={results} onChoose={chooseResults} onWatchBout={watchBout} />;
-      case 'settings': return <SettingsPanel prefs={savedPrefs} onChange={setPrefs} labels={labels} onLabels={setLabels} compact={compact} />;
+      case 'settings': return <SettingsPanel prefs={savedPrefs} onChange={setPrefs} labels={labels} onLabels={setLabels} compact={compact} feedback={feedback}
+        onSeeMine={viewer === 'player' && owner?.inbox ? openMyFeedback : undefined} />;
       case 'gladiators': return <RosterPanel world={world} ownerId={ownerId} ownPlace={ownPlace} roster={roster} sceneStatus={game.sceneStatus}
         following={following} bridge={bridge} onDone={handBack}
         onProfile={gladiatorId => openRow(gladiatorId)} />;

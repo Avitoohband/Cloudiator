@@ -2,7 +2,7 @@
 
 import { useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
 import type { EquipmentSlot, GameCommand } from '@contracts/commands';
-import type { ItemInstance, OwnerState } from '@contracts/reads';
+import type { BuyBackEntry, ItemInstance, OwnerState } from '@contracts/reads';
 import { CATALOG_V1 } from '@domain/catalog-v1';
 import { npcSaleValue, type Merchant } from '@domain/inventory';
 import { RULES_V1 } from '@domain/rules-v1';
@@ -13,6 +13,7 @@ import { useClockMode } from '../../lib/clock-setting';
 import { slotTimeText } from '../schedule/slot-time';
 import { useMinuteNow } from '../schedule/use-minute-now';
 import { ShopPanel } from '../shops/ShopPanel';
+import { afterSaleLine } from '../shops/buy-back';
 import { useOutcomeFocus } from '../shell/focus-lost';
 import { ItemIcon, ItemStats } from './ItemPresentation';
 import { ItemSearch, MatchCount, NoMatch } from './ItemSearch';
@@ -25,8 +26,9 @@ import {
 } from './gear';
 import styles from './InventoryPanel.module.css';
 
-type InventoryCommand = Extract<GameCommand, { kind: 'buy-shop' | 'sell-item' | 'discard-item' }>;
-type Intent = Omit<Extract<InventoryCommand, { kind: 'buy-shop' }>, 'operationId'> | Omit<Extract<InventoryCommand, { kind: 'sell-item' | 'discard-item' }>, 'operationId'>;
+type InventoryCommand = Extract<GameCommand, { kind: 'buy-shop' | 'sell-item' | 'discard-item' | 'buy-back' }>;
+type Intent = Omit<Extract<InventoryCommand, { kind: 'buy-shop' }>, 'operationId'> | Omit<Extract<InventoryCommand, { kind: 'sell-item' | 'discard-item' }>, 'operationId'>
+  | Omit<Extract<InventoryCommand, { kind: 'buy-back' }>, 'operationId'>;
 const filters = ['All', 'Weapons', 'Armor', 'Materials'] as const;
 type Filter = typeof filters[number];
 const itemName = (item: ItemInstance) => item.catalogId === 'salvage' ? 'Salvage' : CATALOG_V1.items[item.catalogId]?.name ?? item.catalogId;
@@ -40,15 +42,24 @@ const saleReason = (code: string) => code === 'invalid' ? 'that piece is reserve
   : code === 'processing' ? 'the world is processing previous results' : code === 'unavailable' ? 'the request could not be confirmed'
     : code === 'rate-limited' ? 'too many requests, try again shortly' : code === 'sold' ? 'it was sold on the Marketplace'
       : code === 'expired' ? 'its Marketplace listing expired' : `the server answered ${code}`;
-/** What a refused command says: a gear change in the gear's words (`gearRefusal`), a trade in its own. */
-const refusalText = (gear: boolean, code: string) => gear ? gearRefusal(code) : code === 'processing' ? 'The world is processing previous results. Retry shortly.'
+/**
+ * What a refused buy back says (patch 1.9): a sale the server no longer lists (an earlier game day, outside the last 10, bought back) and a
+ * stale preparation both read the list again; gold and the bag in the card's own words. Null: the trade's words.
+ */
+const buyBackRefusal = (code: string) => code === 'expired' || code === 'not-found' ? 'This sale can no longer be bought back. The list is up to date.'
+  : code === 'conflict' ? 'Your items changed. Review the updated list and try again.'
+    : code === 'insufficient-funds' ? 'Not enough available gold. Held fees cannot be spent.'
+      : code === 'inventory-full' ? 'Your bag is full. Free a slot and try again.' : null;
+/** What a refused command says: a gear change in the gear's words (`gearRefusal`), a buy back in its own, a trade in its own. */
+const refusalText = (gear: boolean, code: string, kind?: string) => gear ? gearRefusal(code) : (kind === 'buy-back' && buyBackRefusal(code))
+  || (code === 'processing' ? 'The world is processing previous results. Retry shortly.'
   : code === 'unavailable' ? 'This request could not be confirmed. Retry the same request.'
     : code === 'inventory-full' ? 'Your inventory is full. Clear enough slots and try again.'
       : code === 'insufficient-funds' ? 'Not enough available currency. Held fees cannot be spent.'
         : code === 'conflict' ? 'Your inventory changed or this cosmetic is already owned. Review the refreshed state.'
           : code === 'sold' ? 'This item was sold on the Marketplace. Review the refreshed inventory.'
             : code === 'expired' ? 'Its Marketplace listing has expired and the item is back. Review the refreshed inventory.'
-              : `Request rejected: ${code}.`;
+              : `Request rejected: ${code}.`);
 /** What `send` tells a caller that waits for it: whether the server took the command, or why not; null when it was not sent. */
 type Sent = { ok: true } | { ok: false; code: string } | null;
 const itemLabel = (item: ItemInstance) => `${itemName(item)}, level ${item.tier} ${item.rarity}`;
@@ -75,6 +86,8 @@ export function InventoryPanel({ owner, gateway, refresh, clock, preview = false
   merchantRequest?: number;
 }) {
   const [busy, setBusy] = useState(false), [message, setMessage] = useState(''), [error, setError] = useState('');
+  /** Patch 1.9: the last outcome was a gear sale, so it offers "Open Buy back"; and how many times that was pressed (the Shops open on Buy back). */
+  const [sold, setSold] = useState(false), [buyBackRequest, setBuyBackRequest] = useState(0);
   const [confirmation, setConfirmation] = useState<{ itemId: string; quantity: number } | 'stale' | null>(null);
   const [quantities, setQuantities] = useState<Record<string, number>>({});
   const [filter, setFilter] = useState<Filter>('All');
@@ -152,7 +165,7 @@ export function InventoryPanel({ owner, gateway, refresh, clock, preview = false
     if (done !== undefined) success.current = done; else if (!again) success.current = '';
     const gear = command.kind === 'queue-build' || command.kind === 'cancel-build';
     if (!quiet) begin();
-    attempt.current = command; sending.current = true; setBusy(true); if (!quiet) { setError(''); setMessage(''); setRetry(false); }
+    attempt.current = command; sending.current = true; setBusy(true); if (!quiet) { setError(''); setMessage(''); setRetry(false); setSold(false); }
     if (place) setWhere(place); else if (!gear) setWhere('trade');
     try {
       const result = await gateway.command(command);
@@ -161,13 +174,16 @@ export function InventoryPanel({ owner, gateway, refresh, clock, preview = false
         await refresh();
         if (mounted.current) {
           attempt.current = null;
-          if (!quiet) setMessage(success.current || (command.kind === 'buy-shop' ? 'Purchase confirmed.' : command.kind === 'sell-item' ? 'Sale confirmed.' : 'Item discarded. No gold or renown awarded.'));
+          // A gear sale (it has its line: salvage says "Sale confirmed.") offers "Open Buy back", also after a Retry.
+          if (!quiet && command.kind === 'sell-item' && success.current) setSold(true);
+          if (!quiet) setMessage(success.current || (command.kind === 'buy-shop' ? 'Purchase confirmed.' : command.kind === 'sell-item' ? 'Sale confirmed.'
+            : command.kind === 'buy-back' ? 'Bought back.' : 'Item discarded. No gold or renown awarded.'));
         }
         return { ok: true };
       } else {
         const transient = ['processing', 'unavailable', 'rate-limited'].includes(result.code);
         if (!quiet) setRetry(transient);
-        if (!quiet) setError(refusalText(gear, result.code));
+        if (!quiet) setError(refusalText(gear, result.code, command.kind));
         // A gear change the server finds `invalid` no longer fits the build or the bag (`gearRefusal`): reload them.
         const reload = ['conflict', 'not-found', 'inventory-full', 'sold', 'expired'].includes(result.code) || result.code === 'invalid' || (quiet && result.code === 'unavailable');
         if (!transient && (quiet || !reload)) attempt.current = null;
@@ -179,7 +195,7 @@ export function InventoryPanel({ owner, gateway, refresh, clock, preview = false
             // The command is kept, so Retry resends this very operation (the server answers it again) and reads the bag again; once
             // that read works the refusal stays, with nothing more to retry. Before, the command was dropped here and the "could not
             // be confirmed" Retry that followed sent nothing.
-            if (mounted.current) { setError(`${refusalText(gear, result.code)} Your latest items could not be loaded. Retry sends it again and reloads your items.`); setRetry(true); }
+            if (mounted.current) { setError(`${refusalText(gear, result.code, command.kind)} Your latest items could not be loaded. Retry sends it again and reloads your items.`); setRetry(true); }
             return { ok: false, code: result.code };
           }
         }
@@ -216,11 +232,27 @@ export function InventoryPanel({ owner, gateway, refresh, clock, preview = false
   const locked = busy || selling !== null;
   const busyProps = locked ? { 'aria-disabled': true as const } : {};
   /** Keep a gear outcome reachable if the item is no longer shown in the detail card. */
-  const place = where === 'trade' || where === 'sale' || selected?.items.some(item => item.id === where) ? where : 'gear';
+  const place = where === 'trade' || where === 'sale' || where === 'buyback' || selected?.items.some(item => item.id === where) ? where : 'gear';
+  /** "Open Buy back" after a sale: the Shops below open on Buy back, with the focus on its chip. */
+  const openBuyBack = () => { setBuyBackRequest(n => n + 1); };
   const outcomes = <>
-    {message && <p ref={outcome} role="status" tabIndex={-1} {...target}>{message}</p>}{error && <p ref={outcome} role="alert" tabIndex={-1} {...target}>{error}</p>}
+    {message && (sold ? <div className={styles.soldNote}>
+      <p ref={outcome} role="status" tabIndex={-1} {...target}>{message}</p>
+      <button type="button" className={styles.linkButton} onClick={openBuyBack}>Open Buy back</button>
+    </div> : <p ref={outcome} role="status" tabIndex={-1} {...target}>{message}</p>)}
+    {error && <p ref={outcome} role="alert" tabIndex={-1} {...target}>{error}</p>}
     {retry && <button disabled={busy} onClick={() => { if (attempt.current) void send(attempt.current, undefined, where); }}>Retry request</button>}
   </>;
+  /**
+   * Buy back (patch 1.9): one `buy-back` for the chosen sale, through `send` (its operation id, busy state, refresh and Retry); its outcome
+   * shows above the sale's card ("Bought back. Sword is in your bag again."). The preview takes no command and says so there.
+   */
+  const buyBack = (entry: BuyBackEntry) => {
+    if (sending.current || sellLock.current) return;
+    const name = itemName(entry.item);
+    if (preview) { setWhere('buyback'); setError(''); setRetry(false); setSold(false); setMessage('Actions are unavailable in this preview.'); return; }
+    void send({ kind: 'buy-back', saleId: entry.saleId }, `Bought back. ${name} is in your bag again.`, 'buyback');
+  };
   /** Waits for the bag the panel shows to catch up with the sale just settled, so the next piece is checked against it. */
   async function bagUpdated(before: OwnerState) {
     for (let waited = 0; ownerNow.current === before && waited < 50; waited++) await new Promise(resolve => setTimeout(resolve, 10));
@@ -236,12 +268,13 @@ export function InventoryPanel({ owner, gateway, refresh, clock, preview = false
     if (preview) { setMessage('Actions are unavailable in this preview.'); return; }
     const reset = () => setQuantities(values => { const { [tile.key]: _gone, ...rest } = values; return rest; });
     if (list.length === 1) {
-      const result = await send({ kind: 'sell-item', itemId: list[0].id, quantity: 1 }, `Sold ${name} for ${value} gold.`, 'sale');
+      // Patch 1.9: the line says where to buy it back (it replaces "Sold Sword for 39 gold."), with "Open Buy back".
+      const result = await send({ kind: 'sell-item', itemId: list[0].id, quantity: 1 }, afterSaleLine(value, 1), 'sale');
       if (result?.ok && mounted.current) reset();
       return;
     }
     sellLock.current = true; begin();
-    setSelling({ key: tile.key, name, done: 0, total: list.length }); setMessage(''); setError(''); setRetry(false); setWhere('sale');
+    setSelling({ key: tile.key, name, done: 0, total: list.length }); setMessage(''); setError(''); setRetry(false); setSold(false); setWhere('sale');
     let done = 0, refusal = '', unknown = false;
     try {
       for (const piece of list) {
@@ -259,7 +292,7 @@ export function InventoryPanel({ owner, gateway, refresh, clock, preview = false
       const sold = done ? `Sold ${done} of ${list.length} ${name} for ${gold} gold. ` : '';
       if (unknown) setError(`${sold}The result of sale ${done + 1} is unknown; check your gold. Review the updated items and sell the rest again.`);
       else if (refusal) setError(`${sold || 'Nothing was sold. '}Sale ${done + 1} was refused: ${refusal}. Review the updated items and sell the rest again.`);
-      else setMessage(`Sold ${list.length} × ${name} for ${gold} gold.`);
+      else { setMessage(afterSaleLine(gold, list.length, name)); setSold(true); }
       reset();
     } finally { sellLock.current = false; end(); if (mounted.current) setSelling(null); }
   }
@@ -386,7 +419,8 @@ export function InventoryPanel({ owner, gateway, refresh, clock, preview = false
       {place === 'gear' && outcomes}
     </section>
     {place === 'trade' && outcomes}
-    <ShopPanel key={merchantRequest} initialMerchant={initialMerchant} owner={owner} busy={busy || selling !== null} preview={preview} buy={(catalogId, quantity) => void send({ kind: 'buy-shop', catalogId, catalogVersion: CATALOG_V1.version, quantity })} />
+    <ShopPanel key={merchantRequest} initialMerchant={initialMerchant} owner={owner} busy={busy || selling !== null} preview={preview} buy={(catalogId, quantity) => void send({ kind: 'buy-shop', catalogId, catalogVersion: CATALOG_V1.version, quantity })}
+      clock={clock} buyBack={buyBack} buyBackOutcome={place === 'buyback' ? outcomes : null} buyBackRequest={buyBackRequest} />
     <dialog ref={dialog} aria-labelledby="discard-heading" onCancel={() => setConfirmation(null)} onClose={() => {
       if (!dialog.current?.open) setConfirmation(current => current === 'stale' ? current : null);
     }}>

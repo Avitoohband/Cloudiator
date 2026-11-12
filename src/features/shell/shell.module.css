@@ -1638,6 +1638,36 @@
   line-height: 1.4;
 }
 
+.settingsHelpSection {
+  padding-top: 12px;
+  border-top: 1px solid var(--glass-line);
+}
+
+/* Help → Send… (patch 1.9): the gold outline button of the feedback mockup. */
+.settingsSend {
+  flex: none;
+  min-height: 40px;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 0 14px;
+  border: 1px solid #ae864a;
+  border-radius: 8px;
+  background: #4b3726;
+  color: #f2c66b;
+  font: inherit;
+  font-weight: 700;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.settingsSend:hover { background: #5a4430; }
+.settingsSend:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+@media (hover: none), (max-width: 480px) {
+  .settingsSend { min-height: 44px; }
+}
+
 .settingsFoot {
   margin: 0;
   padding-top: 10px;

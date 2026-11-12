@@ -134,6 +134,15 @@ the process-scoped opt-out let version and help succeed, and the direct
 offline launcher served the verified Design bind with the worker's own 401.
 See [local runtime recovery](docs/operations/local-runtime.md).
 
+Avi approved on 2026-11-12 (M33 lesson): in a Windows PowerShell 5.1 script,
+the CLI's update notice on stderr aborts a version check run under
+`$ErrorActionPreference = 'Stop'`, so run the version call with `Continue`;
+and write docker `--format` label templates with escaped quotes
+(`'{{index .Config.Labels \"com.supabase.cli.project\"}}'`), because PowerShell
+5.1 drops plain inner quotes ("function \"com\" not defined"). Observed while
+generating M33 with CLI 2.120.0; tested fix: the M33-M35 `generate.ps1` and
+`replay.ps1` scripts. Adopted as guidance, not separately tested.
+
 ## Windows Docker startup — approved local guidance
 
 Avi approved this extension on 2026-10-14 for **Supabase CLI**. Before retrying
@@ -231,6 +240,17 @@ restate the source's CHECK expression in the draft; the replay then matched the
 source byte for byte (1,210 lines); see the M25 record in
 [the migration guide](docs/operations/migrations.md). The rule as a general
 practice is adopted, not separately tested.
+Avi approved on 2026-11-12 (M34 lesson): a new source that restates a
+definition from SQL21-25 must also be appended to the chain that
+`tests/db/economy.test.ts` `reapplyEconomy()` re-commits, and every new table
+must be classed in `tests/performance/capacity-model.ts` `TABLE_CLASSES`.
+Observed with M34: the first full `npm run test:db` failed 13 cases because
+`reapplyEconomy()` re-committed SQL21-25 and silently restored the older
+`inventory_command`, `titles_on_ledger` and `owner_state` for every later file,
+and the capacity model lacked the two new tables. Tested fix: the chain ends
+with `28-feedback-buyback.sql`, both tables are classed, and the rerun passed
+662/662. Also: a CASE inside a plpgsql IF condition needs parentheses. The
+rule as a general practice is adopted, not separately tested.
 
 # Postgres concurrency — persistent project override
 

@@ -17,6 +17,9 @@ const notices = (page: Page) => page.locator('[data-notices]');
 const settled = async (locator: Locator) => { await locator.evaluate(el => Promise.all(el.getAnimations().map(a => a.finished))); return locator; };
 const shotDir = process.env.MENU_PIN_SHOT_DIR;
 
+// Production builds always refuse the fixture preview (next.config.ts), so these cases run in the development suite only.
+test.beforeEach(() => { test.skip(process.env.PLAYWRIGHT_STATIC === 'true', 'The camp harness runs on the fixture preview only.'); });
+
 async function openCamp(page: Page, saved?: string, query = '') {
   if (saved !== undefined) await page.addInitScript(([key, value]) => localStorage.setItem(key, value), [MENU_PREFS_KEY, saved]);
   await page.goto(`/game/?mode=fixture${query}`);

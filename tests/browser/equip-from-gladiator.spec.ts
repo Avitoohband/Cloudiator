@@ -606,6 +606,7 @@ test.describe('equip from My gladiator (live)', () => {
 });
 
 test('the fixture preview opens the picker with stacked duplicates and says gear changes are unavailable', async ({ page }, info) => {
+  test.skip(process.env.PLAYWRIGHT_STATIC === 'true', 'Production builds refuse the fixture preview.');
   if (info.project.name === 'mobile') await page.setViewportSize({ width: 360, height: 740 });
   await page.goto('/game/?mode=fixture&bag=demo');
   const menu = await openMenu(page, 'My gladiator');

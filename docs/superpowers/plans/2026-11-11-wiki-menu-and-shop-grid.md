@@ -130,5 +130,6 @@ Avi added four features after Tasks 1-2 (2026-11-11, mockups approved): search a
 
 ### Task 12: Combined candidate
 
-- [ ] Final review of Tasks 3-11. Reconcile the 1.9 changelog lines, `docs/game-info/wiki-1.9-pending.md` and the Future Updates draft with what shipped. Commit.
-- [ ] Run the complete offline 12-stage gate (native32, `pw-design-tcp.config.mjs`, 32 browser shards) on the exact committed candidate. Record the result and gate.json SHA-256 in HANDOFF and here. Stop at local readiness.
+- [x] Final review of Tasks 3-11. Reconcile the 1.9 changelog lines, `docs/game-info/wiki-1.9-pending.md` and the Future Updates draft with what shipped. Commit.
+- [x] Run the complete offline 12-stage gate (native32, `pw-design-tcp.config.mjs`, 32 browser shards) on the exact committed candidate. Record the result and gate.json SHA-256 in HANDOFF and here. Stop at local readiness.
+  Passed 12/12 on `722a0f1bae2f9dff3be4b54ab8e146a0b9da3677` (2026-11-12, 14:13–15:15 Israel): unit 2,683, DB 638, development and production browser 1,582/1,582 each; `gate.json` SHA-256 `79575a2da600b9a58d97543f690ecd5c49ff7c7a3fb1c0b42065dcd640b5f290`. The first run on `6d19c54` failed stage 11 only (fixture-only specs in the production run), fixed in `fb98bf0`.

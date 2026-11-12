@@ -152,6 +152,11 @@ export function MessagesPanel({ id, inbox, load, loadNotifications, loadPatches,
   const [bulk, setBulk] = useState<{ done: number; total: number } | null>(null);
   const [banner, setBanner] = useState<{ kind: 'ok' | 'err'; text: string; retry: boolean } | null>(null);
   const [announce, setAnnounce] = useState('');
+  /**
+   * Says `text` in the polite status region. The same words twice in a row (a second identical failure) would change nothing in the
+   * region, and a screen reader would stay silent: the repeat alternates a trailing no-break space, so it is said again (Task 21).
+   */
+  const say = (text: string) => setAnnounce(previous => (previous === text ? `${text}\u00a0` : text));
   const bulkTotal = useRef(0);
   const list = useRef<HTMLUListElement>(null);
   const markOne = async (id: number): Promise<boolean> => {
@@ -174,9 +179,9 @@ export function MessagesPanel({ id, inbox, load, loadNotifications, loadPatches,
     if (bulk) return;
     const next = unreadIds.find(other => other !== id && !marking.has(other));
     const ok = await markOne(id);
-    if (!ok) { setAnnounce('Could not mark the message as read.'); focusMark(id); return; }
+    if (!ok) { say('Could not mark the message as read.'); focusMark(id); return; }
     setBanner(null);
-    setAnnounce(`Marked as read. ${Math.max(0, unreadIds.length - 1)} unread.`);
+    say(`Marked as read. ${Math.max(0, unreadIds.length - 1)} unread.`);
     focusMark(next);
   };
   const markAll = async (retry: boolean) => {
@@ -188,14 +193,14 @@ export function MessagesPanel({ id, inbox, load, loadNotifications, loadPatches,
     let bad = 0;
     for (let n = 0; n < ids.length; n++) {
       setBulk({ done: n, total: ids.length });
-      setAnnounce(`Marking ${n + 1} of ${ids.length}…`);
+      say(`Marking ${n + 1} of ${ids.length}…`);
       if (!(await markOne(ids[n]))) bad++;
     }
     setBulk(null);
     const total = bulkTotal.current;
     const text = bad > 0 ? `Marked ${total - bad} of ${total}. ${bad} could not be marked.` : retry ? 'All marked as read.' : `All ${total} marked as read.`;
     setBanner({ kind: bad > 0 ? 'err' : 'ok', text, retry: bad > 0 });
-    setAnnounce(text);
+    say(text);
     window.setTimeout(() => {
       (bad > 0 ? root.current?.querySelector<HTMLElement>('[data-mark-retry]') : list.current)?.focus();
     }, 0);
@@ -246,6 +251,13 @@ export function MessagesPanel({ id, inbox, load, loadNotifications, loadPatches,
   // then); if that one failed or has not been sent, this sends it (one `see-notifications`) and says so when it fails.
   const [notesMarking, setNotesMarking] = useState(false);
   const [notesError, setNotesError] = useState(false);
+  // A failed mark gives its message's Try again the focus once the message shows, as a failed Mark all on Messages does (Task 21).
+  const notesRetry = useRef<HTMLButtonElement>(null), focusNotesRetry = useRef(false);
+  useEffect(() => {
+    if (!notesError || !focusNotesRetry.current) return;
+    focusNotesRetry.current = false;
+    notesRetry.current?.focus();
+  }, [notesError]);
   const markNotes = async () => {
     if (notesMarking || mark === null) return;
     setNotesError(false);
@@ -253,16 +265,17 @@ export function MessagesPanel({ id, inbox, load, loadNotifications, loadPatches,
       const before = seenUpTo.current;
       seenUpTo.current = mark;
       setNotesMarking(true);
-      setAnnounce('Marking notifications…');
+      say('Marking notifications…');
       try { await seeNotifications(mark); } catch {
         if (seenUpTo.current === mark) seenUpTo.current = before;
-        setNotesMarking(false); setNotesError(true); setAnnounce('Could not mark notifications. Try again.');
+        focusNotesRetry.current = true;
+        setNotesMarking(false); setNotesError(true); say('Could not mark notifications. Try again.');
         return;
       }
       setNotesMarking(false);
     }
     setSeenAtOpen(previous => Math.max(previous, mark));
-    setAnnounce('Notifications marked as read.');
+    say('Notifications marked as read.');
     window.setTimeout(() => root.current?.querySelector<HTMLElement>('[role="tab"][aria-selected="true"]')?.focus(), 0);
   };
 
@@ -331,7 +344,8 @@ export function MessagesPanel({ id, inbox, load, loadNotifications, loadPatches,
                 {messageCount === 0 ? <p className={styles.state}>No messages yet.</p> : <>
                   <div className={styles.summary}>
                     <span className={styles.summaryText}>{messageCount} message{messageCount === 1 ? '' : 's'} · {inbox.unread > 0 ? `${inbox.unread} new` : 'all read'}</span>
-                    <button type="button" className={styles.markAll} data-mark-all disabled={unreadIds.length === 0} aria-disabled={bulk ? true : undefined} aria-busy={bulk ? true : undefined}
+                    {/* Disabled for the whole run, focusably (aria-disabled), and natively only once it is over (Task 21). */}
+                    <button type="button" className={styles.markAll} data-mark-all disabled={!bulk && unreadIds.length === 0} aria-disabled={bulk ? true : undefined} aria-busy={bulk ? true : undefined}
                       onClick={() => markAll(false)}>
                       {bulk ? <><span className={styles.spin} aria-hidden="true" />Marking {bulk.done + 1} of {bulk.total}…</> : <><TickAll />Mark all as read{unreadIds.length > 0 ? ` (${unreadIds.length})` : ''}</>}
                     </button>
@@ -381,13 +395,14 @@ export function MessagesPanel({ id, inbox, load, loadNotifications, loadPatches,
                 {entries.length === 0 ? <p className={styles.state}>No results yet. What your training and expeditions earn shows here.</p> : <>
                   <div className={styles.summary}>
                     <span className={styles.summaryText}>{notificationsSummary(noteItems.length, listedNotices.length, freshNotes)}</span>
-                    <button type="button" className={styles.markAll} data-mark-notes disabled={freshNotes === 0} aria-busy={notesMarking ? true : undefined} onClick={markNotes}>
+                    <button type="button" className={styles.markAll} data-mark-notes disabled={!notesMarking && freshNotes === 0} aria-disabled={notesMarking ? true : undefined}
+                      aria-busy={notesMarking ? true : undefined} onClick={markNotes}>
                       {notesMarking ? <><span className={styles.spin} aria-hidden="true" />Marking…</> : <><TickAll />Mark all as read</>}
                     </button>
                   </div>
                   {notesError && <p className={`${styles.banner} ${styles.bannerErr}`} data-mark-banner>
                     <span>Could not mark notifications. Try again.</span>
-                    <button type="button" className={styles.bannerRetry} data-mark-retry onClick={markNotes}>Try again</button>
+                    <button type="button" className={styles.bannerRetry} data-mark-retry ref={notesRetry} onClick={markNotes}>Try again</button>
                   </p>}
                   <ul className={styles.list}>
                     {entries.map(entry => {

@@ -96,6 +96,8 @@ type Setup = { messages?: GameMessage[]; notifications?: LiveNotification[]; rea
   refuseRead?: 'rate-limited' | 'not-found';
   /** Patch 1.9: read marks for these message ids are refused once each (then taken); `readDelayMs` holds every read mark that long; `refuseSee` refuses that many see-notifications. */
   failReadOnce?: number[]; readDelayMs?: number; refuseSee?: number;
+  /** Task 21: holds every see-notifications answer this long. */
+  seeDelayMs?: number;
   /** The look the owner's gladiator has (null, the default, is the legacy look). */
   appearance?: Appearance | null;
   /**
@@ -137,6 +139,7 @@ async function player(page: Page, setup: Setup = {}) {
       return answer(200, { ok: true, value: { messageId: command.messageId } });
     }
     if (command.kind === 'see-notifications') {
+      if (setup.seeDelayMs) await new Promise(resolve => setTimeout(resolve, setup.seeDelayMs));
       if (setup.refuseSee) { setup.refuseSee -= 1; return answer(429, { ok: false, code: 'rate-limited' }); }
       server.seenMs = Math.max(server.seenMs, Math.min(command.upToMs, live.serverNowMs()));
       sync();
@@ -169,6 +172,36 @@ async function player(page: Page, setup: Setup = {}) {
     post(message: GameMessage) { server.messages.unshift(message); sync(); } };
 }
 const sent = (commands: readonly GameCommand[], kind: GameCommand['kind']) => commands.filter(c => c.kind === kind);
+type Watched = Window & { __said?: string[]; __states?: { disabled: boolean; aria: string | null; text: string }[] };
+/** Records every text the panel's polite status region is given from now on (Task 21: a repeated text must be said again). */
+const watchStatus = (panel: Locator) => panel.locator('[data-mark-status]').evaluate(el => {
+  const w = window as Watched;
+  w.__said = [];
+  new MutationObserver(() => w.__said!.push((el.textContent ?? '').trim())).observe(el, { childList: true, characterData: true, subtree: true });
+});
+/** How many times `text` was given to the status region since `watchStatus`. */
+const said = (page: Page, text: string) => page.evaluate(t => ((window as Watched).__said ?? []).filter(s => s === t).length, text);
+/** Records the button's disabled state, aria-disabled and text at every change from now on. */
+const watchButton = (button: Locator) => button.evaluate(el => {
+  const w = window as Watched, b = el as HTMLButtonElement;
+  w.__states = [];
+  new MutationObserver(() => w.__states!.push({ disabled: b.disabled, aria: b.getAttribute('aria-disabled'), text: (b.textContent ?? '').trim() }))
+    .observe(b, { attributes: true, childList: true, characterData: true, subtree: true });
+});
+const buttonStates = (page: Page) => page.evaluate(() => (window as Watched).__states ?? []);
+/** The panel's mark controls and summary lines that reach past its right edge or overflow their own box (a 360 px phone). */
+const spills = (panel: Locator) => panel.evaluate(root => {
+  const right = root.getBoundingClientRect().right, out: string[] = [];
+  for (const el of root.querySelectorAll<HTMLElement>('[data-mark-all], [data-mark-notes], [data-mark-button], [data-mark-banner], [data-mark-retry], [data-mark-error]')) {
+    const box = el.getBoundingClientRect();
+    if (box.right > right + 0.5 || el.scrollWidth > el.clientWidth + 1) out.push(`${el.getAttribute('aria-label') ?? el.textContent?.trim()}: ${Math.round(box.right)} of ${Math.round(right)}`);
+  }
+  for (const el of root.querySelectorAll<HTMLElement>('[data-mark-all], [data-mark-notes]')) {
+    const line = el.parentElement!;
+    if (line.scrollWidth > line.clientWidth + 1 || line.getBoundingClientRect().right > right + 0.5) out.push(`summary line: ${line.textContent?.trim()}`);
+  }
+  return out;
+});
 
 const messagesButton = (page: Page) => cornerChip(page).getByRole('button', { name: /^Messages(, \d+ new)?$/ });
 const badge = (page: Page) => page.getByTestId('messages-badge');
@@ -648,6 +681,98 @@ test.describe('Watch from Notifications', () => {
     await expect(list.locator('[data-unread-dot]')).toHaveCount(0);
     await expect(list.locator('[data-mark-banner]')).toHaveCount(0);
     expect(sent(commands, 'see-notifications')).toHaveLength(3);
+  });
+
+  // Task 21 item 4 (the review leftovers, folded into 1.9).
+  test('Notifications Mark all as read: a failure takes the focus to its Try again, and the same failure again is announced again', async ({ page }) => {
+    const { commands } = await player(page, { notifications: RESULTS, refuseSee: 3 });
+    await openLive(page);
+    const panel = await openPanel(page);
+    // The mark sent when the tab shows is refused first (so Mark all sends its own).
+    const refused = page.waitForResponse(response => response.url().endsWith('/functions/v1/game-command') && response.request().postDataJSON()?.kind === 'see-notifications');
+    await tab(panel, /^Notifications/).click();
+    const list = panel.getByRole('tabpanel');
+    expect((await refused).status()).toBe(429);
+    await expect.poll(() => sent(commands, 'see-notifications').length).toBe(1);
+    await watchStatus(panel);
+    await list.locator('[data-mark-notes]').focus();
+    await page.keyboard.press('Enter');
+    const banner = list.locator('[data-mark-banner]'), again = banner.getByRole('button', { name: 'Try again', exact: true });
+    await expect(banner).toContainText('Could not mark notifications. Try again.');
+    await expect(again).toBeFocused();
+    await page.keyboard.press('Enter');
+    await expect.poll(() => sent(commands, 'see-notifications').length).toBe(3);
+    await expect(banner).toContainText('Could not mark notifications. Try again.');
+    await expect(again).toBeFocused();
+    await expect.poll(() => said(page, 'Could not mark notifications. Try again.'), 'each failure is said').toBe(2);
+  });
+
+  test('a round check that fails twice in a row is announced both times', async ({ page }) => {
+    await player(page, { failReadOnce: [LOOK.id, LOOK.id] });
+    await openLive(page);
+    const panel = await openPanel(page);
+    await watchStatus(panel);
+    const check = panel.getByRole('button', { name: /^Mark New: choose your gladiator.* as read$/ });
+    await check.click();
+    await expect(row(panel, /New: choose your gladiator/).locator('[data-mark-error]')).toHaveText('Could not mark. Try again.');
+    await expect.poll(() => said(page, 'Could not mark the message as read.')).toBe(1);
+    await check.click();
+    await expect.poll(() => said(page, 'Could not mark the message as read.'), 'the second failure is said again').toBe(2);
+  });
+
+  test('Mark all as read stays disabled, and only so, for the whole run on both tabs', async ({ page }) => {
+    const { commands } = await player(page, { messages: [AVI, ...MESSAGES], readIds: [EVENING.id], readDelayMs: 300, notifications: RESULTS, refuseSee: 1, seeDelayMs: 600 });
+    await openLive(page);
+    const panel = await openPanel(page);
+    const all = panel.locator('[data-mark-all]');
+    await watchButton(all);
+    await all.click();
+    await expect(panel.locator('[data-mark-banner]')).toHaveText('All 3 marked as read.', { timeout: 10_000 });
+    await expect(all).toBeDisabled();
+    const run = await buttonStates(page);
+    const last = run.map(state => state.text.startsWith('Marking')).lastIndexOf(true);
+    const during = run.slice(0, last + 1);
+    expect(during.length).toBeGreaterThan(0);
+    expect(during.filter(state => state.aria !== 'true' || state.disabled), JSON.stringify(run)).toEqual([]);
+    // Notifications: the mark shown with the tab was refused, so Mark all sends it, and is disabled until its answer.
+    const refused = page.waitForResponse(response => response.url().endsWith('/functions/v1/game-command') && response.request().postDataJSON()?.kind === 'see-notifications');
+    await tab(panel, /^Notifications/).click();
+    const list = panel.getByRole('tabpanel');
+    expect((await refused).status()).toBe(429);
+    await expect.poll(() => sent(commands, 'see-notifications').length).toBe(1);
+    await expect(list.locator('[data-unread-dot]')).toHaveCount(3);
+    const notes = list.locator('[data-mark-notes]');
+    await watchButton(notes);
+    await notes.click();
+    await expect(notes).toHaveText('Marking…');
+    await expect(notes).toHaveAttribute('aria-disabled', 'true');
+    await expect(list.locator('[data-unread-dot]')).toHaveCount(0);
+    await expect(notes).toBeDisabled();
+    const marked = await buttonStates(page);
+    const busy = marked.filter(state => state.text.startsWith('Marking'));
+    expect(busy.length).toBeGreaterThan(0);
+    expect(busy.filter(state => state.aria !== 'true' || state.disabled), JSON.stringify(marked)).toEqual([]);
+    expect(sent(commands, 'see-notifications')).toHaveLength(2);
+  });
+
+  test('fits a 360 px phone with the summary lines, Mark all, the ✓ buttons, a run and a failure', async ({ page }) => {
+    await page.setViewportSize({ width: 360, height: 740 });
+    const long: GameMessage = { ...AVI, id: 9, title: 'A very long title that goes on and on until it reaches the eighty character limit' };
+    await player(page, { messages: [long, AVI, ...MESSAGES], readIds: [EVENING.id], readDelayMs: 500, failReadOnce: [AVI.id], notifications: RESULTS });
+    await openLive(page);
+    const panel = await openPanel(page);
+    await expect(panel.locator('[data-mark-button]')).toHaveCount(4);
+    expect(await spills(panel), 'the list with its ✓ buttons').toEqual([]);
+    await panel.locator('[data-mark-all]').click();
+    await expect(panel.locator('[data-mark-all]')).toHaveText(/Marking \d of 4…/);
+    expect(await spills(panel), 'during the run').toEqual([]);
+    await expect(panel.locator('[data-mark-banner]')).toContainText('Marked 3 of 4. 1 could not be marked.', { timeout: 10_000 });
+    await expect(row(panel, /A note from Avi/).locator('[data-mark-error]')).toHaveText('Could not mark. Try again.');
+    expect(await spills(panel), 'after a failure').toEqual([]);
+    await tab(panel, /^Notifications/).click();
+    await expect(panel.locator('[data-mark-notes]')).toBeVisible();
+    expect(await spills(panel), 'the notifications').toEqual([]);
+    expect(await noHorizontalScroll(page)).toBe(true);
   });
 
   test('shows a bulleted body as a list and the look note with its Change look button and disclaimer', async ({ page }, testInfo) => {

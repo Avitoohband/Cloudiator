@@ -1,4 +1,5 @@
 import type { Appearance } from '../domain/appearance.ts';
+import type { FeedbackCategory, FeedbackDetails } from './reads.ts';
 
 /** Wire values are plain JSON. Boundary validators enforce safe integer ranges and UUIDs. */
 export type GladiatorId = string;
@@ -16,7 +17,11 @@ export type ActivityChoice = { kind: 'training' | 'rest' | 'arena' }
 export type Schedule = Record<Phase, ActivityChoice>;
 export type EquipmentSlot = 'weapon' | 'offHand' | 'head' | 'body' | 'feet';
 export type Equipment = Record<EquipmentSlot, string | null>;
-export type ApiErrorCode = 'unauthenticated' | 'invalid' | 'conflict' | 'processing' | 'insufficient-funds' | 'inventory-full' | 'sold' | 'expired' | 'not-found' | 'rate-limited' | 'unavailable';
+/**
+ * `daily-limit` (patch 1.9, HTTP 409): the account has sent its 5 feedback of the current game day (send-feedback; the next game
+ * day allows again). `expired` also answers a buy-back of a sale that can no longer be bought back.
+ */
+export type ApiErrorCode = 'unauthenticated' | 'invalid' | 'conflict' | 'processing' | 'insufficient-funds' | 'inventory-full' | 'sold' | 'expired' | 'not-found' | 'rate-limited' | 'unavailable' | 'daily-limit';
 export type CommandResult<T> = { ok: true; receiptId: string; value: T } | { ok: false; code: ApiErrorCode; retryAfterMs?: number };
 
 type Operation = { operationId: OperationId };
@@ -54,6 +59,19 @@ export type SeeNotificationsValue = { seenMs: number };
  * and one per opening would pile up), or a refusal.
  */
 export type SeeNotificationsResult = { ok: true; value: SeeNotificationsValue } | { ok: false; code: ApiErrorCode; retryAfterMs?: number };
+/**
+ * The answer to a `send-feedback` command (patch 1.9): the new feedback's id and how many more the account may send in the current
+ * game day (5 a game day). Refusals: `invalid`, `daily-limit` (409; no receipt is written, so the same operation may be sent again
+ * on the next game day), `conflict` (another body under a used operation id).
+ */
+export type SendFeedbackValue = { feedbackId: number; leftToday: number };
+/**
+ * The answer to a `buy-back` command (patch 1.9): the item instance that is back in the bag (the same id, level, rarity and stats it
+ * was sold with) and the gold taken, exactly what the sale paid. Refusals: `expired` (an earlier game day, outside the last 10
+ * sales of the day, or already bought back), `insufficient-funds`, `inventory-full`, `not-found` (not one of the caller's own
+ * gladiator's sales), `processing` (retry), `conflict` (a stale preparation: read the owner state again and send a new operation).
+ */
+export type BuyBackValue = { itemId: string; moneyDebit: number };
 /** Actor identity is supplied by a verified session, never by any command field. */
 export type GameCommand = Operation & (
   // `appearance` is the look chosen at creation (supabase/functions/_shared/domain/appearance.ts). Absent (an older open tab): the
@@ -79,4 +97,9 @@ export type GameCommand = Operation & (
   // Mark the account's own settled results seen up to a time (`upToMs`, server time in ms); no receipt, it never moves the mark back.
   | { kind: 'see-notifications'; upToMs: number }
   | { kind: 'presence' }
+  // Patch 1.9: feedback from any signed-in account (the account and its gladiator are the verified session's): the category, the
+  // text (10 to 1,000 characters once trimmed; stored trimmed, shown as plain text) and the game details or null.
+  | { kind: 'send-feedback'; category: FeedbackCategory; text: string; details: FeedbackDetails | null }
+  // Patch 1.9: buy back one of the caller's own gladiator's gear sales (an `OwnerState.buyBack` entry's `saleId`).
+  | { kind: 'buy-back'; saleId: number }
 );

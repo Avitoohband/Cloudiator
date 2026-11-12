@@ -1,6 +1,6 @@
 import type { ActivityChoice, GameCommand, Attributes, Phase } from '../contracts/commands.ts';
 import type { Actor } from './auth.ts';
-import type { AppearanceCommand, CommandDatabase, InventoryCommand, MarketCommand, OptInCommand, PlanningCommand, ReadMessageCommand, SeeNotificationsCommand, WearTitleCommand } from './database.ts';
+import type { AppearanceCommand, BuyBackCommand, CommandDatabase, InventoryCommand, MarketCommand, OptInCommand, PlanningCommand, ReadMessageCommand, SeeNotificationsCommand, SendFeedbackCommand, WearTitleCommand } from './database.ts';
 import { CATALOG_V1 } from '../domain/catalog-v1.ts';
 import { RULES_V1 } from '../domain/rules-v1.ts';
 import { RULES_V2 } from '../domain/rules-v2.ts';
@@ -8,6 +8,7 @@ import { validAppearance } from '../domain/appearance.ts';
 import { titleById } from '../domain/titles.ts';
 import { validateCreationAllocation } from '../domain/build.ts';
 import { choiceAllowedInPhase } from '../domain/schedule-choice.ts';
+import { isFeedbackCategory, validFeedbackDetails, validFeedbackText } from '../domain/feedback.ts';
 import { jsonResponse, preflightResponse, readCommandBody, statusFor } from './http.ts';
 
 const uuid = (v: unknown) => typeof v === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(v);
@@ -73,6 +74,12 @@ export function parseCommand(value: unknown): GameCommand | null {
     case 'see-notifications': valid = shape('upToMs') && integer(value.upToMs, 0); break;
     // Task 23.8: the owner's activity signal; no payload.
     case 'presence': valid = shape(); break;
+    // Patch 1.9: feedback names no account or gladiator (the verified session's); the text, the category and the game details (or
+    // null) are checked here as SQL checks them again: 10 to 1,000 characters once trimmed, exactly the five details.
+    case 'send-feedback': valid = shape('category', 'text', 'details') && isFeedbackCategory(value.category) && validFeedbackText(value.text)
+      && (value.details === null || validFeedbackDetails(value.details)); break;
+    // Patch 1.9: one of the caller's own sales by its id; SQL decides whether it is still there to buy back.
+    case 'buy-back': valid = shape('saleId') && integer(value.saleId, 1); break;
   }
   return valid ? value as GameCommand : null;
 }
@@ -82,7 +89,7 @@ const INVENTORY_KINDS: readonly string[] = ['buy-shop', 'sell-item', 'discard-it
 const MARKET_KINDS: readonly string[] = ['create-listing', 'cancel-listing', 'buy-listing'];
 export type CommandDependencies = {
   verifyActor(request: Request): Promise<Actor>;
-  database: Pick<CommandDatabase, 'consumeRateLimit' | 'createGladiator' | 'plan' | 'inventory' | 'market' | 'setTournamentOptIn' | 'changeAppearance' | 'wearTitle' | 'readMessage' | 'seeNotifications'>;
+  database: Pick<CommandDatabase, 'consumeRateLimit' | 'createGladiator' | 'plan' | 'inventory' | 'market' | 'setTournamentOptIn' | 'changeAppearance' | 'wearTitle' | 'readMessage' | 'seeNotifications' | 'sendFeedback' | 'buyBack'>;
   allowedOrigins: readonly string[];
 };
 export async function handleCommand(request: Request, deps: CommandDependencies): Promise<Response> {
@@ -108,7 +115,7 @@ export async function handleCommand(request: Request, deps: CommandDependencies)
     }
     const command = parseCommand(body);
     if (!command) return jsonResponse({ ok: false, code: 'invalid' }, 400, origin);
-    if (![...PLANNING_KINDS, ...INVENTORY_KINDS, ...MARKET_KINDS, 'create-character', 'set-tournament-opt-in', 'change-appearance', 'wear-title', 'read-message', 'see-notifications', 'presence'].includes(command.kind)) return jsonResponse({ ok: false, code: 'unavailable' }, 503, origin);
+    if (![...PLANNING_KINDS, ...INVENTORY_KINDS, ...MARKET_KINDS, 'create-character', 'set-tournament-opt-in', 'change-appearance', 'wear-title', 'read-message', 'see-notifications', 'presence', 'send-feedback', 'buy-back'].includes(command.kind)) return jsonResponse({ ok: false, code: 'unavailable' }, 503, origin);
     // Task 23.8: the rate check above recorded the owner's activity signal (consume_command_rate). Presence writes nothing
     // else: no operation receipt, which would be permanent.
     if (command.kind === 'presence') return jsonResponse({ ok: true }, 200, origin);
@@ -119,6 +126,8 @@ export async function handleCommand(request: Request, deps: CommandDependencies)
           // A read mark and a notifications mark write no receipt (like presence), so their answers carry none.
           : command.kind === 'read-message' ? await deps.database.readMessage(actor, command as ReadMessageCommand)
             : command.kind === 'see-notifications' ? await deps.database.seeNotifications(actor, command as SeeNotificationsCommand)
+            : command.kind === 'send-feedback' ? await deps.database.sendFeedback(actor, command as SendFeedbackCommand)
+            : command.kind === 'buy-back' ? await deps.database.buyBack(actor, command as BuyBackCommand)
               : INVENTORY_KINDS.includes(command.kind) ? await deps.database.inventory(actor, command as InventoryCommand)
                 : MARKET_KINDS.includes(command.kind) ? await deps.database.market(actor, command as MarketCommand)
                   : await deps.database.plan(actor, command as PlanningCommand);

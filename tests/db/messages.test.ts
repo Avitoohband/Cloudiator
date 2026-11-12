@@ -80,7 +80,10 @@ describe('game messages', () => {
     const signatures = ['private.post_message(text,text,text,jsonb,text)', 'private.hide_message(bigint)', 'private.valid_message_body(jsonb)'];
     for (const fn of signatures) {
       for (const role of ['anon', 'authenticated', 'service_role']) {
-        expect((await sql`select has_function_privilege(${role}::name, ${fn}::text, 'EXECUTE') as ok`)[0].ok, `${role} ${fn}`).toBe(false);
+        // Patch 1.9 (M34): the backend posts a team reply (public.review_feedback), so the body CHECK runs as service_role: it alone
+        // executes the body function. Posting and hiding stay the operator's.
+        const backendCheck = role === 'service_role' && fn === 'private.valid_message_body(jsonb)';
+        expect((await sql`select has_function_privilege(${role}::name, ${fn}::text, 'EXECUTE') as ok`)[0].ok, `${role} ${fn}`).toBe(backendCheck);
       }
       // No PUBLIC grant either (every role inherits one), and the owner keeps it.
       expect(await sql`select x.grantee from pg_proc p cross join aclexplode(coalesce(p.proacl, acldefault('f', p.proowner))) x
@@ -155,7 +158,38 @@ describe('game messages', () => {
       .rejects.toMatchObject({ code: '23514', constraint_name: 'game_messages_body_check' });
     await expect(sql`insert into public.game_messages(kind,title,preview,body,published_at_ms) values('news','t','p','[{"p":"x"}]',0)`)
       .rejects.toMatchObject({ code: '23514', constraint_name: 'game_messages_kind_check' });
+    // Patch 1.9 (M34): a team reply always names its one recipient and a broadcast never does, so the operator's post_message (no
+    // recipient) cannot post a team reply, and no admin or patch note is sent to one account.
+    await expect(post({ kind: 'team-reply' })).rejects.toMatchObject({ code: '23514', constraint_name: 'game_messages_recipient_check' });
+    const recipient = (await account()).id;
+    for (const kind of ['admin', 'patch-notes']) {
+      await expect(sql`insert into public.game_messages(kind,title,preview,body,published_at_ms,recipient_id) values(${kind},'t','p','[{"p":"x"}]',0,${recipient})`, kind)
+        .rejects.toMatchObject({ code: '23514', constraint_name: 'game_messages_recipient_check' });
+    }
+    await expect(sql`insert into public.game_messages(kind,title,preview,body,published_at_ms,recipient_id) values('team-reply','t','p','[{"p":"x"}]',0,${randomUUID()})`)
+      .rejects.toMatchObject({ code: '23503' });
     expect(await messageCount()).toBe(0);
+  });
+
+  it('shows a team reply to its one recipient only: never to visitors or another account, in no count and to no read mark', async () => {
+    const me = await player('Reply Owner'), other = await player('Reply Other');
+    await sleep(8);
+    const [{ reply }] = await sql`insert into public.game_messages(kind,title,preview,body,published_at_ms,recipient_id)
+      values('team-reply','Answer to your idea','Thanks.','[{"p":"Thanks."}]',${await dbNow()},${me.id}) returning id::int as reply`;
+    const shared = await post({ title: 'For everyone' });
+    const ids = async (client: typeof anonymous) => ((await client.from('game_messages').select('id').order('id')).data ?? []).map(m => m.id);
+    expect(await ids(me.client)).toEqual([reply, shared]);
+    expect(await ids(other.client)).toEqual([shared]);
+    expect(await ids(anonymous)).toEqual([shared]);
+    expect((await me.client.from('game_messages').select('recipient_id').eq('id', reply)).data).toEqual([{ recipient_id: me.id }]);
+    expect(await inboxOf(me.id)).toMatchObject({ unread: 2 });
+    expect(await inboxOf(other.id)).toMatchObject({ unread: 1 });
+    // Another account cannot mark it read (not-found, as for a hidden message); its recipient can.
+    expect(await readMessage(other.id, reply)).toEqual({ ok: false, code: 'not-found' });
+    expect(await marks(other.id)).toEqual([]);
+    expect(await readMessage(me.id, reply)).toEqual({ ok: true, value: { messageId: reply } });
+    expect(await inboxOf(me.id)).toMatchObject({ unread: 1, readIds: [reply] });
+    expect(await inboxOf(other.id)).toMatchObject({ unread: 1, readIds: [] });
   });
 
   it('accepts the limits and stores the text as data, character for character', async () => {

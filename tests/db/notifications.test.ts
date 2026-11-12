@@ -289,8 +289,9 @@ describe('notifications', () => {
     const owner = await player('Keys');
     const { data } = await owner.client.from('owner_state').select('state').single();
     const state = data!.state as Record<string, unknown>;
-    // Patch 1.7 (M28) adds the owner's titles: wornTitle, titles and titleProgress.
-    expect(Object.keys(state).sort()).toEqual(['appearance', 'buildVersion', 'currentActivity', 'currentBuild', 'gladiatorId', 'inbox', 'inventory', 'inventoryCapacity', 'name',
+    // Patch 1.7 (M28) adds the owner's titles: wornTitle, titles and titleProgress. Patch 1.9 (M34) adds buyBack, the gear sales the
+    // gladiator can still buy back.
+    expect(Object.keys(state).sort()).toEqual(['appearance', 'buildVersion', 'buyBack', 'currentActivity', 'currentBuild', 'gladiatorId', 'inbox', 'inventory', 'inventoryCapacity', 'name',
       'ownedCosmetics', 'pendingBuild', 'processedSlotIndex', 'progression', 'reservedFees', 'restingUntilSlot', 'schedule', 'scheduleVersion', 'stamina', 'titleProgress',
       'titles', 'tournamentOptIn', 'wallets', 'wornTitle']);
     expect(Object.keys(state.inbox as object).sort()).toEqual(['newNotifications', 'notificationsSeenMs', 'readIds', 'sinceMs', 'unread']);

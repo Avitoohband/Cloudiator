@@ -1,5 +1,5 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
-import type { GameCommand, CommandResult, ChangeAppearanceValue, DayScheduleValue, WearTitleValue, ReadMessageResult, SeeNotificationsResult } from '../contracts/commands.ts';
+import type { GameCommand, CommandResult, ChangeAppearanceValue, DayScheduleValue, WearTitleValue, ReadMessageResult, SeeNotificationsResult, SendFeedbackValue, BuyBackValue } from '../contracts/commands.ts';
 import type { ItemInstance, OwnerState, PendingBuildView } from '../contracts/reads.ts';
 import type { Actor } from './auth.ts';
 import { WorkerFailure } from './failure.ts';
@@ -119,6 +119,21 @@ export type AppearanceCommand = Extract<GameCommand, { kind: 'change-appearance'
 export type WearTitleCommand = Extract<GameCommand, { kind: 'wear-title' }>;
 export type ReadMessageCommand = Extract<GameCommand, { kind: 'read-message' }>;
 export type SeeNotificationsCommand = Extract<GameCommand, { kind: 'see-notifications' }>;
+export type SendFeedbackCommand = Extract<GameCommand, { kind: 'send-feedback' }>;
+export type BuyBackCommand = Extract<GameCommand, { kind: 'buy-back' }>;
+/** Patch 1.9: the item a buy back returns and the buyer's historical strength before and after it (checked by SQL under its locks). */
+export type BuyBackPreparation = { itemId: string; baselinePeakStrength: number; nextPeakStrength: number };
+/**
+ * Patch 1.9: the sale's item from the owner read's buy-back list, scored like any acquisition (as a listing purchase is). Null when
+ * the list does not hold the sale (another gladiator's, expired or unknown) or the read has no list: SQL then answers from the sale
+ * itself (a still valid sale is `conflict`, a stale read). Malformed stored stats throw; the caller sends no preparation.
+ */
+export function prepareBuyBack(command: BuyBackCommand, state: OwnerState): BuyBackPreparation | null {
+  const sale = Array.isArray(state.buyBack) ? state.buyBack.find(entry => entry.saleId === command.saleId) : undefined;
+  if (!sale) return null;
+  const baseline = state.progression.peakStrength;
+  return { itemId: sale.item.id, baselinePeakStrength: baseline, nextPeakStrength: historicalGearScore([...state.inventory, sale.item], baseline) };
+}
 /** The saved automatic-entry setting and the database time it was received (Task 19). */
 export type OptInValue = { enabled: boolean; receivedAtMs: number };
 export type CreationValue = { gladiatorId: string };
@@ -261,6 +276,34 @@ export function createDatabase(client: SupabaseClient) {
       const { data, error } = await client.rpc('see_notifications', { actor_id: actor.userId, up_to_ms: command.upToMs });
       if (error) throw new Error('notifications-unavailable');
       return data as SeeNotificationsResult;
+    },
+    /**
+     * Patch 1.9: feedback from the caller's own account (the verified actor; the command names no other). SQL replays a committed
+     * receipt first, checks the shape and text again and answers `daily-limit` after 5 in a game day (no receipt for a refusal).
+     */
+    async sendFeedback(actor: Actor, original: SendFeedbackCommand): Promise<CommandResult<SendFeedbackValue>> {
+      const command = { ...original, operationId: original.operationId.toLowerCase() };
+      const { data, error } = await client.rpc('send_feedback', { actor_id: actor.userId, operation_id: command.operationId, input: { command } });
+      if (error) throw new Error('feedback-unavailable');
+      return data as CommandResult<SendFeedbackValue>;
+    },
+    /**
+     * Patch 1.9: buy back one of the caller's own gladiator's gear sales. The owner read supplies the item and the historical
+     * strength it would give (prepareBuyBack); even a missing preparation reaches SQL, which replays a committed receipt first. A
+     * deadlock or serialization abort rolled back whole and is a retryable `processing`.
+     */
+    async buyBack(actor: Actor, original: BuyBackCommand): Promise<CommandResult<BuyBackValue>> {
+      const command = { ...original, operationId: original.operationId.toLowerCase() };
+      const owner = await client.from('owner_state').select('state').eq('owner_id', actor.userId).maybeSingle();
+      if (owner.error) throw new Error('buy-back-unavailable');
+      let prepared: BuyBackPreparation | null = null;
+      try { if (owner.data) prepared = prepareBuyBack(command, owner.data.state as OwnerState); } catch { prepared = null; }
+      const { data, error } = await client.rpc('buy_back', { actor_id: actor.userId, operation_id: command.operationId, input: { command, prepared } });
+      if (error) {
+        if (RETRYABLE_ABORTS.includes(error.code)) return { ok: false, code: 'processing', retryAfterMs: 1000 };
+        throw new Error('buy-back-unavailable');
+      }
+      return data as CommandResult<BuyBackValue>;
     },
     /** Future build commands must use this actor-scoped inventory, never a player-supplied owned list. */
     async loadOwnedInventory(actor: Actor): Promise<ItemInstance[]> {

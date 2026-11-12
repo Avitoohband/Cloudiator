@@ -58,7 +58,7 @@ export const buttonName = (count: number): string => (count > 0 ? `Messages, ${c
  */
 export const isUnread = (message: GameMessage, inbox: Inbox): boolean => message.publishedAtMs > inbox.sinceMs && !inbox.readIds.includes(message.id);
 
-const TAGS: Record<GameMessage['kind'], string> = { 'patch-notes': 'Patch notes', admin: 'Admin' };
+const TAGS: Record<GameMessage['kind'], string> = { 'patch-notes': 'Patch notes', admin: 'Admin', 'team-reply': 'Team reply' };
 /** The tag a message shows: "Patch notes" (gold) or "Admin" (violet). */
 export const tagName = (kind: GameMessage['kind']): string => TAGS[kind];
 

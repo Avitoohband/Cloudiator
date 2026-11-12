@@ -113,6 +113,9 @@ export const TABLE_CLASSES: Readonly<Record<string, { retention: Retention; wind
   'public.game_messages': { retention: 'singleton' }, 'public.message_reads': { retention: 'player' },
   // M25: one "notifications seen up to" time per account that has asked, never more.
   'public.notification_marks': { retention: 'player' },
+  // Patch 1.9 (M34): each account's feedback (at most 5 a game day, sent by hand: tiny, kept with the account), and each
+  // gladiator's gear sales that can be bought back (only the latest game day it sold on: its next sale removes the older ones).
+  'public.feedback': { retention: 'player' }, 'public.npc_sales': { retention: 'player' },
   // M26: the patch list and its features (a row per release, recorded by hand and kept; at most 20 features each): tiny, kept.
   'public.patches': { retention: 'singleton' }, 'public.patch_features': { retention: 'singleton' },
   // The two published documents and drafts, and the operator allowlist, do not grow per game slot.

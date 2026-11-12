@@ -19,6 +19,10 @@ export function preflightResponse(origin: string | null): Response {
   if (origin) response.headers.set('Access-Control-Max-Age', '7200');
   return response;
 }
+/**
+ * The HTTP status of a command refusal. Every business refusal not named here is 409: conflict, processing, insufficient-funds,
+ * inventory-full, sold, expired, and daily-limit (patch 1.9: the day's 5 feedback are sent).
+ */
 export function statusFor(code: ApiErrorCode): number {
   if (code === 'unauthenticated') return 401;
   if (code === 'invalid') return 400;

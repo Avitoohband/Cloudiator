@@ -22,6 +22,8 @@ export const ownerFixture: OwnerState = {
   inbox: { unread: 0, readIds: [], sinceMs: 0, newNotifications: 0, notificationsSeenMs: 0 },
   // Patch 1.7: no titles in the shared fixture world; the fixture preview's own are in src/lib/api/fixture-gateway.ts.
   wornTitle: null, titles: [], titleProgress: {},
+  // Patch 1.9: nothing to buy back in the shared fixture world.
+  buyBack: [],
 };
 
 export const worldFixture: WorldSnapshot = {

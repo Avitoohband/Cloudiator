@@ -153,6 +153,20 @@ const SERVICE_ROLE = [
   'column private.bots.gladiator_id: SELECT',
   'column private.bots.member_key: SELECT',
   'column private.bots.role: SELECT',
+  // Patch 1.9 (M34): the backend answers feedback (public.review_feedback moves an item to read or answered, and records its answer)
+  // and posts the team reply itself (only the columns a reply sets); a buy back marks its sale bought back.
+  'column public.feedback.answer: UPDATE',
+  'column public.feedback.answer_message_id: UPDATE',
+  'column public.feedback.answered_at_ms: UPDATE',
+  'column public.feedback.status: UPDATE',
+  'column public.game_messages.body: INSERT',
+  'column public.game_messages.kind: INSERT',
+  'column public.game_messages.preview: INSERT',
+  'column public.game_messages.published_at_ms: INSERT',
+  'column public.game_messages.recipient_id: INSERT',
+  'column public.game_messages.title: INSERT',
+  'column public.npc_sales.bought_back_at_ms: UPDATE',
+  'column public.npc_sales.buy_back_receipt_id: UPDATE',
   // Task 5's economy switch/table deliberately add no service_role privilege; pinned separately below.
   'default postgres:public:sequences: UPDATE',
   'default postgres:public:tables: MAINTAIN,REFERENCES,TRIGGER,TRUNCATE',
@@ -249,10 +263,16 @@ const SERVICE_ROLE = [
   // (create_gladiator and the boundary functions, as service_role) needs EXECUTE; clients never do.
   'function private.valid_appearance(jsonb): EXECUTE',
   'function private.valid_bracket(uuid, jsonb, jsonb): EXECUTE',
+  // Patch 1.9 (M34): the CHECK on public.feedback.details calls it, so the backend that inserts feedback (send_feedback) needs EXECUTE.
+  'function private.valid_feedback_details(jsonb): EXECUTE',
   'function private.valid_game_info_document(text, jsonb): EXECUTE',
+  // Patch 1.9 (M34): the CHECK on public.game_messages.body, run as the backend when review_feedback posts a team reply.
+  'function private.valid_message_body(jsonb): EXECUTE',
   'function private.valid_preparation(uuid, jsonb): EXECUTE',
   'function private.valid_tournament_outcomes(text, text, text, text, jsonb): EXECUTE',
   'function public.advance_boundary(bigint, uuid): EXECUTE',
+  // Patch 1.9 (M34): the command buy-back, backend only like sell_item.
+  'function public.buy_back(uuid, uuid, jsonb): EXECUTE',
   'function public.buy_listing(uuid, uuid, jsonb): EXECUTE',
   'function public.buy_shop(uuid, uuid, jsonb): EXECUTE',
   'function public.cancel_build(uuid, uuid, jsonb): EXECUTE',
@@ -279,9 +299,13 @@ const SERVICE_ROLE = [
   'function public.read_message(uuid, bigint): EXECUTE',
   'function public.refresh_projections(): EXECUTE',
   'function public.renew_job(uuid, uuid): EXECUTE',
+  // Patch 1.9 (M34): the Game Info editors' feedback actions, behind the game-info Edge function (the allowlist is SQL's check).
+  'function public.review_feedback(uuid, jsonb): EXECUTE',
   // Notifications (M25): marking the player's own results seen, backend only and without a receipt, like read_message.
   'function public.see_notifications(uuid, bigint): EXECUTE',
   'function public.sell_item(uuid, uuid, jsonb): EXECUTE',
+  // Patch 1.9 (M34): the command send-feedback, backend only.
+  'function public.send_feedback(uuid, uuid, jsonb): EXECUTE',
   'function public.set_tournament_opt_in(uuid, uuid, jsonb): EXECUTE',
   'function public.settle_activity(uuid, uuid): EXECUTE',
   'function public.settle_expedition(uuid, uuid, jsonb): EXECUTE',
@@ -334,6 +358,8 @@ const SERVICE_ROLE = [
   // Task 23.8 (M22): a character's rest at home, written by boundary phase 3 and consume_command_rate.
   'relation public.character_rests: INSERT,SELECT,UPDATE',
   'relation public.dungeon_fights: DELETE,INSERT,SELECT',
+  // Patch 1.9 (M34): feedback is inserted by send_feedback and read by review_feedback (its updates are the column grants above).
+  'relation public.feedback: INSERT,SELECT',
   'relation public.game_info_reads: SELECT,UPDATE',
   // Game messages (M25): the backend only reads them (the owner read's inbox, read_message); the operator writes as postgres.
   'relation public.game_messages: SELECT',
@@ -348,6 +374,9 @@ const SERVICE_ROLE = [
   'relation public.message_reads: INSERT,SELECT',
   // Notifications (M25): each account's "seen up to" time, written by see_notifications (insert, then only moved on) and read by the owner read.
   'relation public.notification_marks: INSERT,SELECT,UPDATE',
+  // Patch 1.9 (M34): a gear sale's snapshot, inserted by the sale, read by the owner read and buy_back, removed by the next sale of
+  // a later game day.
+  'relation public.npc_sales: DELETE,INSERT,SELECT',
   'relation public.operation_receipts: DELETE,INSERT,MAINTAIN,SELECT,UPDATE',
   'relation public.owned_cosmetics: INSERT,SELECT',
   'relation public.owner_state: MAINTAIN,REFERENCES,SELECT,TRIGGER,TRUNCATE',
@@ -594,6 +623,29 @@ describe('release access matrix', () => {
       `function ${AWARDS_OWNER_ONLY.function} service_role EXECUTE`].sort());
   });
 
+  it('keeps feedback and NPC sales owner-read, and a team reply readable by its recipient only (M34)', async () => {
+    const rows = await audit();
+    const clients = (relation: string) => lines(rows.filter(r => relationOf(r.object) === relation && r.grantee !== 'service_role'))
+      .map(l => l.replace(/ md5:[0-9a-f]{32}$/, ''));
+    // Feedback: a signed-in player reads six columns of its own rows (never the account, gladiator, details or answer); visitors nothing.
+    expect(clients('public.feedback')).toEqual([...['answered_at_ms', 'category', 'created_at_ms', 'id', 'status', 'text']
+      .map(c => `column public.feedback.${c} authenticated SELECT`), 'policy public.feedback.owner_read authenticated SELECT permissive']);
+    // The sale snapshots: the owner's gladiator's rows, through the owner_read recipe.
+    expect(clients('public.npc_sales')).toEqual(['policy public.npc_sales.owner_read authenticated SELECT permissive',
+      'relation public.npc_sales authenticated SELECT']);
+    // Messages stay open to visitors and players (OPEN), its policy now filtering a team reply to its recipient.
+    expect(clients('public.game_messages')).toEqual(['policy public.game_messages.player_read anon SELECT permissive',
+      'policy public.game_messages.player_read authenticated SELECT permissive', 'relation public.game_messages anon SELECT',
+      'relation public.game_messages authenticated SELECT']);
+    const policies = await sql`select c.relname as relation, p.polname as policy, pg_get_expr(p.polqual, p.polrelid) as qual from pg_policy p
+      join pg_class c on c.oid=p.polrelid where c.oid in ('public.feedback'::regclass, 'public.npc_sales'::regclass, 'public.game_messages'::regclass) order by 1`;
+    expect(policies.map(p => [p.relation, p.policy])).toEqual([['feedback', 'owner_read'], ['game_messages', 'player_read'], ['npc_sales', 'owner_read']]);
+    for (const p of policies) expect(p.qual, p.relation).toContain('auth.uid()');
+    expect(policies.find(p => p.relation === 'game_messages')!.qual).toMatch(/recipient_id IS NULL\) OR \(recipient_id = \( SELECT auth\.uid\(\)/);
+    // Their identity sequences are the owner's alone.
+    expect(lines(rows.filter(r => r.section === 'sequence' && /^public\.(feedback|npc_sales)_id_seq$/.test(r.object)))).toEqual([]);
+  });
+
   it('defines no SECURITY DEFINER function and pins search_path on every function', async () => {
     const rows = await audit();
     expect(lines(rows.filter(r => ['security-definer', 'search-path'].includes(r.section)))).toEqual([]);
@@ -803,6 +855,15 @@ describe('release access matrix', () => {
       await sql`insert into public.gladiator_titles(gladiator_id,title_id,earned_at_ms,source) values(${gid},'tiro',0,'result')
         on conflict do nothing`;
       await sql`insert into public.item_firsts(gladiator_id,catalog_id,first_at_ms) values(${gid},'sword:1:common',0) on conflict do nothing`;
+      // Patch 1.9 (M34): a feedback row (owner-only by account; its readable columns hold no id, so its text names the account) and a
+      // gear sale's snapshot (owner-only by gladiator) with the sale's receipt.
+      await sql`insert into public.feedback(owner_id,gladiator_id,category,text,created_at_ms) values(${ownerId},${gid},'idea',${'Matrix feedback from ' + ownerId},0)`;
+      const receipt = randomUUID();
+      await sql`insert into public.operation_receipts(owner_id,operation_id,receipt_id,gladiator_id,request,request_digest,result)
+        values(${ownerId},${randomUUID()},${receipt},${gid},'{"kind":"sell-item"}',${Buffer.from('matrix')},'{"ok":true}')`;
+      await sql`insert into public.npc_sales(gladiator_id,item_id,item,price,sold_at_ms,sale_receipt_id)
+        select ${gid},x.id,i.item||jsonb_build_object('id',x.id::text,'reservation',null),10,0,${receipt}
+        from public.item_instances i cross join (select gen_random_uuid() as id) x where i.gladiator_id=${gid} order by i.id desc limit 1`;
       return [activityId];
     };
     const [ownerActivities, otherActivities] = [await seed(owner.gid, owner.owner.id), await seed(other.gid, other.owner.id)];

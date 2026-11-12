@@ -151,12 +151,13 @@ describe('inventory and NPC shops', () => {
   }, 121_000 + 30_000);
   afterAll(() => sql.end());
 
-  it('exposes backend-only buy_shop, sell_item and discard_item RPCs with invoker security', async () => {
+  it('exposes backend-only buy_shop, sell_item, discard_item and buy_back RPCs with invoker security', async () => {
+    // Patch 1.9 (M34): buy_back, the command that returns a sold item, is backend only like the other item commands.
     const rows = await sql`select p.proname, p.prosecdef, p.proconfig,
       has_function_privilege('authenticated',p.oid,'EXECUTE') as authenticated, has_function_privilege('anon',p.oid,'EXECUTE') as anon,
       has_function_privilege('service_role',p.oid,'EXECUTE') as service from pg_proc p join pg_namespace n on n.oid=p.pronamespace
-      where n.nspname='public' and p.proname in ('buy_shop','sell_item','discard_item') order by p.proname`;
-    expect(rows).toEqual(['buy_shop', 'discard_item', 'sell_item'].map(proname => ({ proname, prosecdef: false, proconfig: ['search_path=""'],
+      where n.nspname='public' and p.proname in ('buy_shop','sell_item','discard_item','buy_back') order by p.proname`;
+    expect(rows).toEqual(['buy_back', 'buy_shop', 'discard_item', 'sell_item'].map(proname => ({ proname, prosecdef: false, proconfig: ['search_path=""'],
       authenticated: false, anon: false, service: true })));
     const privateFunctions = await sql`select p.proname, p.prosecdef, p.proconfig,
       has_function_privilege('authenticated',p.oid,'EXECUTE') as authenticated, has_function_privilege('anon',p.oid,'EXECUTE') as anon,
@@ -170,7 +171,7 @@ describe('inventory and NPC shops', () => {
     }
     expect((await anonymous.from('owned_cosmetics').select('*')).error).not.toBeNull();
     const owner = await fighter();
-    for (const name of ['buy_shop', 'sell_item', 'discard_item']) {
+    for (const name of ['buy_shop', 'sell_item', 'discard_item', 'buy_back']) {
       expect((await owner.client.rpc(name, { actor_id: owner.id, operation_id: randomUUID(), input: {} })).error, name).not.toBeNull();
       expect((await anonymous.rpc(name, { actor_id: owner.id, operation_id: randomUUID(), input: {} })).error, name).not.toBeNull();
     }

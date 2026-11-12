@@ -92,7 +92,8 @@ async function published(tab: Tab) {
 async function saveThroughMcp(tab: Tab, expectedVersion: number, document: unknown) {
   const token = randomBytes(32).toString('base64url');
   const handle = createGameInfoHandler({ allowedOrigins: [], verifyMcp: await createMcpVerifier(token),
-    verifyOwner: async () => { throw Error('This fixture uses the MCP credential'); }, edit });
+    verifyOwner: async () => { throw Error('This fixture uses the MCP credential'); }, edit,
+    feedback: async () => { throw Error('This fixture saves Game Info documents only'); } });
   const server = createServer(async (incoming, outgoing) => {
     const chunks = [];
     for await (const chunk of incoming) chunks.push(chunk);

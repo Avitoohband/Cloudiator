@@ -150,7 +150,8 @@ export const RETRY_CODES: readonly ApiErrorCode[] = ['processing', 'unavailable'
 export function marketErrorText(code: ApiErrorCode, kind: MarketKind): string {
   switch (code) {
     case 'processing': return 'The world is processing previous results. Retry shortly.';
-    case 'unavailable': return 'This request could not be confirmed. Retry the same request.';
+    // Patch 1.9: `daily-limit` is feedback's refusal; a market command never answers it, so it reads as unconfirmed.
+    case 'unavailable': case 'daily-limit': return 'This request could not be confirmed. Retry the same request.';
     case 'rate-limited': return 'Too many requests right now. Wait a moment, then retry the same request.';
     case 'unauthenticated': return 'Your session has ended. Sign in again to trade.';
     case 'insufficient-funds': return 'Not enough available gold for this purchase. Held fees cannot be spent.';

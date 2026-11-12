@@ -17,7 +17,8 @@ Deno.test('Edge runtime loads canonical domain modules and enforces the command 
       consumeRateLimit: async () => null, createGladiator: async () => { throw new Error('Untrusted command reached mutation'); },
       market: async () => { throw new Error('Untrusted command reached mutation'); }, setTournamentOptIn: async () => { throw new Error('Untrusted command reached mutation'); },
       changeAppearance: async () => { throw new Error('Untrusted command reached mutation'); }, wearTitle: async () => { throw new Error('Untrusted command reached mutation'); }, readMessage: async () => { throw new Error('Untrusted command reached mutation'); },
-      seeNotifications: async () => { throw new Error('Untrusted command reached mutation'); } },
+      seeNotifications: async () => { throw new Error('Untrusted command reached mutation'); },
+      sendFeedback: async () => { throw new Error('Untrusted command reached mutation'); }, buyBack: async () => { throw new Error('Untrusted command reached mutation'); } },
   });
   if (response.status !== 400 || (await response.json()).code !== 'invalid') throw new Error('Authority rejection failed');
 });
@@ -53,7 +54,7 @@ Deno.test('Edge runtime routes wear-title to its own transaction and refuses an 
   const refuse = async () => { throw new Error('A title wear reached another transaction'); };
   const deps = { allowedOrigins: [], verifyActor: async () => ({ userId: id }),
     database: { plan: refuse, inventory: refuse, market: refuse, consumeRateLimit: async () => null, createGladiator: refuse, setTournamentOptIn: refuse,
-      changeAppearance: refuse, readMessage: refuse, seeNotifications: refuse,
+      changeAppearance: refuse, readMessage: refuse, seeNotifications: refuse, sendFeedback: refuse, buyBack: refuse,
       wearTitle: async (actor: unknown, command: unknown) => { calls.push({ actor, command }); return { ok: true as const, receiptId: id, value: { titleId: 'pathfinder', receivedAtMs: 1 } }; } } };
   const send = (body: unknown) => handleCommand(new Request('http://local', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }), deps);
   const command = { kind: 'wear-title', operationId: id, titleId: 'pathfinder' };

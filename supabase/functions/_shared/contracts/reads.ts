@@ -50,7 +50,44 @@ export type OwnerState = {
   inbox: Inbox;
   /** Patch 1.7 (M28): the title worn now (an id of TITLES_V1) or null; every title held, by `earnedAtMs` then id; the counters the titles measure. */
   wornTitle: string | null; titles: EarnedTitle[]; titleProgress: Record<string, number>;
+  /**
+   * Patch 1.9 (M34): the gear this gladiator sold to the NPCs that it can still buy back: its last 10 gear sales of the current game
+   * day (database time of the read), newest first, leaving out those already bought back (a bought-back sale still takes its place
+   * among the 10). Salvage is never listed. Absent from an older server's owner read.
+   */
+  buyBack: BuyBackEntry[];
 };
+/**
+ * One sale that can be bought back (patch 1.9): `item` exactly as it was sold (same id, level, rarity and stats), `price` the gold it
+ * was sold for and costs to buy back, `soldAtMs` the database time of the sale, `expiresAtMs` the start of the next game day (a game
+ * day is three 80-minute slots, floor(time / 14,400,000)). The `buy-back` command names `saleId`.
+ */
+export type BuyBackEntry = { saleId: number; item: ItemInstance; price: number; soldAtMs: number; expiresAtMs: number };
+/** Patch 1.9: what a piece of feedback is about. */
+export type FeedbackCategory = 'bug' | 'idea' | 'balance' | 'other';
+/**
+ * Patch 1.9: the game details a player may attach to feedback, exactly these keys and nothing else: the patch, the screen (the panel
+ * open), the device (browser and OS, phone or desktop) and the window size, each a string of at most 80 characters, and the client's
+ * send time in ms.
+ */
+export type FeedbackDetails = { patch: string; screen: string; device: string; window: string; sentAtMs: number };
+/** Patch 1.9: new (sent), read (the team opened it), answered (its one answer was sent as a team-reply message). */
+export type FeedbackStatus = 'new' | 'read' | 'answered';
+/**
+ * Patch 1.9: one of the player's own feedback rows, read through row security from `public.feedback`, which serves these six columns
+ * only (`id, category, text, status, created_at_ms, answered_at_ms`). The team's answer arrives as a `team-reply` message whose
+ * `publishedAtMs` equals `answeredAtMs`.
+ */
+export type OwnFeedback = { id: number; category: FeedbackCategory; text: string; status: FeedbackStatus; createdAtMs: number; answeredAtMs: number | null };
+/**
+ * Patch 1.9: one item of the Game Info editors' feedback list (the game-info Edge function, `{ tab: 'feedback', action: 'list' }`):
+ * `gladiatorName` is the name now of the gladiator the account had when it sent the feedback (null without one); `answer` and
+ * `answeredAtMs` are null until it is answered.
+ */
+export type OwnerFeedbackItem = { id: number; category: FeedbackCategory; text: string; details: FeedbackDetails | null; status: FeedbackStatus;
+  createdAtMs: number; gladiatorName: string | null; answer: string | null; answeredAtMs: number | null };
+/** Patch 1.9: the editors' list, newest first, at most 100 items, and how many are new in all (the Feedback tab's badge). */
+export type OwnerFeedbackList = { items: OwnerFeedbackItem[]; newCount: number };
 /** Where an earned title came from: the release back-fill, a result, a season award, a shop, a market buy, an NPC sale, creation or the Game Master's hand (patch 1.7.1). */
 export type TitleSource = 'history' | 'result' | 'season' | 'shop' | 'market' | 'sale' | 'joined' | 'award';
 /** One title a gladiator holds; `detail` names the season place of a season title, null otherwise. */
@@ -80,9 +117,11 @@ export type MessageBlock = { p: string } | { li: string };
 /**
  * One game message from the public `game_messages` table (visible rows only), shown as plain text. `action` names a button the
  * message offers: `change-look` opens the look picker. `publishedAtMs` is the database time of posting (never back-dated).
+ * Patch 1.9 (M34): `team-reply` is the team's answer to one account's feedback; row security shows it to that account only (its
+ * `recipient_id`; every other kind is for everyone), and the owner read's unread count counts it for that account only.
  */
 export type GameMessage = {
-  id: number; kind: 'patch-notes' | 'admin'; title: string; preview: string; body: MessageBlock[]; action: 'change-look' | null; publishedAtMs: number;
+  id: number; kind: 'patch-notes' | 'admin' | 'team-reply'; title: string; preview: string; body: MessageBlock[]; action: 'change-look' | null; publishedAtMs: number;
 };
 /** Whitelisted public projection: never spread an OwnerState into this shape. */
 export type CampLocation = 'orientation' | 'camp' | 'training' | 'rest' | 'arena' | 'tournament'

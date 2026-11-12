@@ -1,7 +1,8 @@
 import { expect, it } from 'vitest';
 import { createClient } from '@supabase/supabase-js';
 import { handleCommand, parseCommand, type CommandDependencies } from '../../supabase/functions/_shared/backend/commands.ts';
-import { createDatabase, prepareBuild, prepareItemSale } from '../../supabase/functions/_shared/backend/database.ts';
+import { createDatabase, prepareBuild, prepareBuyBack, prepareItemSale } from '../../supabase/functions/_shared/backend/database.ts';
+import { statusFor } from '../../supabase/functions/_shared/backend/http.ts';
 import type { ItemInstance, OwnerState } from '../../supabase/functions/_shared/contracts/reads.ts';
 import { CATALOG_V1 } from '../../supabase/functions/_shared/domain/catalog-v1.ts';
 import { RULES_V2 } from '../../supabase/functions/_shared/domain/rules-v2.ts';
@@ -15,7 +16,8 @@ const deps: CommandDependencies = { allowedOrigins: ['http://127.0.0.1:3000'], v
   database: { plan: async () => ({ ok: false, code: 'unavailable' }), inventory: async () => ({ ok: false, code: 'unavailable' }), consumeRateLimit: async () => null, createGladiator: async () => ({ ok: true, receiptId: operationId, value: { gladiatorId: operationId } }),
     market: async () => ({ ok: false, code: 'unavailable' }), setTournamentOptIn: async () => ({ ok: false, code: 'unavailable' }),
     changeAppearance: async () => ({ ok: false, code: 'unavailable' }), wearTitle: async () => ({ ok: false, code: 'unavailable' }), readMessage: async () => ({ ok: false, code: 'unavailable' }),
-    seeNotifications: async () => ({ ok: false, code: 'unavailable' }) } };
+    seeNotifications: async () => ({ ok: false, code: 'unavailable' }),
+    sendFeedback: async () => ({ ok: false, code: 'unavailable' }), buyBack: async () => ({ ok: false, code: 'unavailable' }) } };
 function req(body: unknown, origin = 'http://127.0.0.1:3000') { return new Request('http://local', { method: 'POST',
   headers: { 'Content-Type': 'application/json', Origin: origin }, body: JSON.stringify(body) }); }
 
@@ -26,7 +28,8 @@ it('rejects missing identity before any command executes', async () => {
     database: { plan: async () => { throw new Error('must not execute'); }, inventory: async () => { throw new Error('must not execute'); }, consumeRateLimit: async () => null, createGladiator: async () => { throw new Error('must not execute'); },
       market: async () => { throw new Error('must not execute'); }, setTournamentOptIn: async () => { throw new Error('must not execute'); },
       changeAppearance: async () => { throw new Error('must not execute'); }, wearTitle: async () => { throw new Error('must not execute'); }, readMessage: async () => { throw new Error('must not execute'); },
-      seeNotifications: async () => { throw new Error('must not execute'); } },
+      seeNotifications: async () => { throw new Error('must not execute'); },
+      sendFeedback: async () => { throw new Error('must not execute'); }, buyBack: async () => { throw new Error('must not execute'); } },
   });
   expect(response.status).toBe(401);
   expect(await response.json()).toEqual({ ok: false, code: 'unauthenticated' });
@@ -824,4 +827,144 @@ it('sends no preparation to the build command when the change is locked', async 
   expect(await database.plan(actor, queueBuild({ allocation: withPoints({ strength: 1, agility: 3 }) }))).toEqual({ ok: false, code: 'invalid' });
   const queued = sent.filter(request => request.path === '/rest/v1/rpc/queue_build').map(request => (request.body as { input: { prepared: unknown } }).input.prepared);
   expect(queued).toEqual([null, null]);
+});
+
+// Patch 1.9 (M34): feedback and buy back. `send-feedback` carries a category, the text and the optional game details, nothing else;
+// `buy-back` names one of the caller's own sales. Both go through the command endpoint with receipts and the rate limit.
+const DETAILS = { patch: '1.9', screen: 'Arena', device: 'Chrome 131, Windows, desktop', window: '1920 x 1080', sentAtMs: 1_791_590_400_000 };
+const feedbackCommand = { kind: 'send-feedback' as const, operationId, category: 'bug' as const, text: 'The Arena timer shows a wrong number.', details: DETAILS };
+const buyBackCommand = { kind: 'buy-back' as const, operationId, saleId: 12 };
+
+it('accepts send-feedback with a category, 10 to 1,000 characters after trimming and exactly the five game details or none', () => {
+  expect(parseCommand(feedbackCommand)).toEqual(feedbackCommand);
+  expect(parseCommand({ ...feedbackCommand, details: null })).toEqual({ ...feedbackCommand, details: null });
+  for (const category of ['bug', 'idea', 'balance', 'other']) expect(parseCommand({ ...feedbackCommand, category }), category).not.toBeNull();
+  // Length is counted after trimming, in characters (a code point each), from 10 to 1,000; the text travels as written.
+  for (const text of ['  ten chars!  ', 'x'.repeat(1000), '😀'.repeat(1000), ` ${'y'.repeat(1000)}\n`, 'Line one.\nLine two.'])
+    expect(parseCommand({ ...feedbackCommand, text }), text.slice(0, 20)).toEqual({ ...feedbackCommand, text });
+  for (const text of ['', '         ', 'nine char', ' nine char ', 'x'.repeat(1001), '😀'.repeat(1001), 'ten chars\u0000!', 42, null, undefined, ['ten characters'], {}])
+    expect(parseCommand({ ...feedbackCommand, text }), JSON.stringify(text)?.slice(0, 20)).toBeNull();
+  for (const category of ['Bug', 'feature', '', null, undefined, 1]) expect(parseCommand({ ...feedbackCommand, category }), String(category)).toBeNull();
+  // The details: exactly patch, screen, device, window (strings of at most 80 characters) and sentAtMs (a whole time from 0), or null.
+  const { sentAtMs: _sent, ...withoutTime } = DETAILS;
+  for (const details of [{ ...DETAILS, patch: 'p'.repeat(80), screen: '', device: '😀'.repeat(80) }, { ...DETAILS, sentAtMs: 0 }])
+    expect(parseCommand({ ...feedbackCommand, details }), JSON.stringify(details).slice(0, 40)).not.toBeNull();
+  for (const details of [undefined, {}, [], 'Arena', 1, withoutTime, { ...DETAILS, email: 'a@b.test' }, { ...DETAILS, patch: 'p'.repeat(81) },
+    { ...DETAILS, device: '😀'.repeat(81) }, { ...DETAILS, screen: 3 }, { ...DETAILS, window: null }, { ...DETAILS, sentAtMs: -1 }, { ...DETAILS, sentAtMs: 1.5 },
+    { ...DETAILS, sentAtMs: 2 ** 53 }, { ...DETAILS, sentAtMs: '1' }, { ...DETAILS, screen: 'nul\u0000' }])
+    expect(parseCommand({ ...feedbackCommand, details }), JSON.stringify(details)?.slice(0, 60)).toBeNull();
+  const { details: _details, ...withoutDetails } = feedbackCommand;
+  expect(parseCommand(withoutDetails)).toBeNull();
+  // No account, gladiator or status rides along: the sender is the verified session's.
+  for (const extra of [{ ownerId: operationId }, { gladiatorId: operationId }, { status: 'answered' }, { answer: 'x' }, { extra: 1 }])
+    expect(parseCommand({ ...feedbackCommand, ...extra }), JSON.stringify(extra)).toBeNull();
+  expect(parseCommand({ ...feedbackCommand, operationId: 'bad' })).toBeNull();
+});
+
+it('accepts buy-back with a positive safe integer sale id and nothing else', () => {
+  expect(parseCommand(buyBackCommand)).toEqual(buyBackCommand);
+  expect(parseCommand({ ...buyBackCommand, saleId: Number.MAX_SAFE_INTEGER })).not.toBeNull();
+  for (const saleId of [0, -1, 1.5, '12', null, undefined, true, [], {}, NaN, Infinity, 2 ** 53])
+    expect(parseCommand({ ...buyBackCommand, saleId }), String(saleId)).toBeNull();
+  for (const extra of [{ itemId: operationId }, { price: 1 }, { gladiatorId: operationId }, { quantity: 1 }])
+    expect(parseCommand({ ...buyBackCommand, ...extra }), JSON.stringify(extra)).toBeNull();
+  expect(parseCommand({ kind: 'sell-item', operationId, itemId: operationId, quantity: 1, saleId: 1 })).toBeNull();
+});
+
+it('answers the feedback daily limit as 409, like every other business refusal', () => {
+  expect(statusFor('daily-limit')).toBe(409);
+  expect(statusFor('expired')).toBe(409);
+  expect(statusFor('not-found')).toBe(404);
+});
+
+it('routes send-feedback and buy-back to their own database calls with the verified actor and the parsed command only', async () => {
+  const calls: unknown[] = [];
+  const never = (what: string) => async () => { throw new Error(`feedback and buy back must not reach ${what}`); };
+  const answers = [{ ok: true as const, receiptId: operationId, value: { feedbackId: 7, leftToday: 4 } }, { ok: false as const, code: 'daily-limit' as const },
+    { ok: true as const, receiptId: operationId, value: { itemId: operationId, moneyDebit: 39 } }, { ok: false as const, code: 'expired' as const }];
+  const routed: CommandDependencies = { ...deps, database: { ...deps.database, plan: never('planning'), inventory: never('the inventory'), market: never('the market'),
+    createGladiator: never('creation'), setTournamentOptIn: never('the opt-in'), changeAppearance: never('a look change'), wearTitle: never('a title'),
+    readMessage: never('a read mark'), seeNotifications: never('notifications'),
+    sendFeedback: async (actor, command) => { calls.push({ actor, command }); return answers.shift() as never; },
+    buyBack: async (actor, command) => { calls.push({ actor, command }); return answers.shift() as never; } } };
+  const sent = await handleCommand(req(feedbackCommand), routed);
+  expect([sent.status, await sent.json()]).toEqual([200, { ok: true, receiptId: operationId, value: { feedbackId: 7, leftToday: 4 } }]);
+  const limited = await handleCommand(req(feedbackCommand), routed);
+  expect([limited.status, await limited.json()]).toEqual([409, { ok: false, code: 'daily-limit' }]);
+  const bought = await handleCommand(req(buyBackCommand), routed);
+  expect([bought.status, await bought.json()]).toEqual([200, { ok: true, receiptId: operationId, value: { itemId: operationId, moneyDebit: 39 } }]);
+  const expired = await handleCommand(req(buyBackCommand), routed);
+  expect([expired.status, await expired.json()]).toEqual([409, { ok: false, code: 'expired' }]);
+  const actor = { userId: operationId };
+  expect(calls).toEqual([{ actor, command: feedbackCommand }, { actor, command: feedbackCommand }, { actor, command: buyBackCommand }, { actor, command: buyBackCommand }]);
+  // Extra authority or a bad shape is refused at the boundary and reaches nothing.
+  for (const bad of [{ ...feedbackCommand, ownerId: operationId }, { ...feedbackCommand, text: 'short' }, { ...buyBackCommand, saleId: 0 }]) {
+    const refused = await handleCommand(req(bad), routed);
+    expect([refused.status, await refused.json()]).toEqual([400, { ok: false, code: 'invalid' }]);
+  }
+  expect(calls).toHaveLength(4);
+  // Both are charged against the command rate limit before any parsing.
+  const rate = { ...routed, database: { ...routed.database, consumeRateLimit: async () => 500 } };
+  for (const command of [feedbackCommand, buyBackCommand]) {
+    const answer = await handleCommand(req(command), rate);
+    expect([answer.status, await answer.json()]).toEqual([429, { ok: false, code: 'rate-limited', retryAfterMs: 500 }]);
+  }
+  expect(calls).toHaveLength(4);
+});
+
+it('sends feedback to the send_feedback RPC with the actor, the canonical operation id and the command only', async () => {
+  const sent: Sent[] = [];
+  const stored = { ok: true, receiptId: 'r1', value: { feedbackId: 3, leftToday: 2 } };
+  const database = createDatabase(backend(() => json(stored), sent));
+  const id = OPERATION.toLowerCase();
+  expect(await database.sendFeedback({ userId: ACTOR }, { ...feedbackCommand, operationId: OPERATION })).toEqual(stored);
+  expect(sent).toEqual([{ method: 'POST', path: '/rest/v1/rpc/send_feedback', search: '',
+    body: { actor_id: ACTOR, operation_id: id, input: { command: { ...feedbackCommand, operationId: id } } } }]);
+  const failing = createDatabase(backend(() => json({ code: 'XX000', message: 'secret database detail', details: null, hint: null }, 500), []));
+  await expect(failing.sendFeedback({ userId: ACTOR }, feedbackCommand)).rejects.toThrow('feedback-unavailable');
+  const response = await handleCommand(req(feedbackCommand), { ...deps, database: { ...deps.database, sendFeedback: failing.sendFeedback } });
+  expect([response.status, await response.json()]).toEqual([503, { ok: false, code: 'unavailable' }]);
+});
+
+/** A sold Sword L5 rare (sell value 39) in the owner read's buy-back list, beside the starter loadout (historical strength 28). */
+const soldSword: ItemInstance = { ...itemOf('sword:5:rare', 'e5d0c1a2-3b4c-4d5e-8f60-718293a4b5c6'), origin: 'expedition' };
+const sellerState: OwnerState = { ...buyerState, buyBack: [{ saleId: 12, item: soldSword, price: 39, soldAtMs: 1_791_590_400_000, expiresAtMs: 1_791_590_400_000 + 3_600_000 }] };
+
+it('prepares a buy back from the owner read: the sold item and the historical strength it would give', () => {
+  // Sword L5 rare, 4 x 11.7 = 46.8, replaces the starter sword's 24 beside light armor's 4.
+  expect(prepareBuyBack(buyBackCommand, sellerState)).toEqual({ itemId: soldSword.id, baselinePeakStrength: 28, nextPeakStrength: 50.8 });
+  // A weaker item than the loadout keeps the baseline.
+  const weak = { ...sellerState, buyBack: [{ ...sellerState.buyBack[0], item: itemOf('sword:1:common', soldSword.id) }] };
+  expect(prepareBuyBack(buyBackCommand, weak)).toEqual({ itemId: soldSword.id, baselinePeakStrength: 28, nextPeakStrength: 28 });
+  // A sale the list does not hold (another gladiator's, expired or unknown) has no preparation; SQL answers from the sale.
+  expect(prepareBuyBack({ ...buyBackCommand, saleId: 13 }, sellerState)).toBeNull();
+  expect(prepareBuyBack(buyBackCommand, { ...sellerState, buyBack: [] })).toBeNull();
+});
+
+it('sends a buy back to the buy_back RPC after reading the owner state, with the preparation, and maps a deadlock to processing', async () => {
+  const sent: Sent[] = [];
+  let owner: unknown[] = [{ state: sellerState }];
+  let answer = () => json({ ok: true, receiptId: 'r1', value: { itemId: soldSword.id, moneyDebit: 39 } });
+  const database = createDatabase(backend(name => name === 'owner_state' ? json(owner) : answer(), sent));
+  const id = OPERATION.toLowerCase();
+  const command = { ...buyBackCommand, operationId: OPERATION };
+  const rpc = (prepared: unknown) => ({ method: 'POST', path: '/rest/v1/rpc/buy_back', search: '',
+    body: { actor_id: ACTOR, operation_id: id, input: { command: { ...buyBackCommand, operationId: id }, prepared } } });
+  expect(await database.buyBack({ userId: ACTOR }, command)).toEqual({ ok: true, receiptId: 'r1', value: { itemId: soldSword.id, moneyDebit: 39 } });
+  expect(sent.map(r => [r.method, r.path, r.search])).toEqual([['GET', '/rest/v1/owner_state', `?select=state&owner_id=eq.${ACTOR}`],
+    ['POST', '/rest/v1/rpc/buy_back', '']]);
+  expect(sent[1]).toEqual(rpc({ itemId: soldSword.id, baselinePeakStrength: 28, nextPeakStrength: 50.8 }));
+  // Without a character, or with an older owner read that has no list, the call still reaches SQL (a committed receipt replays first).
+  sent.length = 0; owner = [];
+  await database.buyBack({ userId: ACTOR }, command);
+  expect(sent[1]).toEqual(rpc(null));
+  sent.length = 0; owner = [{ state: { ...sellerState, buyBack: undefined } }];
+  await database.buyBack({ userId: ACTOR }, command);
+  expect(sent[1]).toEqual(rpc(null));
+  // A deadlock or serialization abort rolled back whole: a retryable processing. Any other error is unavailable.
+  owner = [{ state: sellerState }];
+  answer = () => json({ code: '40P01', message: 'deadlock detected', details: null, hint: null }, 500);
+  expect(await database.buyBack({ userId: ACTOR }, command)).toEqual({ ok: false, code: 'processing', retryAfterMs: 1000 });
+  answer = () => json({ code: 'XX000', message: 'secret database detail', details: null, hint: null }, 500);
+  await expect(database.buyBack({ userId: ACTOR }, command)).rejects.toThrow('buy-back-unavailable');
 });

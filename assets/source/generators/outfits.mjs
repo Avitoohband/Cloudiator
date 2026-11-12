@@ -178,7 +178,6 @@ function face(c, T, skin, state, figure = 'male') {
   else c.set(...P(3.4, 3.3), female ? 'crimson2' : skin.deep);
 }
 
-
 // ---------------------------------------------------------------- cloth
 /** Kilt/loincloth with pleats; length is the fraction of the thigh covered. */
 export function kilt(r = RAMP.gray, length = 0.55) {

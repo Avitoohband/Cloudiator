@@ -824,6 +824,27 @@ test.describe('the whole-trip replay', () => {
       expect(await drawn(page)).toMatchObject({ map: 'woodland', asleep: false });
     });
 
+    test('loads the gladiators\' art once: the camp\'s scene waits for the expedition\'s, with no "Texture key already in use" (Task 21)', async ({ page }) => {
+      // Final review log noise (mobile trip-replay runs): the camp's scene began loading the gladiators' atlas while the expedition's
+      // scene was still loading it into the same game, and Phaser refused the second copy with that console error. The atlas is held
+      // for 1.5 s here, so the two loads overlap whenever the camp's scene starts before the expedition's art is in.
+      const errors: string[] = [];
+      page.on('console', message => { if (/Texture key already in use/.test(message.text())) errors.push(message.text()); });
+      let atlas = 0;
+      await page.route('**/assets/actors/gladiators.*.png', async route => {
+        atlas += 1;
+        await new Promise(resolve => setTimeout(resolve, 1_500));
+        await route.continue();
+      });
+      await view.open(page, view.page('woodland', '&play=trip'));
+      await view.planned(page);
+      await view.sceneReady(page);
+      await expect.poll(async () => (await drawn(page)).camp?.ready, { timeout: 30_000 }).toBe(true);
+      await nextFrames(page);
+      expect(errors).toEqual([]);
+      expect(atlas, 'one request for the gladiators\' atlas').toBe(1);
+    });
+
     test.describe('with reduced motion', () => {
       test.use({ reducedMotion: 'reduce' });
 

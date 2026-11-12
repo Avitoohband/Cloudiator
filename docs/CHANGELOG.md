@@ -46,6 +46,7 @@ Project folders under `D:\Avi\Projects\Animation\Cloudiator\`.
 - My gladiator and gladiator cards show the extra damage of a critical hit, and how much renown armor and weapons add in the Arena.
 - Sleeping gladiators take off their armour.
 - Each Wiki topic shows its own YouTube video guide.
+- Phones scroll a tapped item's card into view, plus small fixes to the inventory, shops, messages, Settings and the Wiki list.
 
 ### Planned for 1.9 (added 2026-11-12, not built yet)
 

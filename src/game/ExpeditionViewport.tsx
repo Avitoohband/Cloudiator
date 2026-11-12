@@ -117,6 +117,8 @@ export function ExpeditionViewport({ environment, state, look, bridge, reducedMo
     (async () => {
       const [P, assets, expedition] = await Promise.all([import('phaser'), import('./assets'), import('./expedition-scene')]);
       if (cancelled || !host.current) return;
+      /** The expedition scene has loaded its art (the gladiators' atlas among it) into the game's one texture manager. */
+      let expeditionArt = false;
       const created = expedition.createExpeditionScene(P, {
         manifest: assets.loadAssetManifest(),
         atlasData: assets.ATLAS_DATA,
@@ -127,7 +129,7 @@ export function ExpeditionViewport({ environment, state, look, bridge, reducedMo
         bridge,
         reducedMotion: reduced.current,
         wander: () => wanderRef.current,
-        onReady: () => { if (!cancelled) setStatus({ kind: 'ready' }); },
+        onReady: () => { expeditionArt = true; if (!cancelled) setStatus({ kind: 'ready' }); },
         onReturned: next => { if (!cancelled) setReturned(next); },
         onError: (reason, message) => fail(reason, reason === 'assets'
           ? `The expedition art could not load (${message}). The progress, the activity log and the result below still work.`
@@ -168,10 +170,12 @@ export function ExpeditionViewport({ environment, state, look, bridge, reducedMo
           phaser.scene.add(module.TRIP_CAMP_SCENE, trip.scene, true);
         }).catch(() => undefined);
       };
-      // Before each frame: the camp's scene runs while a camp chapter plays (once its art is in), the expedition's otherwise.
+      // Before each frame: the camp's scene runs while a camp chapter plays (once its art is in), the expedition's otherwise. The
+      // camp's scene joins once the expedition's art is in (Task 21): it reuses the gladiators' atlas, and loading it while the
+      // expedition's scene still was made Phaser refuse the second copy ("Texture key already in use: gladiators").
       const choose = () => {
         const read = vignetteRef.current;
-        if (read && !campAsked) addCamp();
+        if (read && !campAsked && expeditionArt) addCamp();
         const wanted = !!read && !!tripScene && read() !== null && !!campHandle.current?.ready();
         const [run, rest] = wanted ? [tripScene, created.scene] : [created.scene, tripScene];
         if (rest?.sys.isActive()) phaser.scene.sleep(rest);

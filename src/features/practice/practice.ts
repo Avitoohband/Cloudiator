@@ -50,7 +50,10 @@ export function dummyPoints(level: number): number {
 /** Levels 5 and 10 open the better gear tiers. */
 export const maxGearLevel = (level: number): 1 | 5 | 10 => (level >= 10 ? 10 : level >= 5 ? 5 : 1);
 
-export const levelRange = (): { min: 1; max: number } => ({ min: 1, max: RULES.attributes.maximumLevel });
+/** The top level planned for 2.1 content (the rules' own maximumLevel is a placeholder). */
+export const PRACTICE_MAX_LEVEL = 30;
+export const levelRange = (): { min: 1; max: number } => ({ min: 1, max: PRACTICE_MAX_LEVEL });
+const clampLevel = (level: number): number => Math.min(PRACTICE_MAX_LEVEL, Math.max(1, Math.round(level)));
 
 /** A preset's points at a level: each share's floor, then one more to each of the largest shares in turn (the listed order breaks ties). */
 function splitPoints(preset: Exclude<DummyPreset, 'custom'>, level: number): Attributes {
@@ -63,7 +66,8 @@ function splitPoints(preset: Exclude<DummyPreset, 'custom'>, level: number): Att
   return out;
 }
 
-export function presetSetup(preset: DummyPreset, level: number): DummySetup {
+export function presetSetup(preset: DummyPreset, rawLevel: number): DummySetup {
+  const level = clampLevel(rawLevel);
   const gearLevel = maxGearLevel(level);
   if (preset === 'custom') {
     return { preset, level, stance: 'balanced', allocations: splitPoints('balanced', level), gear: { ...DUMMY_PRESETS.balanced.gear }, gearLevel };
@@ -73,7 +77,8 @@ export function presetSetup(preset: DummyPreset, level: number): DummySetup {
 }
 
 /** A new level: the gear level is clamped; a preset re-applies its split at the new total, Custom keeps its points. */
-export function withLevel(setup: DummySetup, level: number): DummySetup {
+export function withLevel(setup: DummySetup, rawLevel: number): DummySetup {
+  const level = clampLevel(rawLevel);
   const gearLevel = Math.min(setup.gearLevel, maxGearLevel(level)) as 1 | 5 | 10;
   return { ...setup, level, gearLevel, allocations: setup.preset === 'custom' ? { ...setup.allocations } : splitPoints(setup.preset, level) };
 }

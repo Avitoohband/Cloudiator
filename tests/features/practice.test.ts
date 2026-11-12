@@ -8,7 +8,7 @@ import { deriveStats } from '@domain/stats';
 import type { PublicBuild, PublicGear } from '@/lib/api/reads';
 import { cardSnapshot } from '@/features/character/profile-card';
 import {
-  DUMMY_LOOK, DUMMY_NAME, DUMMY_PRESETS, cardFighter, comparisonRows, dummyFighter, dummyPoints, levelRange, maxGearLevel,
+  DUMMY_LOOK, DUMMY_NAME, DUMMY_PRESETS, PRACTICE_MAX_LEVEL, cardFighter, comparisonRows, dummyFighter, dummyPoints, levelRange, maxGearLevel,
   pointsLeft, practiceSeed, presetSetup, runPractice, withLevel, type DummySetup, type PracticeSide,
 } from '@/features/practice/practice';
 
@@ -28,7 +28,16 @@ describe('dummy points and gear level', () => {
     expect([1, 4, 5, 9, 10, 20].map(maxGearLevel)).toEqual([1, 1, 5, 5, 10, 10]);
   });
   it('has the rules maximum level', () => {
-    expect(levelRange()).toEqual({ min: 1, max: RULES_V1.attributes.maximumLevel });
+    expect(levelRange()).toEqual({ min: 1, max: 30 });
+    expect(PRACTICE_MAX_LEVEL).toBe(30);
+    expect(dummyPoints(30)).toBe(130);
+  });
+  it('clamps the level into 1 to 30', () => {
+    expect(presetSetup('tank', 0).level).toBe(1);
+    expect(presetSetup('tank', 99).level).toBe(30);
+    expect(withLevel(presetSetup('tank', 5), -3).level).toBe(1);
+    expect(withLevel(presetSetup('tank', 5), 31)).toMatchObject({ level: 30, gearLevel: 5 });
+    expect(pointsLeft(withLevel(presetSetup('tank', 5), 31))).toBe(0);
   });
 });
 

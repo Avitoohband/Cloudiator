@@ -3,15 +3,17 @@
 // stored or counted (no rating, record, renown or XP).
 import type { Attributes, ClassId, EquipmentSlot, Stance } from '@contracts/commands';
 import type { BattleLog } from '@contracts/events';
-import type { Appearance } from '@domain/appearance';
+import type { OwnerState, PublicActor } from '@contracts/reads';
+import { validAppearance, type Appearance } from '@domain/appearance';
 import { CATALOG_V1 } from '@domain/catalog-v1';
 import { criticalProbability, hitProbability, makeFighter, simulateBattle } from '@domain/combat';
 import { trainingCap } from '@domain/economy';
 import { RULES_V1 } from '@domain/rules-v1';
 import { RULES_V2 } from '@domain/rules-v2';
-import type { FighterSnapshot, Rules } from '@domain/types';
+import { deriveStats } from '@domain/stats';
+import type { BuildSnapshot, FighterSnapshot, Rules } from '@domain/types';
 import type { PublicBuild, PublicGear } from '../../lib/api/reads';
-import { cardSnapshot } from '../character/profile-card';
+import { cardSnapshot, ownBuild } from '../character/profile-card';
 import { GEAR_SLOTS } from '../inventory/gear';
 
 export type DummyPreset = 'balanced' | 'tank' | 'glass-cannon' | 'custom';
@@ -91,24 +93,40 @@ export const pointsLeft = (setup: DummySetup): number =>
 const NEUTRAL = 'neutral' as ClassId;
 const NEUTRAL_RULES: Rules = { ...RULES, classes: { ...RULES.classes, [NEUTRAL]: { strength: 1, agility: 1, vitality: 1, endurance: 1, precision: 1 } } };
 
-/** The fighter of a catalog-common build with no class; Arena context. */
-export function dummyFighter(setup: DummySetup): FighterSnapshot {
-  const twoHanded = setup.gear.weapon !== null && CATALOG_V1.items[`${setup.gear.weapon}:${setup.gearLevel}:common`]?.hands === 2;
+/** Whether the setup's weapon takes both hands (its off hand is then empty). */
+export const twoHanded = (setup: Pick<DummySetup, 'gear' | 'gearLevel'>): boolean =>
+  setup.gear.weapon !== null && CATALOG_V1.items[`${setup.gear.weapon}:${setup.gearLevel}:common`]?.hands === 2;
+
+/** The dummy's build as the rules read it: the neutral class, catalog-common gear at the gear level, no off hand under a two-handed weapon. */
+function dummySnapshot(setup: DummySetup): BuildSnapshot {
+  const both = twoHanded(setup);
   const piece = (slot: DummySlot): PublicGear | null => {
-    const template = slot === 'offHand' && twoHanded ? null : setup.gear[slot];
+    const template = slot === 'offHand' && both ? null : setup.gear[slot];
     const item = template === null ? undefined : CATALOG_V1.items[`${template}:${setup.gearLevel}:common`];
     return item ? { catalogId: item.id, catalogVersion: CATALOG_V1.version, tier: item.tier, rarity: item.rarity, stats: structuredClone(item.stats) } : null;
   };
   const equipment = Object.fromEntries(GEAR_SLOTS.map(slot => [slot, piece(slot as DummySlot & EquipmentSlot)])) as PublicBuild['equipment'];
-  const snapshot = cardSnapshot(NEUTRAL, { stance: setup.stance, allocations: { ...setup.allocations }, equipment });
-  const fighter = makeFighter(snapshot, 'arena', NEUTRAL_RULES);
+  return cardSnapshot(NEUTRAL, { stance: setup.stance, allocations: { ...setup.allocations }, equipment });
+}
+
+/** The fighter of a catalog-common build with no class; Arena context. */
+export function dummyFighter(setup: DummySetup): FighterSnapshot {
+  const fighter = makeFighter(dummySnapshot(setup), 'arena', NEUTRAL_RULES);
   return { ...fighter, classId: null, attributes: { ...fighter.attributes }, equipmentSilhouettes: [...fighter.equipmentSilhouettes] };
+}
+
+/** What the dummy carries, what it can carry, and the share of its strength it fights with (Task 18: the dialog's overload line). */
+export function dummyLoad(setup: DummySetup): { load: number; capacity: number; efficiency: number } {
+  const derived = deriveStats(dummySnapshot(setup), NEUTRAL_RULES);
+  return { load: derived.load, capacity: derived.loadCapacity, efficiency: derived.efficiency };
 }
 
 /** A published build as the Arena fights it. */
 export const cardFighter = (classId: ClassId, build: PublicBuild): FighterSnapshot => makeFighter(cardSnapshot(classId, build), 'arena', RULES);
 
 export type PracticeSide = { gladiatorId: string | null; name: string; look: Appearance | null; snapshot: FighterSnapshot };
+/** One practice fight as the result shows it (Task 18; Task 19's spar is `spar`): its two sides, its roll and its log. */
+export type PracticeFight = { kind: 'dummy' | 'spar'; you: PracticeSide; opponent: PracticeSide; seed: string; log: BattleLog };
 
 /** One practice fight; the sides are told apart by their participant ids, so a mirror (one gladiator twice) works. */
 export function runPractice(you: PracticeSide, opponent: PracticeSide, seed: string): BattleLog {
@@ -125,6 +143,25 @@ export function practiceSeed(): string {
 export const DUMMY_NAME = 'Training dummy';
 /** A bald, cream-clothed man in the straw-coloured palette tone (palette indices only: Cream in `CLOTH_COLOURS`, Olive in `SKIN_TONES`). */
 export const DUMMY_LOOK: Appearance = { body: 'male', hair: 'bald', skin: 2, hairColor: 0, cloth: 7 };
+
+/** The owner's side: its current build (what My gladiator shows) under the Arena's rules, and its own look. */
+export const ownSide = (owner: OwnerState): PracticeSide => ({
+  gladiatorId: owner.gladiatorId, name: owner.name, look: owner.appearance, snapshot: cardFighter(owner.currentBuild.classId, ownBuild(owner)),
+});
+/**
+ * A copy of a gladiator from its card (Task 19, Spar a copy): the build the card shows (points, gear, stance) under the Arena's rules, and
+ * the gladiator's look, named "<name> (copy)". Your own card makes a mirror: both sides then share one gladiator id.
+ */
+export const copySide = (actor: Pick<PublicActor, 'gladiatorId' | 'name' | 'classId' | 'appearance'>, build: PublicBuild): PracticeSide => ({
+  gladiatorId: actor.gladiatorId, name: `${actor.name} (copy)`, look: validAppearance(actor.appearance) ? actor.appearance : null,
+  snapshot: cardFighter(actor.classId, build),
+});
+/** The training dummy's side; it has no gladiator. */
+export const dummySide = (setup: DummySetup): PracticeSide => ({ gladiatorId: null, name: DUMMY_NAME, look: DUMMY_LOOK, snapshot: dummyFighter(setup) });
+/** A new roll of a practice fight between two sides (Fight, and Fight again with the same sides). */
+export function practiceFight(kind: PracticeFight['kind'], you: PracticeSide, opponent: PracticeSide, seed = practiceSeed()): PracticeFight {
+  return { kind, you, opponent, seed, log: runPractice(you, opponent, seed) };
+}
 
 const secondsText = (ms: number) => `${Math.round(ms / 10) / 100} s`;
 const percent = (value: number) => `${Math.round(value * 100)}%`;

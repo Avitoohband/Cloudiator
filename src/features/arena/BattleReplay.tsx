@@ -32,7 +32,10 @@ import { loadLooks, lookIdsFor, type LookMap, type LookSource } from '../../game
 import { prefersReducedMotion } from '../../game/webgl';
 import { ReplayBar, type BarStep } from '../replay/ReplayBar';
 import { COMPACT_QUERY } from '../shell/rail-reveal';
-import { RESULT_HINT, againLabel, boutEyebrow, chapterLabel, counterText, nextLabel, rewardChips, upNextText, verdictText } from '../bouts/bout-text';
+import {
+  FIGHT_AGAIN, PRACTICE_CHIP, PRACTICE_NOTE, PRACTICE_RESULT, PRACTICE_TAG, RESULT_HINT, againLabel, boutEyebrow, chapterLabel, counterText, nextLabel, rewardChips,
+  upNextText, verdictText,
+} from '../bouts/bout-text';
 import { nextQueuePage, nextTarget, previousTarget, queueEntries, type ReplayQueue, type StepTarget } from '../bouts/bout-queue';
 import type { BoutList } from '../bouts/bouts-store';
 import styles from './BattleReplay.module.css';
@@ -73,6 +76,12 @@ export type ReplayNav = {
 export type ReplayChapters = { labels: readonly string[]; current: number; select(index: number): void };
 /** The scene's way back, named for where it goes ("My bouts"): the end card offers it at the end of the queue. */
 export type ReplayBack = { label: string; go(): void };
+/**
+ * A practice fight (Patch 1.9 Task 18): fought in the browser, kept nowhere. It replaces the eyebrow, the end card's eyebrow, chips and
+ * actions (↺ Watch again, ⚔ Fight again, then `change`: "Change dummy", or a spar's way back) and the Result card's rewards line, tags the
+ * title "Practice — not saved", calls a fighter with no class a dummy, and shows no rewards and no "kept until".
+ */
+export type ReplayPractice = { eyebrow: string; again(): void; change: { label: string; go(): void } };
 
 const CREATURES = (rawManifest as unknown as { actors: { creatures: Creature[] } }).actors.creatures;
 let activeLoops = 0;
@@ -109,6 +118,8 @@ function IconText({ text }: { text: string }) {
   const space = text.indexOf(' ');
   return space < 0 ? <>{text}</> : <><span aria-hidden="true">{text.slice(0, space)}</span>{text.slice(space)}</>;
 }
+/** A label that may start with an icon ("← Camp") or not ("Change dummy"): only a leading icon is hidden from its name. */
+const LabelText = ({ text }: { text: string }) => (/^[^\p{L}\p{N}\s]+\s/u.test(text) ? <IconText text={text} /> : <>{text}</>);
 
 export type HeadingLevel = 1 | 2 | 3 | 4 | 5 | 6;
 /** A heading at `level`; its sections use the next level (at most h6). */
@@ -158,7 +169,8 @@ function useReplayTime(clock: DisplayClock | null | undefined, view: ReplayView,
  * is no next bout; `takeFocus` moves the focus to ⏸ once the replay has loaded, when it is still on the scene's back button or
  * nowhere; `league` is a tournament bracket's (its eyebrow names it, and a bracket's bouts show no rewards).
  */
-export function BattleReplay({ view, bridge, headingLevel = 1, clock, viewerId, looks, titles, onRetry, chapters = null, nav = null, back = null, takeFocus = false, league = null, endActions = 'navigation' }: {
+export function BattleReplay({ view, bridge, headingLevel = 1, clock, viewerId, looks, titles, onRetry, chapters = null, nav = null, back = null, takeFocus = false, league = null, endActions = 'navigation',
+  practice = null }: {
   view: ReplayView; bridge?: SceneBridge; headingLevel?: HeadingLevel; clock?: DisplayClock | null; viewerId?: string | null;
   /**
    * Where the fighters' looks come from: the looks the caller already holds (its world actors) and a reader for the rest. The
@@ -177,6 +189,8 @@ export function BattleReplay({ view, bridge, headingLevel = 1, clock, viewerId, 
   league?: LeagueId | null;
   /** Standalone pages keep bar/keyboard chapters, but their end card offers only Again. */
   endActions?: 'again' | 'navigation';
+  /** A practice fight's words and actions (Patch 1.9 Task 18); null for every fight the server ran. */
+  practice?: ReplayPractice | null;
 }) {
   const now = useReplayTime(clock, view);
   if (view.kind === 'summary') return <SavedOutcome summary={view.summary} level={headingLevel} />;
@@ -194,7 +208,7 @@ export function BattleReplay({ view, bridge, headingLevel = 1, clock, viewerId, 
   // The whole view's fighters (every encounter of an expedition), whichever battles are shown yet: read once for the replay.
   return <ReplayBattles battle={battles[selected]} summary={summary} keptUntil={keptUntil} bridge={bridge} level={headingLevel} viewerId={viewerId}
     looks={looks} titles={titles} lookIds={lookIdsFor(...view.battles.map(b => b.log))} chapters={chapters} nav={nav ?? (chapters ? chaptersNav(chapters) : null)}
-    back={back} takeFocus={takeFocus} league={league} last={selected === battles.length - 1} endActions={endActions} />;
+    back={back} takeFocus={takeFocus} league={league} last={selected === battles.length - 1} endActions={endActions} practice={practice} />;
 }
 
 /** A chapters-only nav: ⏮ and ⏭ step through the chapters, and the last one has no next. */
@@ -343,7 +357,7 @@ function ActivityChapters({ view, clock, queue, activityId, stageId, onChapter, 
 function ReplayBattles({ battle, looks, lookIds, ...rest }: {
   battle: ReplayBattle; summary: ActivitySummary | null; keptUntil: number | null; bridge?: SceneBridge; level: HeadingLevel; viewerId?: string | null;
   looks?: LookSource; titles?: TitleLookup; lookIds: readonly string[]; chapters: ReplayChapters | null; nav: ReplayNav | null; back: ReplayBack | null; takeFocus: boolean;
-  league: LeagueId | null; last: boolean; endActions: 'again' | 'navigation';
+  league: LeagueId | null; last: boolean; endActions: 'again' | 'navigation'; practice: ReplayPractice | null;
 }) {
   // One look read for the whole replay: choosing another chapter of the same view reuses it and never waits again.
   const settledLooks = useSettledLooks(lookIds, looks);
@@ -376,7 +390,8 @@ function useSettledLooks(ids: readonly string[], source: LookSource | undefined)
 /** Whether a key press came from a control that the key operates itself (Space presses a button, a summary toggles). */
 const operates = (target: HTMLElement) => target.closest('button, a, summary, input, select, textarea, [contenteditable="true"]') !== null;
 
-function BattlePlayer({ battle, summary, keptUntil, bridge: external, level, viewerId, titles, looks: settledLooks, chapters, nav, back, takeFocus, league, last, endActions }: {
+function BattlePlayer({ battle, summary, keptUntil, bridge: external, level, viewerId, titles, looks: settledLooks, chapters, nav, back, takeFocus, league, last, endActions,
+  practice }: {
   battle: ReplayBattle; summary: ActivitySummary | null;
   /** When the replay stops being kept, while it still is at the display time (else null: no note). */
   keptUntil: number | null;
@@ -389,6 +404,7 @@ function BattlePlayer({ battle, summary, keptUntil, bridge: external, level, vie
   /** The activity's last chapter (a tournament run's rewards show there only). */
   last: boolean;
   endActions: 'again' | 'navigation';
+  practice: ReplayPractice | null;
 }) {
   const { log, stage } = battle;
   // Rewards to come are promised only to a fighter in the bout (or when the viewer is not known).
@@ -553,14 +569,17 @@ function BattlePlayer({ battle, summary, keptUntil, bridge: external, level, vie
   const tournament = stage.kind === 'bout' && (tournamentRound(stage.label) !== null || league !== null);
   const npc = stage.kind === 'bout' && log.participants.some(p => p.gladiatorId === null);
   const unranked = stage.kind === 'bout' && (stage.arenaMode === 'unranked' || summary?.arenaMode === 'unranked');
-  const eyebrow = boutEyebrow(stage, { npc, league, compact, unranked }, clockMode);
-  // A bracket's bouts show no rewards (spec 2); a run's show on its last chapter.
-  const chips = league !== null ? [] : rewardChips(summary, { fighter, npc, unranked, kind: stage.kind === 'encounter' ? 'expedition' : tournament ? 'tournament' : 'arena', last });
+  const eyebrow = practice ? practice.eyebrow : boutEyebrow(stage, { npc, league, compact, unranked }, clockMode);
+  // A bracket's bouts show no rewards (spec 2); a run's show on its last chapter. A practice fight has none to show.
+  const chips = practice ? [PRACTICE_CHIP] : league !== null ? []
+    : rewardChips(summary, { fighter, npc, unranked, kind: stage.kind === 'encounter' ? 'expedition' : tournament ? 'tournament' : 'arena', last });
+  // In a practice fight the fighter with no class is the training dummy.
+  const kind = (p: Readonly<RevealedCombatant>) => (practice && p.classId === null ? 'Dummy' : kindOf(p));
   const verdict = verdictText(log, compact);
   const step = (name: string, shortcut: string, go: (() => void) | null): BarStep => ({ name, shortcut, disabled: go === null, onClick: () => go?.() });
   const stepping = nav !== null || chapters !== null;
 
-  const fightersBody = <Comparison fighters={log.participants} />;
+  const fightersBody = <Comparison fighters={log.participants} kindOf={kind} />;
   const logBody = <>
     {sceneMissing && <p className={styles.note}>The animation is unavailable here; the log follows the fight instead.</p>}
     {lines.length === 0 && <p className={styles.note}>The first blow lands at {seconds(log.events[0]?.elapsedMs ?? 0)}.</p>}
@@ -573,7 +592,12 @@ function BattlePlayer({ battle, summary, keptUntil, bridge: external, level, vie
     <section className={styles.player} aria-labelledby={`${resultId}-title`} onKeyDown={onKeyDown}>
       <header className={styles.header}>
         <p className="eyebrow">{eyebrow}</p>
-        <Heading level={level} id={`${resultId}-title`}>{a.name}{a.botTeam && <BotTag />} vs {b.name}{b.botTeam && <BotTag />}</Heading>
+        {practice
+          ? <div className={styles.titleRow}>
+            <Heading level={level} id={`${resultId}-title`}>{a.name} vs {b.name}</Heading>
+            <span className={styles.practiceTag} data-practice-tag="">{PRACTICE_TAG}</span>
+          </div>
+          : <Heading level={level} id={`${resultId}-title`}>{a.name}{a.botTeam && <BotTag />} vs {b.name}{b.botTeam && <BotTag />}</Heading>}
         {!compact && nav?.counter && <p className={styles.counter} data-bout-counter="">{nav.counter.wide}</p>}
       </header>
       <div className={styles.arena}>
@@ -582,13 +606,16 @@ function BattlePlayer({ battle, summary, keptUntil, bridge: external, level, vie
           : <BattleViewportWaiting label={closeUp} />}
         {/* The result card on the arena: at the end (after the victory poses) or on ⚑ Result; it never moves on by itself (Avi). */}
         {ended && <div className={styles.endCard} data-end-card="">
-          {!compact && <p className="eyebrow">RESULT</p>}
+          {!compact && <p className="eyebrow">{practice ? PRACTICE_RESULT : 'RESULT'}</p>}
           <p className={styles.endVerdict}>{verdict.verdict}</p>
           <p className={styles.endReason}>{verdict.reason}</p>
-          {chips.length > 0 && <ul className={styles.chips} aria-label="Rewards">{chips.map(chip => <li key={chip}>{chip}</li>)}</ul>}
+          {chips.length > 0 && <ul className={styles.chips} aria-label={practice ? 'Practice' : 'Rewards'}>{chips.map(chip => <li key={chip}>{chip}</li>)}</ul>}
           <div className={styles.endActions}>
             <button type="button" onClick={restart}><IconText text={againLabel(compact)} /></button>
-            {endActions === 'navigation' && (next ? <button type="button" className={styles.gold} onClick={() => next.go()}><IconText text={nextLabel(next.opponent, compact)} /></button>
+            {practice ? <>
+              <button type="button" className={styles.gold} onClick={() => practice.again()}><IconText text={FIGHT_AGAIN} /></button>
+              <button type="button" onClick={() => practice.change.go()}><LabelText text={practice.change.label} /></button>
+            </> : endActions === 'navigation' && (next ? <button type="button" className={styles.gold} onClick={() => next.go()}><IconText text={nextLabel(next.opponent, compact)} /></button>
               : back ? <button type="button" className={styles.gold} onClick={() => back.go()}><IconText text={`← ${back.label}`} /></button> : null)}
           </div>
         </div>}
@@ -597,7 +624,7 @@ function BattlePlayer({ battle, summary, keptUntil, bridge: external, level, vie
         {log.participants.map((p, i) => {
           const hp = frame.hp[i];
           return <div key={p.id} className={i === 0 ? styles.left : styles.right}>
-            <div className={styles.name}><strong>{p.name}</strong> <span className={styles.kind}>{kindOf(p)}</span></div>
+            <div className={styles.name}><strong>{p.name}</strong> <span className={styles.kind} data-fighter-kind="">{kind(p)}</span></div>
             {title(p) && <div className={styles.title} data-fighter-title="">{title(p)}</div>}
             <div className={styles.meter} role="meter" aria-label={`${p.name} health`} aria-valuemin={0} aria-valuemax={p.maxHealth} aria-valuenow={hp} aria-valuetext={`${hp} of ${p.maxHealth} health`}>
               <span className={styles.fill} style={{ width: `${(100 * hp) / p.maxHealth}%` }} />
@@ -637,10 +664,11 @@ function BattlePlayer({ battle, summary, keptUntil, bridge: external, level, vie
               : frame.result.victoryReason === 'health-fraction' ? `Time ran out and ${winner.name} kept the larger share of health.`
                 : frame.result.tieBreakReason === 'simultaneous-defeat' ? `Both fighters fell at the same moment, so a seeded tie-break chose ${winner.name}.`
                   : `Time ran out with equal shares of health, so a seeded tie-break chose ${winner.name}.`}</p>
-            {league === null && (summary ? <Rewards summary={summary} scope={stage.kind === 'encounter' ? 'Credited for the whole expedition' : 'Credited rewards'} />
+            {league === null && !practice && (summary ? <Rewards summary={summary} scope={stage.kind === 'encounter' ? 'Credited for the whole expedition' : 'Credited rewards'} />
               : fighter ? <p className={styles.note}>Rewards are credited when the activity settles.</p> : null)}
           </div> : <p className={styles.note}>{RESULT_HINT}</p>}
-          {keptUntil !== null && <p className={styles.note}>This replay is kept until {day(keptUntil)}; the result and rewards stay in your history for 90 days.</p>}
+          {practice && <p className={styles.note}>{PRACTICE_NOTE}</p>}
+          {keptUntil !== null && !practice && <p className={styles.note}>This replay is kept until {day(keptUntil)}; the result and rewards stay in your history for 90 days.</p>}
         </section>
 
         {compact
@@ -671,7 +699,7 @@ function Fold({ title, wide = false, children }: { title: string; wide?: boolean
   </details>;
 }
 
-function Comparison({ fighters }: { fighters: readonly Readonly<RevealedCombatant>[] }) {
+function Comparison({ fighters, kindOf }: { fighters: readonly Readonly<RevealedCombatant>[]; kindOf(p: Readonly<RevealedCombatant>): string }) {
   const rows: [string, (p: Readonly<RevealedCombatant>) => string][] = [
     ['Type', kindOf],
     ['Stance', p => capital(p.stance)],

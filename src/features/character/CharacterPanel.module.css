@@ -698,3 +698,48 @@ p.partTitle {
     font-size: 0.78rem;
   }
 }
+
+/* Patch 1.9 Task 18: ⚔ Practice fight under Stats, gold, with what it does beside it (under it on a phone). */
+.practice {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 14px;
+  padding: 10px 12px;
+  border: 1px solid var(--glass-line);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.practice p {
+  margin: 0;
+  color: var(--ink-dim);
+  font-size: 0.82rem;
+}
+
+.practiceButton {
+  flex: none;
+  min-height: 38px;
+  padding: 0 14px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: var(--accent);
+  color: var(--accent-ink);
+  font-weight: 700;
+  font-size: 0.88rem;
+}
+
+.practiceButton:focus-visible {
+  outline: 3px solid var(--gold);
+  outline-offset: 3px;
+}
+
+@media (hover: none), (max-width: 480px) {
+  .practice {
+    flex-wrap: wrap;
+  }
+
+  .practiceButton {
+    min-height: 44px;
+  }
+}

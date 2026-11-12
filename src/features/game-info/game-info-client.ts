@@ -44,18 +44,22 @@ export async function loadPublishedGameInfo(): Promise<GameInfoPages> {
 
 /**
  * Fixture preview only (`?mode=fixture&info=draft`): the Wiki and Future Updates drafts in `docs/game-info`, shown as if
- * published, so a full roadmap can be looked at locally. A build without the fixture returns nothing and drops the drafts.
+ * published, so a full roadmap can be looked at locally. The imports sit inside the positive build-flag branch (as
+ * CampShell guards the fixture gateway), so a production build, where the flag is off, drops the drafts' chunks; the
+ * release scan refuses a draft-only title (`FIXTURE_MARKERS` in scripts/release-scan.mjs). Otherwise it returns nothing.
  */
 export async function loadDraftGameInfo(): Promise<GameInfoPages> {
-  if (process.env.NEXT_PUBLIC_FIXTURE_ENABLED !== 'true') return {};
-  const [wiki, future] = await Promise.all([
-    import('../../../docs/game-info/wiki.draft.json'), import('../../../docs/game-info/future-updates.draft.json')]);
-  const pages: GameInfoPages = {};
-  const wikiPage = snapshot({ version: 0, document: wiki.default }, 'wiki');
-  const futurePage = snapshot({ version: 0, document: future.default }, 'future');
-  if (wikiPage) pages.wiki = wikiPage;
-  if (futurePage) pages.future = futurePage;
-  return pages;
+  if (process.env.NEXT_PUBLIC_FIXTURE_ENABLED === 'true') {
+    const [wiki, future] = await Promise.all([
+      import('../../../docs/game-info/wiki.draft.json'), import('../../../docs/game-info/future-updates.draft.json')]);
+    const pages: GameInfoPages = {};
+    const wikiPage = snapshot({ version: 0, document: wiki.default }, 'wiki');
+    const futurePage = snapshot({ version: 0, document: future.default }, 'future');
+    if (wikiPage) pages.wiki = wikiPage;
+    if (futurePage) pages.future = futurePage;
+    return pages;
+  }
+  return {};
 }
 
 export async function editGameInfo(command: Command): Promise<EditResult> {

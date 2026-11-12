@@ -96,6 +96,8 @@ test.each([
 test.each([
   'throw Object.assign(new Error("This read is unavailable in the fixture preview."),{code:"unavailable"})',
   'const s={receiptId:"fixture-receipt-pvp",settledAtMs:1}',
+  // The Game Info drafts (`?mode=fixture&info=draft`): a Future Updates title that exists only in docs/game-info/future-updates.draft.json.
+  '{"id":"bag-slots","title":"Bag slots and real-money shop","body":"…"}',
 ])('scanner refuses fixture preview data in an exported chunk: %s', (content) => {
   const directory = exportedSite();
   mkdirSync(join(directory, '_next/static/chunks'), { recursive: true });
@@ -237,6 +239,7 @@ describe('the shared matcher', () => {
       expect(forbiddenMaterial(content), content).toEqual(['backend']);
     }
     expect(forbiddenMaterial('const s={receiptId:"fixture-receipt-pvp"}')).toEqual(['fixture']);
+    expect(forbiddenMaterial('{"title":"Bag slots and real-money shop"}')).toEqual(['fixture']);
     expect(forbiddenMaterial('SUPABASE_SECRET_KEY fixture-receipt-x')).toEqual(['backend', 'fixture']);
   });
 });

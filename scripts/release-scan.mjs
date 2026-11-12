@@ -42,9 +42,10 @@ function base64Needles(text) {
 }
 // The fixture preview (its gateway and sample data) exists only in development builds with fixtures enabled; every
 // export this scanner checks is a production build, where next.config.ts forces NEXT_PUBLIC_FIXTURE_ENABLED off, so
-// its lazy chunk must be absent (final review Minor 4). Markers: the fixture gateway's own refusal, and the sample
-// summaries' receipt ids.
-export const FIXTURE_MARKERS = ['unavailable in the fixture preview', 'fixture-receipt-'];
+// its lazy chunk must be absent (final review Minor 4). Markers: the fixture gateway's own refusal, the sample
+// summaries' receipt ids, and a Future Updates title that exists only in the Game Info drafts the fixture preview shows
+// (`?mode=fixture&info=draft`, docs/game-info/future-updates.draft.json; Patch 1.9 final review).
+export const FIXTURE_MARKERS = ['unavailable in the fixture preview', 'fixture-receipt-', 'Bag slots and real-money shop'];
 
 /**
  * What the scan refuses in one asset's text: `backend` (any FORBIDDEN pattern) and `fixture` (fixture preview data). It

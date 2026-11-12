@@ -57,7 +57,7 @@
 
 ### Task 3: Final-review fixes and the demo bag
 
-Avi added four features after Tasks 1-2 (2026-11-11, mockups approved): search and sort, menu pin and position, equipping from My gladiator, and a new renown laurel. Tasks 3-7 build them; Task 8 is the combined candidate.
+Avi added four features after Tasks 1-2 (2026-11-11, mockups approved): search and sort, menu pin and position, equipping from My gladiator, and a new renown laurel. Tasks 3-7 build them. Later additions became Tasks 8-11b; Task 12 is the combined candidate.
 
 **Files:** `src/lib/api/fixture-gateway.ts`, `src/features/shops/*`, `src/features/game-info/*`, tests.
 

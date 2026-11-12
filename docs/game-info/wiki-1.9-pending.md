@@ -32,7 +32,7 @@ Press the tick on a message to mark it read, or Mark all to clear every message.
 
 ## Menu pin and position (interface topic)
 
-On desktop, pin the menu and choose whether it sits on the left, on the right, or along the bottom. Your choice is saved in this browser only, so another device can differ.
+On desktop, open Settings (⚙) to pin the menu and choose whether it sits on the left, on the right, or along the bottom. Your choice is saved in this browser only, so another device can differ.
 
 ## Names and titles (camp and interface topics)
 
@@ -41,6 +41,10 @@ In Settings, under Names and titles, choose when names and titles show over the 
 ## Talking NPCs (camp topic)
 
 Click or tap an NPC in camp to hear a line from them, and again for their next one. Each has four. Brutus and Livia talk too; click their stalls to open the shops.
+
+## Sleeping (camp topic)
+
+A resting gladiator lies straight on their bed with an eye cover, and a small ZzZ floats above them. It stops when they get up.
 
 ## Also
 

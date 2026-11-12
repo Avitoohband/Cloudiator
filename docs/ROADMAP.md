@@ -31,9 +31,9 @@ Release details and dates are in the [changelog](CHANGELOG.md).
 - **1.8 — Watch and collect.** Watch a dungeon live, replay the whole run or individual fights, and see personal rewards in Results and Notifications. Earn Den Breaker, Warlord’s End, Kingslayer, and Dungeoneer.
 - **1.8 — Review and trailer.** Clickable UI review on real app screenshots, then implementation and release checks. Make the grandiose trailer-style patch video before shipping. [Dungeon plan](superpowers/plans/2026-10-29-party-dungeons.md) and [design](superpowers/specs/2026-10-29-party-dungeons-design.md).
 
-## Patch 1.9 details (in progress, not released; client only)
+## Patch 1.9 details (in progress, not released)
 
-Avi's decisions of 2026-11-11. Nothing here needs a server change. Mockups were approved by Avi except where noted.
+Avi's decisions of 2026-11-11. The built items need no server change; the Wiki video guides added on 2026-11-12 need one small migration (M33). Mockups were approved by Avi except where noted.
 
 - **Wiki list.** Wiki topics are one short scrolling list.
 - **Shops as an icon grid.** Each shop is a grid of icons that uses the inventory's detail card. The Arena banner shows in the Renown view under All or Armor.
@@ -48,9 +48,9 @@ Avi's decisions of 2026-11-11. Nothing here needs a server change. Mockups were 
 - **Settings menu.** A ⚙ Settings panel holds the menu pin and position (Left, Bottom, Right) and the name and title settings.
 - **Names and titles.** In Settings: Off, When zoomed in, or Always, with Tidy for overlapping names. Off hides them entirely.
 - **Talking NPCs.** Click an NPC for one of 56 approved lines about themselves. The Weaponsmith's and Armorer's stalls open their shops.
-- **Sleeping on beds.** Resting gladiators lie straight on the bed with an eye cover and a floating ZzZ (built, review pending).
+- **Sleeping on beds.** Resting gladiators lie straight on the bed with an eye cover and a floating ZzZ (reviewed 2026-11-12; the eye cover was redrawn as a clear light band that shows on every skin tone).
 - **Added 2026-11-12 (Avi's list; not built yet; UI mockups first):**
-  - **Video guides in the Wiki.** Each Wiki topic shows its own guide as a card: a frame from the video, ▶, "Watch the guide · 1:12" and "YouTube ↗" (variant B of the 2026-11-12 mockup, *recommended*). Topics with a guide get ▶ in the list; the others say "Video guide coming soon". Needs **M33**: the live M32 allows only two links for the whole Wiki, so M33 lets each Wiki entry carry one YouTube link, and the Wiki editor gets that field. Seven guides are made (W01-W07); the links stay empty until Avi approves their upload.
+  - **Video guides in the Wiki.** Each Wiki topic shows its own guide as a card: a frame from the video, ▶, "Watch the guide · 1:12" and "YouTube ↗" (variant B of the 2026-11-12 mockup, approved by Avi on 2026-11-12). Topics with a guide get ▶ in the list; the others say "Video guide coming soon". Needs **M33**: the live M32 allows only two links for the whole Wiki, so M33 lets each Wiki entry carry one YouTube link, and the Wiki editor gets that field. Seven guides are made (W01-W07); the links stay empty until Avi approves their upload.
   - **Practice fights.** Fight a training dummy with stats you choose, or spar a copy of any gladiator from their profile card, to test a build. Free: no stamina, no schedule slot, no rating, not saved. It runs the real combat rules in the browser (the shared combat engine) and plays in the replay viewer. Spars with a real player who accepts an invitation come later, with Friends.
   - **Critical damage shown.** My gladiator and the Wiki say a critical hit deals 50% more damage (rules: x1.5), next to the critical chance (5% + 0.3% per Precision, at most 40%).
   - **Armour block checked.** The block share is min(2% per armour point, 70%), the same formula in combat and on the profile card (checked by reading the code, 2026-11-12). Gap found: in the Arena, renown armour counts 10% more, but the card shows only the expedition figure; 1.9 shows the Arena figure too.

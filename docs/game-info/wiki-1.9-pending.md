@@ -44,7 +44,7 @@ Click or tap an NPC in camp to hear a line from them, and again for their next o
 
 ## Sleeping (camp topic)
 
-A resting gladiator lies straight on their bed with an eye cover, and a small ZzZ floats above them. It stops when they get up.
+A resting gladiator lies straight on their bed with an eye cover, and a small ZzZ floats above them. It stops when they get up. In bed they take off their armor and helmet; they put them back on when they get up.
 
 ## Combat (critical damage and the Arena)
 

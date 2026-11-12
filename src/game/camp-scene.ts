@@ -14,7 +14,7 @@ import type { WorldSnapshot, PublicActor, TournamentView } from '@contracts/read
 import type { BattleLog, RevealedTimeline } from '@contracts/events';
 import type { ActionId, AnimationDef, AssetManifest, Direction, MapData, TilePoint } from './assets';
 import { titleById } from '@domain/titles';
-import { campActorTag, layersFor, layoutCamp, type Placement } from './actors';
+import { campActorTag, layersFor, layoutCamp, shownLayers, spriteLayers, type Placement } from './actors';
 import { ARENA_REVEAL_MS } from './arena-stage';
 import {
   ARENA_GATE, ARENA_JOG_PACE, arenaRings, campArenaFights, fightStatus, hasArenaTimeline, updateRingSchedule, type ArenaRing, type CampFight, type FightStatus, type RingSlot, type RingSpot,
@@ -94,7 +94,8 @@ export type CampSceneHandle = {
 export type CampDebugActor = {
   id: string; kind: 'player' | 'npc' | 'arena-npc'; name: string; x: number; y: number;
   zone: string | null; location: string | null; action: string; frame: string;
-  layers: string[]; tint: { skin: number; cloth: number; hair: number } | null;
+  /** The layers drawn now (visible sprites); `sprites` counts every sprite it has, shown or not. */
+  layers: string[]; sprites: number; tint: { skin: number; cloth: number; hair: number } | null;
   visible: boolean; depth: number; walking: boolean;
   /** Mirrored to face south-west (or west in a ring). */
   flip: boolean;
@@ -211,6 +212,8 @@ type ActorView = {
   container: Container;
   layers: { id: string; sprite: Sprite }[];
   look: string;
+  /** The layer ids shown now (joined), so a change of action toggles the sprites once. */
+  shown?: string;
   label: PhaserNS.GameObjects.Text;
   /** The worn title (a known id's name) in gold over the name, or null; players only. */
   titleLabel?: PhaserNS.GameObjects.Text | null;
@@ -273,7 +276,7 @@ function frameIndex(anim: AnimationDef, t: number): number {
 }
 
 /** Everything that draws a player: layers (equipment, body, hair style) and colours, so a new chosen look restyles it (tested in camp.spec). */
-const lookKey = (p: Placement) => `${p.routine.layers.join('+')}|${p.routine.tint.skin}|${p.routine.tint.cloth}|${p.routine.tint.hair}`;
+const lookKey = (p: Placement) => `${p.routine.layers.join('+')}|${p.routine.sleepLayers.join('+')}|${p.routine.tint.skin}|${p.routine.tint.cloth}|${p.routine.tint.hair}`;
 const errorText = (error: unknown) => (error instanceof Error ? error.message : String(error));
 
 export function createCampScene(P: Phaser, deps: CampSceneDeps): { scene: PhaserNS.Scene; handle: CampSceneHandle } {
@@ -612,7 +615,8 @@ export function createCampScene(P: Phaser, deps: CampSceneDeps): { scene: Phaser
     }
 
     playerSprites(placement: Placement): { id: string; sprite: Sprite }[] {
-      return placement.routine.layers.map(id => {
+      // One sprite per layer worn awake or asleep (hair sits under head gear); `syncLayers` shows the set for the action.
+      return spriteLayers(placement.routine).map(id => {
         const sprite = this.add.sprite(0, 0, gladiator.atlas, `${id}/idle/se/0`);
         const key = layerTint.get(id);
         if (key) sprite.setTint(placement.routine.tint[key]);
@@ -647,6 +651,18 @@ export function createCampScene(P: Phaser, deps: CampSceneDeps): { scene: Phaser
       v.container.add(v.layers.map(l => l.sprite));
       v.look = lookKey(placement);
       v.frame = '';
+      v.shown = '';
+      this.syncLayers(v);
+    }
+
+    /** Shows the layers for what the gladiator does now (armor and helmet off in bed); sprites are toggled, never rebuilt. */
+    syncLayers(v: ActorView) {
+      if (v.kind !== 'player' || !v.placement) return;
+      const shown = shownLayers(v.placement.routine, v.pose ? 'idle' : v.action);
+      const key = [...shown].join('+');
+      if (key === v.shown) return;
+      v.shown = key;
+      for (const l of v.layers) l.sprite.setVisible(shown.has(l.id));
     }
 
     applyWorld(next: WorldSnapshot) {
@@ -899,6 +915,7 @@ export function createCampScene(P: Phaser, deps: CampSceneDeps): { scene: Phaser
           // A tag never covers a title: with one showing, the tag stands on the title's top edge.
           if (visible) v.marker.setPosition(s.x, s.y - (showTitle ? lift + v.label.displayHeight + title!.displayHeight : showLabel ? tagLift(v.label, lift) : lift));
         }
+        this.syncLayers(v);
         if (visible) {
           if (pose) this.applyPose(v, pose);
           else this.updateFrames(v, now);
@@ -1570,6 +1587,8 @@ export function createCampScene(P: Phaser, deps: CampSceneDeps): { scene: Phaser
     debug() {
       const cam = live() ? scene.cameras.main : undefined;
       const now = deps.now();
+      // Read what is drawn for each gladiator's action now, even between two frames.
+      for (const v of views.values()) scene.syncLayers(v);
       return {
         ready,
         disposed,
@@ -1583,7 +1602,7 @@ export function createCampScene(P: Phaser, deps: CampSceneDeps): { scene: Phaser
           : { centerX: 0, centerY: 0, zoom: 1, worldView: { x: 0, y: 0, width: 0, height: 0 }, bounds },
         actors: [...views.values()].map(v => ({
           id: v.id, kind: v.kind, name: v.name, x: v.x, y: v.y, zone: v.placement?.zone ?? null, location: v.location,
-          action: v.action, frame: v.pose ? v.pose.body.slice(v.pose.body.indexOf('/') + 1) : frameFor(v, now).frame, layers: v.layers.map(l => l.id), tint: v.placement ? { ...v.placement.routine.tint } : null,
+          action: v.action, frame: v.pose ? v.pose.body.slice(v.pose.body.indexOf('/') + 1) : frameFor(v, now).frame, layers: v.layers.filter(l => l.sprite.visible).map(l => l.id), sprites: v.layers.length, tint: v.placement ? { ...v.placement.routine.tint } : null,
           visible: v.container.visible, depth: v.container.depth, walking: !!v.walk,
           flip: v.flip ?? (v.facing === 'sw' || v.facing === 'nw'), marker: v.marker?.text ?? null,
           title: v.titleLabel ? { text: v.titleLabel.text, visible: v.titleLabel.visible, box: (() => { const b = v.titleLabel.getBounds(); return { x: b.x, y: b.y, width: b.width, height: b.height }; })() } : null,

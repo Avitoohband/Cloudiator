@@ -316,6 +316,34 @@ test.describe('living isometric camp', () => {
     await expect(page.getByRole('dialog', { name: `Profile: ${sleeper.name}`, exact: true })).toBeVisible();
   });
 
+  test('takes the armor and helmet off a sleeper and brings its hair back, and keeps them on an awake gladiator (Task 14)', async ({ page }) => {
+    await openCamp(page);
+    const HIDDEN = ['armor-light', 'armor-heavy', 'head-hood', 'head-helmet', 'head-helmet-crest'];
+    const HAIR = ['hair', 'hair-long', 'hair-ponytail'];
+    const onBed = (a: { x: number; y: number }) => [14, 16, 18].includes(Math.floor(a.x)) && [35, 36, 39, 40].includes(Math.floor(a.y));
+    const players = (await campState(page)).actors.filter(a => a.kind === 'player' && !a.walking);
+    const sleeper = players.find(a => a.action === 'sleep' && onBed(a))!;
+    const awake = players.find(a => a.action !== 'sleep' && a.id !== sleeper.id)!;
+    // Both put on a helmet and heavy armor, and a look with a ponytail; nobody moves (the same variants keep their spots).
+    await page.evaluate(({ sleeper, awake }) => {
+      const hook = window.__cloudiatorCamp!;
+      const world = hook.world()!;
+      hook.setWorld({ ...world, actors: world.actors.map(a => (a.gladiatorId === sleeper || a.gladiatorId === awake
+        ? { ...a, equipmentSilhouettes: ['weapon-sword', 'offhand-shield', 'head-helmet', 'armor-heavy'], appearance: { body: 'female', hair: 'ponytail', skin: 1, hairColor: 2, cloth: 3 } } : a)) });
+    }, { sleeper: sleeper.id, awake: awake.id });
+    const read = async (id: string) => (await campState(page)).actors.find(a => a.id === id)!;
+    await expect.poll(async () => (await read(sleeper.id)).layers).toContain('hair-ponytail');
+    const asleep = await read(sleeper.id);
+    expect(asleep.action).toBe('sleep');
+    expect(asleep.layers).toEqual(['body-female', 'cloth-female', 'hair-ponytail', 'accent', 'weapon-sword', 'offhand-shield', 'held']);
+    for (const id of HIDDEN) expect(asleep.layers, id).not.toContain(id);
+    // Awake, the helmet covers the hair.
+    const up = await read(awake.id);
+    expect(up.action).not.toBe('sleep');
+    expect(up.layers).toEqual(expect.arrayContaining(['head-helmet', 'head-helmet-crest', 'armor-heavy']));
+    for (const id of HAIR) expect(up.layers, id).not.toContain(id);
+  });
+
   test('sorts every prop slice and actor by the shared depth rule', async ({ page }) => {
     await openCamp(page);
     const props = await page.evaluate(() => window.__cloudiatorCamp!.props());

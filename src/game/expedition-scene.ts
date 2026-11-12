@@ -18,6 +18,7 @@ import type { ExpeditionSceneState } from './expedition-stage';
 import { REPLAY_OUTRO_MS, createReplayController, type ReplayController } from './replay';
 import { frameIndex, planStage, stageAt, type LabelPose, type StageLayout, type StagePlan } from './battle-stage';
 import { gladiatorPose, journeyMap, type GladiatorPose } from './expedition-path';
+import { shownLayers, spriteLayers } from './actors';
 import { clearOfLabel, creatureMode, fightCreatureAlpha, type LabelBox } from './expedition-creatures';
 import { ZOOM_STEP } from './camera';
 import { worldToScreen, type Rect } from './iso';
@@ -30,7 +31,7 @@ type Text = PhaserNS.GameObjects.Text;
 
 export type ExpeditionEnvironment = 'woodland' | 'outpost' | 'mountain';
 /** How the gladiator is drawn outside fights: gladiator layers in draw order and the player's tints. */
-export type GladiatorLook = { key: string; name: string; layers: string[]; tint: { skin: number; cloth: number; hair: number } };
+export type GladiatorLook = { key: string; name: string; layers: string[]; sleepLayers: string[]; tint: { skin: number; cloth: number; hair: number } };
 
 export type ExpeditionSceneDeps = {
   manifest: AssetManifest;
@@ -65,7 +66,9 @@ export type ExpeditionDebugState = {
   /** The expedition is back at camp and the gladiator leaves (or has left) the scene. */
   returned: boolean;
   camera: { centerX: number; centerY: number; zoom: number; worldView: Rect; bounds: Rect };
-  gladiator: { x: number; y: number; action: string; animation: string; frames: string[]; layers: string[]; tint: GladiatorLook['tint']; facing: Direction;
+  gladiator: { x: number; y: number; action: string; animation: string; frames: string[]; layers: string[];
+    /** Every sprite the hero has (shown or not), and how many times it was built: armor hides and shows without a rebuild. */
+    sprites: string[]; builds: number; tint: GladiatorLook['tint']; facing: Direction;
     depth: number; screenX: number; screenY: number; scaleX: number; visible: boolean; alpha: number; labelVisible: boolean; walking: boolean;
     /** The name over the gladiator: `x` its centre, `y` its bottom edge. */
     labelBox: LabelBox } | null;
@@ -135,7 +138,8 @@ export function createExpeditionScene(P: Phaser, deps: ExpeditionSceneDeps): { s
   let reducedMotion = !!deps.reducedMotion;
   let look = deps.look;
   let layer: MapLayer | null = null;
-  let hero: { container: Container; layers: { id: string; sprite: Sprite }[]; label: Text } | null = null;
+  let hero: { container: Container; layers: { id: string; sprite: Sprite }[]; label: Text; shown: string } | null = null;
+  let builds = 0;
   let creature: { container: Container; sprite: Sprite; creatureId: string } | null = null;
   const waiters: Waiter[] = [];
   /** Two boxes reused every frame to compare a creature's name with the gladiator's. */
@@ -193,7 +197,8 @@ export function createExpeditionScene(P: Phaser, deps: ExpeditionSceneDeps): { s
     }
 
     buildHero() {
-      const layers = look.layers.map(id => {
+      // One sprite for every layer the gladiator wears awake or asleep (the hair sits under head gear); `showLayers` toggles them.
+      const layers = spriteLayers(look).map(id => {
         const sprite = this.add.sprite(0, 0, gladiator.atlas, `${id}/idle/se/0`);
         const key = gladiator.layers.find(l => l.id === id)?.tint;
         if (key) sprite.setTint(look.tint[key]);
@@ -202,8 +207,19 @@ export function createExpeditionScene(P: Phaser, deps: ExpeditionSceneDeps): { s
       const container = this.add.container(0, 0, layers.map(l => l.sprite));
       const label = this.nameLabel(look.name);
       if (hero) { hero.container.destroy(); hero.label.destroy(); }
-      hero = { container, layers, label };
+      hero = { container, layers, label, shown: '' };
+      builds += 1;
       last = { ...last, animation: '', frames: [] };
+    }
+
+    /** Shows the sprites of the layers for `action` (the sleeping look while it sleeps); the sprites are never rebuilt. */
+    showLayers(action: string) {
+      if (!hero) return;
+      const shown = shownLayers(look, action);
+      const key = [...shown].join('+');
+      if (key === hero.shown) return;
+      hero.shown = key;
+      for (const l of hero.layers) l.sprite.setVisible(shown.has(l.id));
     }
 
     nameLabel(text: string) {
@@ -309,12 +325,14 @@ export function createExpeditionScene(P: Phaser, deps: ExpeditionSceneDeps): { s
       if (pose) {
         const feet = worldToScreen(pose.x, pose.y);
         if (staged && fighting) {
+          this.showLayers('fight');
           const f = staged.fighters[0];
           const name = manifest.animations[f.animation].frames[f.frame];
           this.setHeroFrames(f.animation, hero.layers.map(l => name.replace(/^body\//, `${l.id}/`)), f.flip);
           hero.container.setPosition(f.x + staged.shake.x, f.y + staged.shake.y).setDepth(f.y + f.depth / 100);
         } else {
           const action = pose.action === 'fight' ? 'idle' : pose.action;
+          this.showLayers(action);
           const dirs = gladiator.animations[action] ?? gladiator.animations.idle;
           const back = pose.facing === 'ne' || pose.facing === 'nw';
           const key = back && dirs.ne ? dirs.ne : dirs.se;
@@ -422,7 +440,7 @@ export function createExpeditionScene(P: Phaser, deps: ExpeditionSceneDeps): { s
   const handle: ExpeditionSceneHandle = {
     setReducedMotion(reduced) { reducedMotion = reduced; },
     setLook(next) {
-      const changed = next.layers.join('+') !== look.layers.join('+') || next.name !== look.name
+      const changed = next.layers.join('+') !== look.layers.join('+') || next.sleepLayers.join('+') !== look.sleepLayers.join('+') || next.name !== look.name
         || next.tint.skin !== look.tint.skin || next.tint.cloth !== look.tint.cloth || next.tint.hair !== look.tint.hair;
       look = next;
       if (changed && live()) scene.buildHero();
@@ -441,7 +459,7 @@ export function createExpeditionScene(P: Phaser, deps: ExpeditionSceneDeps): { s
           ? { centerX: cam.midPoint.x, centerY: cam.midPoint.y, zoom: cam.zoom, worldView: { x: cam.worldView.x, y: cam.worldView.y, width: cam.worldView.width, height: cam.worldView.height }, bounds: camera.bounds }
           : { centerX: 0, centerY: 0, zoom: 1, worldView: { x: 0, y: 0, width: 0, height: 0 }, bounds: camera.bounds },
         gladiator: hero && pose ? {
-          x: pose.x, y: pose.y, action: pose.action, animation: last.animation, frames: [...last.frames], layers: hero.layers.map(l => l.id), tint: { ...look.tint },
+          x: pose.x, y: pose.y, action: pose.action, animation: last.animation, frames: last.frames.filter((_, i) => hero!.layers[i]?.sprite.visible), layers: hero.layers.filter(l => l.sprite.visible).map(l => l.id), sprites: hero.layers.map(l => l.id), builds, tint: { ...look.tint },
           facing: pose.facing, depth: hero.container.depth, screenX: hero.container.x, screenY: hero.container.y, scaleX: hero.container.scaleX,
           visible: hero.container.visible, alpha: hero.container.alpha, labelVisible: hero.label.visible, walking: pose.walking,
           labelBox: { x: hero.label.x, y: hero.label.y, width: hero.label.width, height: hero.label.height },

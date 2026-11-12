@@ -535,6 +535,34 @@ test.describe('followable expedition scenes', () => {
     expect((await hero()).layers).toEqual(['body', 'cloth', 'hair', 'accent', ...GEAR, 'held']);
   });
 
+  test('takes its armor off while it sleeps at the safe point and puts it back on when it sits, without rebuilding (Task 14)', async ({ page }) => {
+    await expeditionFlow.openFailedAtMinute(page, 50);
+    await expeditionFlow.sceneReady(page);
+    const seen: { minute: number; action: string; layers: string[]; sprites: string[]; builds: number }[] = [];
+    for (let minute = 45; minute <= 79; minute += 1) {
+      await expeditionFlow.hold(page, 'outpost', minute);
+      const g = (await expeditionFlow.scene(page)).gladiator!;
+      if (g.action === 'sit' || g.action === 'sleep') seen.push({ minute, action: g.action, layers: g.layers, sprites: g.sprites, builds: g.builds });
+    }
+    const actions = seen.map(s => s.action).filter((a, i, all) => a !== all[i - 1]);
+    // It sat, slept and sat again at least once: the night camp's cycle.
+    expect(actions.join()).toMatch(/sit,sleep,sit/);
+    const GEAR = ['armor-light', 'head-hood'];
+    for (const s of seen) {
+      if (s.action === 'sit') {
+        expect(s.layers, `minute ${s.minute} sitting`).toEqual(expect.arrayContaining(GEAR));
+        expect(s.layers, `minute ${s.minute} sitting`).not.toContain('hair');
+      } else {
+        for (const id of ['armor-light', 'armor-heavy', 'head-hood', 'head-helmet', 'head-helmet-crest']) expect(s.layers, `minute ${s.minute} sleeping ${id}`).not.toContain(id);
+        expect(s.layers, `minute ${s.minute} sleeping`).toContain('hair');
+      }
+      // The same sprites, built once, the whole time.
+      expect(s.sprites, `minute ${s.minute}`).toEqual(seen[0].sprites);
+      expect(s.builds, `minute ${s.minute}`).toBe(seen[0].builds);
+    }
+    expect(seen[0].sprites).toEqual(expect.arrayContaining(['hair', ...GEAR]));
+  });
+
   test('follows the gladiator by default and pans freely after a drag', { tag: '@render' }, async ({ page }) => {
     await expeditionFlow.open(page, 'woodland', 5);
     await expeditionFlow.sceneReady(page);

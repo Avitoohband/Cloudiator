@@ -726,7 +726,12 @@ test.describe('the whole-trip replay', () => {
       await view.seek(page, plan.totalMs);
       await expect.poll(async () => (await drawn(page)).camp?.kind).toBe('resting');
       const bed = bedFor(CAMP_MAP, ASTER.id);
-      expect((await drawn(page)).camp!.gladiator).toMatchObject({ action: 'sleep', x: bed.x + 0.5, y: bed.y + 0.5, alpha: 1, layers: look });
+      // Task 14: in bed the armor is off and the hair is back; on the road (above) it wore its gear.
+      const night = lookFor(null, ASTER.id, fights('woodland')[0].battleLog!.participants[0].equipmentSilhouettes).sleepLayers;
+      expect(night).not.toEqual(look);
+      expect(night).toContain('hair');
+      expect(night).not.toContain('armor-light');
+      expect((await drawn(page)).camp!.gladiator).toMatchObject({ action: 'sleep', x: bed.x + 0.5, y: bed.y + 0.5, alpha: 1, layers: night });
       // Task 11b: a "ZzZ" rises from the sleeper's head, between the lying body (16 px tall) and the name, which sits just over
       // the letters' whole climb (SLEEP_NAME_LIFT), as in the camp. The replay is paused here, so the letters hold.
       await nextFrames(page);

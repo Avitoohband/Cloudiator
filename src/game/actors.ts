@@ -18,6 +18,8 @@ export type ActorRoutine = {
   tint: { skin: number; cloth: number; hair: number };
   /** Gladiator layer ids to draw, in manifest order. */
   layers: string[];
+  /** The layers drawn in bed: `layers` without the armor, hood and helmet, so the hair is back (`sleepLayersFor`). */
+  sleepLayers: string[];
 };
 
 export type Placement = {
@@ -131,6 +133,26 @@ export function layersFor(silhouettes: readonly string[], appearance: Appearance
   return LAYER_ORDER.filter(id => wanted.has(id));
 }
 
+/** What a gladiator takes off to sleep: body armor, hood, helmet and its crest (Patch 1.9). Weapons and shield stay: their sleep frames are empty. */
+export const SLEEP_HIDDEN_LAYERS: ReadonlySet<string> = new Set(['armor-light', 'armor-heavy', 'head-hood', 'head-helmet', 'head-helmet-crest']);
+
+/** The layers drawn asleep: `layersFor` of the gear without what `SLEEP_HIDDEN_LAYERS` names, so the hair comes back with no head gear. */
+export function sleepLayersFor(silhouettes: readonly string[], appearance: Appearance | null = null): string[] {
+  return layersFor(silhouettes.filter(silhouette => !SLEEP_HIDDEN_LAYERS.has(equipmentLayer(silhouette) ?? '')), appearance);
+}
+
+type LayerLook = { layers: readonly string[]; sleepLayers: readonly string[] };
+
+/** Every layer a scene makes a sprite for, in manifest order: awake and asleep looks together (a scene shows one set at a time). */
+export function spriteLayers(look: LayerLook): string[] {
+  return LAYER_ORDER.filter(id => look.layers.includes(id) || look.sleepLayers.includes(id));
+}
+
+/** The layers to show for an action: the sleeping look while it sleeps (Sit and Eat keep the gear), else the awake look. */
+export function shownLayers(look: LayerLook, action: string): ReadonlySet<string> {
+  return new Set(action === 'sleep' ? look.sleepLayers : look.layers);
+}
+
 function pick<T>(options: [T, number][], roll: number): T {
   const total = options.reduce((s, [, w]) => s + w, 0);
   let left = roll % total;
@@ -162,10 +184,11 @@ export function legacyAppearance(gladiatorId: string): Appearance {
  * be chosen: `layersFor(silhouettes)` and the colours of `tintFor(gladiatorId)`. A chosen look uses its body, hair style and
  * palette indices. A missing or invalid value (an actor projected before the look existed, a stale cached read) is the legacy look.
  */
-export function lookFor(appearance: Appearance | null, gladiatorId: string, silhouettes: readonly string[]): Pick<ActorRoutine, 'layers' | 'tint'> {
-  if (!validAppearance(appearance)) return { layers: layersFor(silhouettes), tint: tintFor(gladiatorId) };
+export function lookFor(appearance: Appearance | null, gladiatorId: string, silhouettes: readonly string[]): Pick<ActorRoutine, 'layers' | 'sleepLayers' | 'tint'> {
+  if (!validAppearance(appearance)) return { layers: layersFor(silhouettes), sleepLayers: sleepLayersFor(silhouettes), tint: tintFor(gladiatorId) };
   return {
     layers: layersFor(silhouettes, appearance),
+    sleepLayers: sleepLayersFor(silhouettes, appearance),
     tint: { skin: SKIN_TINTS[appearance.skin], cloth: CLOTH_TINTS[appearance.cloth], hair: HAIR_TINTS[appearance.hairColor] },
   };
 }
@@ -183,6 +206,7 @@ export function planActorRoutine(actor: PublicActor, slotIndex: number): ActorRo
     offsetMs: seed % 12_007,
     tint: look.tint,
     layers: look.layers,
+    sleepLayers: look.sleepLayers,
   };
 }
 

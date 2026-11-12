@@ -14,6 +14,7 @@ import type { SceneBridge } from './bridge';
 import type { GladiatorLook } from './expedition-scene';
 import type { TripVignette } from './trip-replay';
 import { frameIndex } from './battle-stage';
+import { shownLayers, spriteLayers } from './actors';
 import { ZOOM_STEP } from './camera';
 import { worldToScreen } from './iso';
 import { NAME_LABEL_DEPTH, NAME_LABEL_STYLE, createMapCamera, createMapLayer, type MapCamera, type MapLayer } from './map-layer';
@@ -40,7 +41,7 @@ export type TripCampDebug = {
    * it asleep (Task 11b), as world-space boxes with their opacity; empty otherwise.
    */
   gladiator: {
-    x: number; y: number; action: string; alpha: number; layers: string[]; nameLift: number;
+    x: number; y: number; action: string; alpha: number; layers: string[]; /** Every sprite it has, shown or not. */ sprites: string[]; nameLift: number;
     zzz: { glyph: string; x: number; y: number; width: number; height: number; alpha: number }[];
   } | null;
   /** The camera: whether it follows the gladiator (the viewport's Follow toggle), its zoom, and the world rectangle it shows. */
@@ -98,7 +99,7 @@ export function createTripCampScene(P: Phaser, deps: TripCampSceneDeps): { scene
   let reducedMotion = deps.reducedMotion;
   let look = deps.look;
   let layer: MapLayer | null = null;
-  let hero: { container: Container; layers: { id: string; sprite: Sprite }[]; label: Text; zzz: ZzzSprites } | null = null;
+  let hero: { container: Container; layers: { id: string; sprite: Sprite }[]; label: Text; zzz: ZzzSprites; shown: string } | null = null;
   /**
    * What the last frame drew; `snap` puts the camera on the gladiator at once (a new chapter, or the scene woke); `lightMs` is the
    * time the map was last lit at (the chapter's display time, on by its elapsed time).
@@ -153,7 +154,8 @@ export function createTripCampScene(P: Phaser, deps: TripCampSceneDeps): { scene
     }
 
     buildHero() {
-      const layers = look.layers.map(id => {
+      // One sprite for every layer worn awake or asleep (the hair sits under head gear); the pose's action picks which show.
+      const layers = spriteLayers(look).map(id => {
         const sprite = this.add.sprite(0, 0, gladiator.atlas, `${id}/idle/se/0`);
         const key = gladiator.layers.find(l => l.id === id)?.tint;
         if (key) sprite.setTint(look.tint[key]);
@@ -164,7 +166,7 @@ export function createTripCampScene(P: Phaser, deps: TripCampSceneDeps): { scene
       // The ZzZ's loop phase is the gladiator's own, as in the camp.
       const zzz = createZzz(this, look.key);
       if (hero) { hero.container.destroy(); hero.label.destroy(); destroyZzz(hero.zzz); }
-      hero = { container, layers, label, zzz };
+      hero = { container, layers, label, zzz, shown: '' };
       last = { ...last, frames: '', flip: false };
     }
 
@@ -199,6 +201,10 @@ export function createTripCampScene(P: Phaser, deps: TripCampSceneDeps): { scene
         // The loops run on the chapter's own time, so a paused replay holds its frame.
         const name = anim.frames[frameIndex(anim, vignette.elapsedMs)];
         const frames = hero.layers.map(l => name.replace(/^body\//, `${l.id}/`));
+        // Asleep on its bed the armor and helmet are off (a toggle of the existing sprites, no rebuild).
+        const shownNow = shownLayers(look, pose.action);
+        const shownKey = [...shownNow].join('+');
+        if (shownKey !== hero.shown) { hero.shown = shownKey; for (const l of hero.layers) l.sprite.setVisible(shownNow.has(l.id)); }
         const flip = pose.facing === 'sw' || pose.facing === 'nw';
         if (frames.join('|') !== last.frames) { hero.layers.forEach((l, i) => l.sprite.setFrame(frames[i])); last.frames = frames.join('|'); }
         if (flip !== last.flip || hero.container.scaleX !== (flip ? -1 : 1)) { hero.container.setScale(flip ? -1 : 1, 1); last.flip = flip; }
@@ -247,7 +253,7 @@ export function createTripCampScene(P: Phaser, deps: TripCampSceneDeps): { scene
   const handle: TripCampHandle = {
     setReducedMotion(reduced) { reducedMotion = reduced; },
     setLook(next) {
-      const changed = next.layers.join('+') !== look.layers.join('+') || next.name !== look.name || next.key !== look.key
+      const changed = next.layers.join('+') !== look.layers.join('+') || next.sleepLayers.join('+') !== look.sleepLayers.join('+') || next.name !== look.name || next.key !== look.key
         || next.tint.skin !== look.tint.skin || next.tint.cloth !== look.tint.cloth || next.tint.hair !== look.tint.hair;
       look = next;
       if (changed && live()) scene.buildHero();
@@ -262,7 +268,7 @@ export function createTripCampScene(P: Phaser, deps: TripCampSceneDeps): { scene
         kind: last.kind,
         gladiator: hero && pose
           ? {
-            x: pose.x, y: pose.y, action: pose.action, alpha: hero.container.alpha, layers: hero.layers.map(l => l.id), nameLift: hero.container.y - hero.label.y,
+            x: pose.x, y: pose.y, action: pose.action, alpha: hero.container.alpha, layers: hero.layers.filter(l => l.sprite.visible).map(l => l.id), sprites: hero.layers.map(l => l.id), nameLift: hero.container.y - hero.label.y,
             zzz: zzzDebug(hero.zzz),
           }
           : null,

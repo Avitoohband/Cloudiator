@@ -299,10 +299,8 @@ test.describe('living isometric camp', () => {
       expect(z.y + z.height, `${z.glyph} over the body`).toBeLessThanOrEqual(feet.y - 17);
       expect(z.y, `${z.glyph} under the name`).toBeGreaterThan(feet.y - SLEEP_NAME_LIFT);
     }
-    // The letters rise in a loop on the camp's clock; a standing gladiator has none.
-    await page.waitForTimeout(450);
-    await nextFrames(page);
-    expect((await read()).zzz).not.toEqual(now.zzz);
+    // The letters rise in a loop on the camp's clock (polled, not a fixed wait: final review Minor 13); a standing gladiator has none.
+    await expect.poll(async () => JSON.stringify((await read()).zzz)).not.toBe(JSON.stringify(now.zzz));
     for (const a of (await campState(page)).actors.filter(x => x.action !== 'sleep')) expect(a.zzz, a.name).toEqual([]);
     // Its click box covers the whole lying body, from behind the head to the feet on the bed's foot tile.
     expect(now.hit).toEqual({ x: feet.x - 14, y: feet.y - 17, width: 48, height: 27 });
@@ -313,6 +311,8 @@ test.describe('living isometric camp', () => {
     // The legs: 26 art px toward the feet and 4 px under them (screenOf is 20 art px over the feet).
     await page.mouse.click(box.x + at.x + 26 * zoom, box.y + at.y + (20 + 4) * zoom);
     expect((await campState(page)).selected).toBe(sleeper.id);
+    // Its selection ring lies under the middle of its body, half a tile along the bed from its head tile (final review Minor 10).
+    await expect.poll(async () => (await campState(page)).ring).toEqual({ x: feet.x + 16, y: feet.y + 8 });
     await expect(page.getByRole('dialog', { name: `Profile: ${sleeper.name}`, exact: true })).toBeVisible();
   });
 

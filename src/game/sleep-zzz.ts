@@ -45,6 +45,11 @@ const STILL = [5 / 6, 1 / 2, 1 / 6];
 export const ZZZ_TOP = EMIT.bottom - RISE - Math.max(ZZZ_GLYPHS.Z.height, ZZZ_GLYPHS.z.height);
 /** A sleeper's name sits this far over its feet (its bottom edge): one clear row over the ZzZ's highest letter. */
 export const SLEEP_NAME_LIFT = -ZZZ_TOP + 2;
+/**
+ * The middle of a sleeper's lying body on the ground, from its feet (its station, the bed's head tile centre): half a tile along the
+ * bed, which runs along map x (16 px right and 8 px down on screen; a sw-facing sleeper is mirrored, 16 px left).
+ */
+export const SLEEP_BODY_CENTRE = { x: 16, y: 8 } as const;
 /** The camp's and the trip camp's ZzZ draw over the evening light and the torch glows (2_000_001), under the names (2_000_002). */
 export const ZZZ_DEPTH = 2_000_001.2;
 /** The ZzZ texture's key in a scene's texture manager. */

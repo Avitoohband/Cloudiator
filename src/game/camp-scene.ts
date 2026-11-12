@@ -30,7 +30,7 @@ import { drawSlices, hidesActor, type PlacedImage } from './depth';
 import type { ArenaFightSummary, SceneBridge } from './bridge';
 import { DEFAULT_LABEL_PREFS, FADED_LABEL_ALPHA, labelScale, labelsShown as namesShown, tidyLabels, type LabelPrefs, type TidyItem } from './labels';
 import { NPC_LINES, TALK_FADE_MS, TalkLines, talkHoldMs } from './npc-talk';
-import { SLEEP_NAME_LIFT, createZzz, destroyZzz, drawZzz, ensureZzzTexture, zzzDebug, type ZzzSprites } from './sleep-zzz';
+import { SLEEP_BODY_CENTRE, SLEEP_NAME_LIFT, createZzz, destroyZzz, drawZzz, ensureZzzTexture, zzzDebug, type ZzzSprites } from './sleep-zzz';
 
 type Phaser = typeof PhaserNS;
 type Sprite = PhaserNS.GameObjects.Sprite;
@@ -148,6 +148,8 @@ export type CampDebugState = {
   /** The actor under the pointer (its name is drawn full and on top), and the NPC whose gold hover ring shows. */
   hover: string | null;
   hoverRing: string | null;
+  /** The gold ring under the selected or followed actor while it shows: its centre in world space, else null. */
+  ring: { x: number; y: number } | null;
 };
 export type CampDebugFight = {
   battleId: string; ring: number; status: FightStatus; positionMs: number; fighters: [string | null, string | null];
@@ -913,7 +915,10 @@ export function createCampScene(P: Phaser, deps: CampSceneDeps): { scene: Phaser
         if (ring.visible !== show) ring.setVisible(show);
         if (fv && show) {
           const s = worldToScreen(fv.x, fv.y);
-          ring.setPosition(s.x, s.y);
+          // Under a sleeper's whole lying body, not its head tile (final review Minor 10); it still sorts just under the actor.
+          const side = fv.facing === 'sw' || fv.facing === 'nw' ? -1 : 1;
+          if (fv.sleeping) ring.setPosition(s.x + side * SLEEP_BODY_CENTRE.x, s.y + SLEEP_BODY_CENTRE.y);
+          else ring.setPosition(s.x, s.y);
           if (ringDepth !== s.y - 0.5) { ringDepth = s.y - 0.5; ring.setDepth(ringDepth); }
         }
       }
@@ -1603,6 +1608,7 @@ export function createCampScene(P: Phaser, deps: CampSceneDeps): { scene: Phaser
         talk: talk ? { npcId: talk.npcId, index: talk.index, line: talk.line, fading: now - talk.at >= talk.holdMs } : null,
         hover: hovered(),
         hoverRing: hoverRing?.visible ? hovered() : null,
+        ring: ring?.visible ? { x: ring.x, y: ring.y } : null,
       };
     },
     props() {

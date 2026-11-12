@@ -96,14 +96,15 @@ export function FeedbackReview({ onCount }: {
                 <div className={styles.feedbackTop}>
                   <span className={`${feedbackStyles.pill} ${feedbackStyles[item.category]}`}>{categoryLabel(item.category)}</span>
                   <span className={`${feedbackStyles.pill} ${STATUS_CLASS[item.status]}`}>{ownerStatus(item.status)}</span>
-                  {who !== null ? <b className={styles.feedbackWho}>{who}</b> : <span className={styles.feedbackHint}>No gladiator</span>}
+                  {/* The mockup's "gladiator <name>": the team sees the gladiator's name only, never an account. */}
+                  <span className={styles.feedbackHint}>{who !== null ? `gladiator ${who}` : 'No gladiator'}</span>
                   <span className={styles.feedbackWhen}>{feedbackDate(item.createdAtMs, now, clock, true)}</span>
                 </div>
                 <p className={styles.feedbackText}>{item.text}</p>
                 <p className={styles.feedbackDetails}>{details ? <><b>Sent with it:</b> {details}</> : 'Sent without game details.'}</p>
                 {item.answer !== null && <div className={feedbackStyles.answer} data-feedback-answer=""><b>Your answer</b><p>{item.answer}</p></div>}
                 {item.status !== 'answered' && (answering === item.id ? <div className={styles.feedbackAnswer}>
-                  <label htmlFor={textId}>Answer to {who ?? 'this player'} (they get a message)</label>
+                  <label htmlFor={textId}>Answer to {who !== null ? `gladiator ${who}` : 'this player'} (they get a message)</label>
                   <textarea ref={box} id={textId} maxLength={ANSWER_MAXIMUM} rows={4} value={draft} aria-describedby={`${textId}-help`} onChange={event => setDraft(event.target.value)} />
                   <div className={styles.feedbackRow}><span id={`${textId}-help`}>Sends a message and marks it Answered.</span><span>{[...draft].length} / 1,000</span></div>
                   <div className={styles.feedbackActions}>

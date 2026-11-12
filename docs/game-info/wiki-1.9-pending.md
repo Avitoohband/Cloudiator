@@ -60,7 +60,7 @@ Practice uses Arena rules: renown gear counts 10% more.
 
 ## Feedback (messages and interface topics)
 
-Found a bug, or have an idea? Open Messages and press Send feedback, or open Settings and use Send in the Help section. Choose what it is about (Bug, Idea, Balance or Other), write at least 10 characters, and press Send. You can send 5 a game day. Include game details adds the patch, the screen you were on, your browser and device, and the window size; press "What is sent?" to see them. Please do not include passwords or personal details. My feedback, in Messages, shows what you sent and whether the team has read or answered it. The team's answer arrives in your messages with a green Team reply tag.
+Found a bug, or have an idea? Open Messages and press Send feedback, or open Settings and use Send in the Help section. Choose what it is about (Bug, Idea, Balance or Other), write at least 10 characters, and press Send. You can send 5 a game day. Include game details adds the patch, the screen you were on, your browser and device, the window size and the time you sent it; press "What is sent?" to see them. The team sees your gladiator's name, and the answer comes to your messages. Please do not include passwords or personal details. My feedback, in Messages, shows what you sent and whether the team has read or answered it. The team's answer arrives in your messages with a green Team reply tag.
 
 ## Buy back (shops topic)
 

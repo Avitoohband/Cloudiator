@@ -157,7 +157,9 @@ test('Send feedback from Messages: categories, the counter, the minimum, the det
   await expect(details).toContainText(phone ? /Device\s*Chrome \d+ on Android \(phone\)/ : /Device\s*Chrome \d+ on Windows \(desktop\)|Device\s*Chrome \d+ on \w+ \(desktop\)/);
   const size = page.viewportSize()!;
   await expect(details).toContainText(`Window ${size.width} x ${size.height}`);
-  await expect(details).toContainText('Nothing else. Your account and gladiator name are always shown to the team, so it can answer you.');
+  // Fix round 1 (controller ruling): only the gladiator's name is shown to the team, never an account.
+  await expect(details).toContainText('Nothing else. The team sees your gladiator’s name, and the answer comes to your messages.');
+  await expect(details).not.toContainText('account');
   await expect(dialog).toContainText('You can send 5 a game day; 3 left today.');
   expect(await noHorizontalScroll(page)).toBe(true);
   expect(await contrastIssues(dialog)).toEqual([]);
@@ -210,9 +212,15 @@ test('the daily limit: 5 sent shows the limit line with Send off, and a daily-li
   const dialog = feedbackDialog(page);
   await expect(dialog).toContainText('You can send 5 a game day; 1 left today.');
   await dialog.getByRole('textbox', { name: 'Your message' }).fill(IDEA_TEXT);
-  await dialog.getByRole('button', { name: 'Send', exact: true }).click();
-  await expect(dialog).toContainText(/You have sent 5 today\. You can send more on the next game day \(in \d+\s*h(?: \d+\s*min)?\)\./);
+  await dialog.getByRole('button', { name: 'Send', exact: true }).focus();
+  await page.keyboard.press('Enter');
+  // Fix round 1: the limit line is said (a polite status) and the focus stays on Send, which is off but focusable.
+  await expect(dialog.getByRole('status')).toContainText(/You have sent 5 today\. You can send more on the next game day \(in \d+\s*h(?: \d+\s*min)?\)\./);
   await expect(dialog.getByRole('button', { name: 'Send', exact: true })).toBeDisabled();
+  await expect(dialog.getByRole('button', { name: 'Send', exact: true })).toBeFocused();
+  await expect(dialog.getByRole('button', { name: 'Send', exact: true })).toHaveAttribute('aria-disabled', 'true');
+  await page.keyboard.press('Enter');
+  expect(sends(flow.commands)).toHaveLength(1);
   await expect(dialog.getByRole('textbox', { name: 'Your message' })).toHaveValue(IDEA_TEXT);
   expect(sends(flow.commands)).toHaveLength(1);
   await dialog.getByRole('button', { name: 'Cancel', exact: true }).click();
@@ -225,6 +233,11 @@ test('the daily limit: 5 sent shows the limit line with Send off, and a daily-li
   await expect(dialog).toContainText(/You have sent 5 today\./);
   await dialog.getByRole('textbox', { name: 'Your message' }).fill(IDEA_TEXT);
   await expect(dialog.getByRole('button', { name: 'Send', exact: true })).toBeDisabled();
+
+  // Fix round 1: left open across the game day's end, the dialog counts the new game day (nothing sent in it yet).
+  await page.evaluate(day => window.__cloudiatorShell!.clock.freeze((Math.floor(window.__cloudiatorShell!.clock.now() / day) + 1) * day + 60_000), DAY);
+  await expect(dialog).toContainText('You can send 5 a game day; 5 left today.');
+  await expect(dialog.getByRole('button', { name: 'Send', exact: true })).toBeEnabled();
 });
 
 test('a send that fails keeps the text, and Send again repeats the same operation', async ({ page }) => {
@@ -425,10 +438,11 @@ test('the owner reads New, Answered and All, marks one read and answers one', as
   await expect(items).toHaveCount(2);
   await expect(panel).toContainText('Newest first · 2 shown');
   const first = items.nth(0), second = items.nth(1);
-  await expect(first).toContainText(/Bug\s*New\s*Cassia/);
+  // Fix round 1: the mockup's "gladiator <name>" (no account is shown).
+  await expect(first).toContainText(/Bug\s*New\s*gladiator Cassia/);
   await expect(first).toContainText('The Arena result says I lost');
   await expect(first).toContainText('Sent with it: Patch 1.9 · Arena · Chrome 131 on Android (phone) · 360 x 780 ·');
-  await expect(second).toContainText(/Idea\s*New\s*Varro/);
+  await expect(second).toContainText(/Idea\s*New\s*gladiator Varro/);
   expect(await noHorizontalScroll(page)).toBe(true);
 
   // Mark read: the item leaves New, and the count falls.
@@ -439,7 +453,7 @@ test('the owner reads New, Answered and All, marks one read and answers one', as
 
   // Answer: a text box for that player, then Send answer.
   await first.getByRole('button', { name: 'Answer', exact: true }).click();
-  const box = first.getByRole('textbox', { name: 'Answer to Cassia (they get a message)' });
+  const box = first.getByRole('textbox', { name: 'Answer to gladiator Cassia (they get a message)' });
   await expect(box).toBeFocused();
   await expect(first).toContainText('Sends a message and marks it Answered.');
   const reply = 'Thank you for the report. We are looking into it and will fix it in the next patch.';

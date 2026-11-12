@@ -267,8 +267,9 @@
 }
 
 .gold { border: 1px solid #ae864a; background: #4b3726; color: #f2c66b; font-weight: 700; }
-.gold:hover:not(:disabled) { background: #5a4430; }
-.gold:disabled { border-color: #655847; background: #292526; color: #cbbfae; cursor: default; }
+.gold:hover:not(:disabled, [aria-disabled='true']) { background: #5a4430; }
+/* Off: natively, or focusable and aria-disabled (Send at 0 left keeps the focus after a daily-limit answer). */
+.gold:disabled, .gold[aria-disabled='true'] { border-color: #655847; background: #292526; color: #cbbfae; cursor: default; }
 .ghost { border: 1px solid #655847; background: #292526; color: #e4d7c9; }
 .ghost:hover { background: #38302a; }
 .gold:focus-visible, .ghost:focus-visible { outline: 2px solid #f2c66b; outline-offset: 2px; }

@@ -248,7 +248,6 @@
 .feedbackItem { padding: 11px 12px; border: 1px solid #3a3350; border-radius: 10px; background: #15111f; overflow-wrap: anywhere; }
 .feedbackItem[data-new] { border-color: #ae864a; }
 .feedbackTop { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; }
-.feedbackWho { font-weight: 700; }
 .feedbackHint { color: #acb7cc; font-size: 12.5px; }
 .feedbackWhen { margin-left: auto; color: #acb7cc; font-size: 12.5px; white-space: nowrap; }
 .panel .feedbackText { margin: 8px 0; white-space: pre-wrap; user-select: text; }

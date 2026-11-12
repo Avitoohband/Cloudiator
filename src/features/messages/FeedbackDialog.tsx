@@ -12,6 +12,7 @@ import { useEffect, useId, useRef, useState, useSyncExternalStore, type FormEven
 import type { FeedbackCategory } from '@contracts/reads';
 import { FEEDBACK } from '@domain/feedback';
 import { useClockMode } from '../../lib/clock-setting';
+import { gameDayOf } from '../../lib/game-day';
 import { PATCH } from '../../lib/patch';
 import { timeOfDay } from '../../lib/time-format';
 import { useMinuteNow } from '../schedule/use-minute-now';
@@ -48,13 +49,16 @@ export function FeedbackDialog({ actions, screen, canSeeMine, onClose }: {
   const [text, setText] = useState('');
   const [include, setInclude] = useState(true);
   const [showDetails, setShowDetails] = useState(false);
-  const [left, setLeft] = useState<number | null>(null);
+  /** What is left, with the game day it was counted for: a dialog left open into the next game day counts again (fix round 1). */
+  const [counted, setCounted] = useState<{ day: number; left: number } | null>(null);
   const [sent, setSent] = useState(false);
   const [busy, setBusy] = useState(false);
   const [failed, setFailed] = useState(false);
   const attempt = useRef<{ key: string; command: SendFeedbackCommand } | null>(null);
   const sending = useRef(false), mounted = useRef(true), finished = useRef(false), accepted = useRef(false);
   const nowMs = useMinuteNow(actions.clock);
+  const day = gameDayOf(nowMs);
+  const left = counted !== null && counted.day === day ? counted.left : null;
   const clock = useClockMode();
   const view = useSyncExternalStore(subscribeView, readView, () => 'desktop|0|0');
   const [layout, width, height] = view.split('|');
@@ -67,12 +71,17 @@ export function FeedbackDialog({ actions, screen, canSeeMine, onClose }: {
     mounted.current = true;
     return () => { mounted.current = false; };
   }, []);
-  // What is left today: the account's own feedback, counted in the current game day (a send's answer, when it comes first, wins).
+  // What is left today: the account's own feedback, counted in the current game day, and again when a new game day starts (a send's
+  // answer for the same game day, when it comes first, wins).
   useEffect(() => {
     let alive = true;
-    actions.load().then(list => { if (alive) setLeft(previous => previous ?? leftToday(list, actions.clock.now())); }, () => undefined);
+    actions.load().then(list => {
+      if (!alive) return;
+      const now = actions.clock.now(), at = gameDayOf(now);
+      setCounted(previous => (previous !== null && previous.day === at ? previous : { day: at, left: leftToday(list, now) }));
+    }, () => undefined);
     return () => { alive = false; };
-  }, [actions]);
+  }, [actions, day]);
   useEffect(() => { if (sent) heading.current?.focus(); }, [sent]);
 
   const finish = (then: 'mine' | null) => {
@@ -98,12 +107,12 @@ export function FeedbackDialog({ actions, screen, canSeeMine, onClose }: {
       if (result.ok) {
         attempt.current = null;
         accepted.current = true;
-        setLeft(Math.max(0, result.value.leftToday));
+        setCounted({ day: gameDayOf(actions.clock.now()), left: Math.max(0, result.value.leftToday) });
         setText('');
         setSent(true);
         return;
       }
-      if (result.code === 'daily-limit') { attempt.current = null; setLeft(0); return; }
+      if (result.code === 'daily-limit') { attempt.current = null; setCounted({ day: gameDayOf(actions.clock.now()), left: 0 }); return; }
       if (!OPEN_ANSWERS.includes(result.code)) attempt.current = null;
       setFailed(true);
     } catch {
@@ -161,13 +170,15 @@ export function FeedbackDialog({ actions, screen, canSeeMine, onClose }: {
         <p><b>Patch</b> {PATCH} · <b>Screen</b> {screen}</p>
         <p><b>Device</b> {deviceText(navigator.userAgent, layout === 'phone')}</p>
         <p><b>Sent at</b> {shownAt} · <b>Window</b> {width} x {height}</p>
-        <p className={styles.hint}>Nothing else. Your account and gladiator name are always shown to the team, so it can answer you.</p>
+        <p className={styles.hint}>Nothing else. The team sees your gladiator’s name, and the answer comes to your messages.</p>
       </div>}
-      <p className={left === 0 ? styles.limitZero : styles.limit}>{limitLine(left, nowMs)}</p>
+      {/* A polite status (fix round 1): a daily-limit answer is said where the player is, and the focus stays on Send. */}
+      <p className={left === 0 ? styles.limitZero : styles.limit} role="status">{limitLine(left, nowMs)}</p>
       {failed && <p className={styles.alert} role="alert">Could not send. Your text is still here. Try again.</p>}
       <div className={styles.actions}>
         <button type="button" className={styles.ghost} onClick={() => { if (!sending.current) finish(null); }}>Cancel</button>
-        <button type="submit" className={styles.gold} disabled={!ready} aria-disabled={busy || undefined}>Send</button>
+        {/* At 0 left Send stays focusable (aria-disabled), so a refused send keeps the focus; `submit` refuses it. */}
+        <button type="submit" className={styles.gold} disabled={!ready && left !== 0} aria-disabled={busy || left === 0 || undefined}>Send</button>
       </div>
     </form>}
   </dialog>;

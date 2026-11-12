@@ -81,14 +81,15 @@ function withDemoBag(owner: OwnerState): OwnerState {
   return { ...owner, inventory: [...owner.inventory, ...items] as OwnerState['inventory'], buyBack: demoSales(owner.inventory[0]?.ownerId ?? 'aster') };
 }
 /**
- * Patch 1.9: the demo bag's Buy back list, the mockup's five sales of this game day (at the fixture's server time), newest first: a rare
+ * Patch 1.9: the demo bag's Buy back list, the mockup's five sales of this game day (the fixture's server time), newest first: a rare
  * Sword L5 sold for 39 gold, an uncommon Iron helmet L5 for 34, two Round shields for 7 each and Heavy boots for 10. The preview refuses
  * the `buy-back` command, as it refuses every command.
  */
 function demoSales(ownerId: string): OwnerState['buyBack'] {
   const now = worldFixture.serverNowMs, gameDay = 14_400_000, expiresAtMs = (Math.floor(now / gameDay) + 1) * gameDay;
-  const sales: [string, number, number][] = [['sword:5:rare', 39, 20], ['iron-helmet:5:uncommon', 34, 38], ['round-shield:1:common', 7, 69], ['round-shield:1:common', 7, 69],
-    ['heavy-boots:1:common', 10, 95]];
+  // Minutes before the fixture's time, all inside its game day (it began at 00:00 UTC, 40 minutes before; fix round 1).
+  const sales: [string, number, number][] = [['sword:5:rare', 39, 5], ['iron-helmet:5:uncommon', 34, 12], ['round-shield:1:common', 7, 24], ['round-shield:1:common', 7, 24],
+    ['heavy-boots:1:common', 10, 36]];
   return sales.flatMap(([catalogId, price, minutesAgo], index) => {
     const entry = CATALOG_V1.items[catalogId];
     return entry ? [{ saleId: 5 - index, price, soldAtMs: now - minutesAgo * 60_000, expiresAtMs,

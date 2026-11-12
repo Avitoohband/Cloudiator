@@ -1,13 +1,15 @@
 import { mkdirSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
+import { readFileSync } from 'node:fs';
 import { expect, test, type BrowserContext, type Locator, type Page, type TestInfo } from './fixtures';
 import type { GameCommand } from '../../supabase/functions/_shared/contracts/commands';
 import type { BuyBackEntry, ItemInstance } from '../../supabase/functions/_shared/contracts/reads';
 import { CATALOG_V1 } from '../../supabase/functions/_shared/domain/catalog-v1';
 import { itemFixture, ownerFixture } from '../fixtures/domain';
+import { worldToScreen } from '../../src/game/iso';
 import { emptyWorld, isPresence, routeLiveReads, seedSession, SUPABASE_URL } from './live-routes';
 import { contrastIssues, noHorizontalScroll } from './a11y-helpers';
-import { expectOwnerShown, openMenu, quietArrivals } from './shell-helpers';
+import { expectOwnerShown, menuDialog, openMenu, quietArrivals } from './shell-helpers';
 
 // Patch 1.9 Task 23: Buy back in the Shops (the approved mockup, .superpowers/design/2026-11-12-feedback-buyback, notes.md "Buy back"). The owner
 // read lists the gladiator's last 10 gear sales of the current game day (`OwnerState.buyBack`, Task 22's M34); the Shops show them behind a
@@ -15,6 +17,12 @@ import { expectOwnerShown, openMenu, quietArrivals } from './shell-helpers';
 // stands in for the server (the price is what the sale paid; the bag holds 60; the next game day is every 14,400,000 ms).
 const DAY = 14_400_000;
 const MIN = 60_000;
+/**
+ * The server's time, held (fix round 1: the card's "today" must not depend on the wall clock): 13:40 UTC, 15:40 in Israel, 100 minutes into
+ * the game day that started at 12:00 UTC, so every sale below is from this game day and the next starts in 2 h 20 min.
+ */
+const NOW = Date.UTC(2026, 10, 12, 13, 40);
+test.use({ timezoneId: 'Asia/Jerusalem' });
 
 async function shot(page: Page, info: TestInfo, name: string, show?: Locator) {
   // The view at the top of the menu, as the player looks at it.
@@ -42,7 +50,7 @@ type Options = { money?: number; bagSize?: number; sales?: typeof SALES; refuse?
 async function shopFlow(context: BrowserContext, options: Options = {}) {
   await quietArrivals(context);
   await seedSession(context);
-  const now = Date.now();
+  const now = NOW;
   const state = structuredClone(ownerFixture);
   state.wallets = { money: options.money ?? 100, renown: 25 };
   state.inventory = [piece('axe:1:common'), ...Array.from({ length: (options.bagSize ?? 19) - 1 }, () => piece('light-boots:1:common'))];
@@ -50,7 +58,7 @@ async function shopFlow(context: BrowserContext, options: Options = {}) {
   const entry = (catalogId: string, price: number, minutesAgo: number, item = piece(catalogId)): BuyBackEntry =>
     ({ saleId: ++saleIds, item, price, soldAtMs: now - minutesAgo * MIN, expiresAtMs: (Math.floor(now / DAY) + 1) * DAY });
   state.buyBack = (options.sales ?? SALES).map(([id, price, ago]) => entry(id, price, ago));
-  const live = await routeLiveReads(context, { world: emptyWorld(now), owner: state });
+  const live = await routeLiveReads(context, { world: emptyWorld(now), owner: state, serverNowMs: () => now });
   const commands: GameCommand[] = [];
   let refusal = options.refuse;
   await context.route(`${SUPABASE_URL}/functions/v1/game-command`, async route => {
@@ -99,6 +107,32 @@ const cells = (shops: Locator) => shops.locator('[data-buyback-cell]');
 const card = (shops: Locator) => shops.getByRole('region', { name: 'Offer details', exact: true });
 const buyBacks = (commands: readonly GameCommand[]) => commands.filter(c => c.kind === 'buy-back');
 
+type Prop = { frame: string; x: number; y: number };
+const stallProps = (JSON.parse(readFileSync('public/assets/camp/map.json', 'utf8')) as { props: Prop[] }).props;
+/**
+ * Clicks (or taps) a merchant's stall on its awning while the Inventory and shops menu stays open: the camera puts the awning on a point of
+ * the camp the menu does not cover (right of the panel on a desktop, above the sheet on a phone).
+ */
+async function clickStallBeside(page: Page, frame: 'stall-weapons' | 'stall-armor') {
+  await page.waitForFunction(() => window.__cloudiatorCamp?.state()?.ready === true, null, { timeout: 45_000 });
+  const prop = stallProps.find(p => p.frame === frame)!;
+  const box = (await page.locator('canvas').boundingBox())!;
+  const target = (await page.evaluate(() => matchMedia('(hover: none), (max-width: 480px)').matches))
+    ? { x: box.x + box.width / 2, y: box.y + 150 } : { x: box.x + box.width - 260, y: box.y + box.height / 2 };
+  const awning = (() => { const a = worldToScreen(prop.x, prop.y); return { x: a.x + 14, y: a.y - 23 }; })();
+  const zoom = 2;
+  // The camera centre (world px) that puts the awning on `target`, as a tile for centerOn.
+  const centre = { x: awning.x + box.width / (2 * zoom) - (target.x - box.x) / zoom, y: awning.y + box.height / (2 * zoom) - (target.y - box.y) / zoom };
+  const tile = { x: (centre.x / 32 + centre.y / 16) / 2, y: (centre.y / 16 - centre.x / 32) / 2 };
+  await page.evaluate(({ x, y }) => window.__cloudiatorCamp!.centerOn(x, y, 2), tile);
+  await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+  const { camera } = await page.evaluate(() => window.__cloudiatorCamp!.state()!);
+  const at = { x: box.x + (awning.x - camera.worldView.x) * camera.zoom, y: box.y + (awning.y - camera.worldView.y) * camera.zoom };
+  expect(await page.evaluate(p => document.elementFromPoint(p.x, p.y) instanceof HTMLCanvasElement, at), `${frame} is on the open camp`).toBe(true);
+  if (await page.evaluate(() => matchMedia('(hover: none)').matches)) await page.touchscreen.tap(at.x, at.y);
+  else await page.mouse.click(at.x, at.y);
+}
+
 async function openBuyBack(page: Page) {
   await page.goto('/game/');
   await expectOwnerShown(page, ownerFixture.name);
@@ -123,11 +157,14 @@ test('the chip counts the sales; the card shows the sold time, the price and the
   await expect(cells(shops).nth(0)).toContainText('39');
   await expect(cells(shops).nth(1)).toHaveAttribute('data-rarity', 'uncommon');
   await expect(shops).toContainText('5 items to buy back · your last 10 sales of this game day. 19 / 60 bag slots used.');
+  // Fix round 1: a compact grid, as the mockup's (no tall empty box under two rows of sales).
+  const gridHeight = await shops.getByRole('group', { name: 'Items to buy back' }).evaluate(element => element.getBoundingClientRect().height);
+  expect(gridHeight).toBeLessThanOrEqual(260);
   const details = card(shops);
   await expect(details.getByRole('heading', { name: 'Sword', exact: true })).toBeVisible();
   await expect(details).toContainText('Level 5 · rare · Tradable');
   await expect(details).toContainText(/Damage\s*11\.7/);
-  await expect(details).toContainText(/Sold for 39 gold · today \d{1,2}:\d{2}/);
+  await expect(details).toContainText(/Sold for 39 gold · today (3:20\sPM|15:20)/);
   await expect(details).toContainText(/Available until the next game day \(in (\d+\s*h(?: \d+\s*min)?|\d+\s*min|under a minute)\)\./);
   await expect(details).toContainText('Same price you were paid. It comes back with its level, rarity and stats.');
   const buy = details.getByRole('button', { name: 'Buy back for 39 gold' });
@@ -203,6 +240,37 @@ test('the empty state, then a sale: the after-sale line and Open Buy back', asyn
   await expect(cells(shops)).toHaveCount(1);
   await expect(cells(shops).nth(0)).toHaveAccessibleName('Axe, level 1, common, buy back for 10 gold');
   await expect(chip(shops)).toBeInViewport();
+});
+
+// Fix round 1: "Open Buy back" once must not keep opening Buy back: a merchant's stall clicked later opens that merchant's shop.
+test('after Open Buy back, a stall opens its merchant shop, not Buy back', async ({ page, context }) => {
+  const flow = await shopFlow(context, { sales: [] });
+  const { menu, shops } = await openBuyBack(page);
+  await shops.getByRole('group', { name: 'Shop filters', exact: true }).getByRole('button', { name: 'All', exact: true }).click();
+  const axe = flow.state.inventory[0];
+  await menu.getByTestId(`tile-${axe.id}`).click();
+  await menu.getByTestId(`item-${axe.id}`).getByRole('button', { name: 'Sell Axe · 10 gold' }).click();
+  await menu.getByRole('region', { name: 'Item details' }).getByRole('button', { name: 'Open Buy back' }).click();
+  await expect(chip(shops)).toHaveAttribute('aria-pressed', 'true');
+  const inventory = menuDialog(page, 'Inventory and shops');
+  const pressed = () => shopsOf(inventory).getByRole('group', { name: 'Shop filters', exact: true }).getByRole('button', { pressed: true });
+  // A merchant request that reaches the open panel (the camp's `open-merchant`, as a stall sends it): the shops remount at that merchant
+  // while the inventory stays, and must not take the earlier "Open Buy back" again.
+  await page.waitForFunction(() => window.__cloudiatorCamp?.state()?.ready === true, null, { timeout: 45_000 });
+  for (const [merchant, filter] of [['weapons', 'Weapons'], ['armor', 'Armor']] as const) {
+    await page.evaluate(m => window.__cloudiatorCamp!.emit('open-merchant', { merchant: m }), merchant);
+    await expect(inventory).toBeVisible();
+    await expect(pressed()).toHaveText([filter]);
+    await expect(chip(shopsOf(inventory))).not.toBeFocused();
+  }
+  await expect(menu.getByRole('region', { name: 'Item details' }).getByRole('button', { name: 'Open Buy back' })).toBeVisible();
+  // And a real click on each stall (the camp's click closes and reopens the menu).
+  for (const [frame, filter] of [['stall-weapons', 'Weapons'], ['stall-armor', 'Armor']] as const) {
+    await clickStallBeside(page, frame);
+    await expect(inventory).toBeVisible();
+    await expect(pressed()).toHaveText([filter]);
+    await expect(chip(shopsOf(inventory))).not.toBeFocused();
+  }
 });
 
 test('a sale that can no longer be bought back says so, and the list is read again', async ({ page, context }) => {

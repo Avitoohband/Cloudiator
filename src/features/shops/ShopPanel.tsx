@@ -62,9 +62,13 @@ export function ShopPanel({ owner, busy, preview, buy, initialMerchant, clock, b
   const [query, setQuery] = useState(''), [sort, setSort] = useState<SortKey>('level'), [backSort, setBackSort] = useState<SortKey>('newest');
   const back = filter === 'Buy back';
   const sales = owner.buyBack ?? [];
-  // "Open Buy back": the view, the shops at the top of their menu, and the focus on the chip.
+  // "Open Buy back": the view, the shops at the top of their menu, and the focus on the chip. Only a request newer than the one present when
+  // the shops mounted (fix round 1): a merchant's request remounts them (`key`) at that merchant, and an earlier "Open Buy back" must not
+  // take the view and the focus again.
+  const handledRequest = useRef(buyBackRequest);
   useEffect(() => {
-    if (!buyBackRequest) return;
+    if (buyBackRequest === handledRequest.current) return;
+    handledRequest.current = buyBackRequest;
     setFilter('Buy back');
     scrollToTop(section.current);
     backChip.current?.focus({ preventScroll: true });
@@ -173,7 +177,7 @@ export function ShopPanel({ owner, busy, preview, buy, initialMerchant, clock, b
             {CURRENCIES.map(([value, label]) => <button key={value} type="button" aria-pressed={value === currency} onClick={() => switchCurrency(value)}>{label}</button>)}
           </div>}
         </div>
-        <div ref={scroller} className={`${inventory.gridScroll} ${styles.scroll}`} role="group" aria-label={back ? 'Items to buy back' : 'Shop items'} onKeyDown={move}>
+        <div ref={scroller} className={`${inventory.gridScroll} ${styles.scroll}${back ? ` ${styles.backScroll}` : ''}`} role="group" aria-label={back ? 'Items to buy back' : 'Shop items'} onKeyDown={move}>
           {back && sales.length === 0 ? <div className={styles.empty}><span><AtlasIcon frame="inventory" size={40} /></span><p>{BUY_BACK_EMPTY}</p></div>
             : count === 0 ? <NoMatch query={query} clear={() => setQuery('')} filter={hiddenBy} /> : <div ref={grid} className={inventory.grid}>
               {back ? backCells.map(saleCell) : choices.map(cell)}

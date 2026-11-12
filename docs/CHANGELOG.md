@@ -30,12 +30,11 @@ Project folders under `D:\Avi\Projects\Animation\Cloudiator\`.
 
 ### Built
 
-- Open Game Info from camp to read the Wiki. Pick a topic from one short scrolling list: combat, attributes, stamina, Training, the Arena, dungeons and more.
-- The Future Updates tab shows the public plans for upcoming patches.
+- Open Game Info from camp to read the Wiki and the Future Updates plans. Pick a Wiki topic from one short scrolling list: combat, attributes, stamina, Training, the Arena, dungeons and more.
 - Open Inventory and shops to browse your inventory in a square grid of pixel-art items. Select a tile to check its details, wear it, or manage it.
 - In My gladiator, hover, focus, or tap worn gear and replacements to see stats, attribute bonuses, and weight.
 - Shops are an icon grid with the same detail card as your inventory. Search and sort both.
-- A new Settings menu (⚙) pins the menu and places it on the left, bottom or right of the screen on desktop. It is remembered in this browser.
+- A new Settings menu (⚙) pins the menu to the left, bottom or right on desktop, and sets when names and titles show over the camp: Off, When zoomed in, or Always. It is remembered in this browser.
 - Wear or replace gear straight from the Worn equipment slots in My gladiator.
 - A new gold laurel marks renown, including in the corner chip.
 - Identical items show as one stack with a count. Sell lets you choose how many.
@@ -43,7 +42,6 @@ Project folders under `D:\Avi\Projects\Animation\Cloudiator\`.
 - An XP bar shows your progress and whether your next expedition can level you up.
 - My gladiator explains each attribute and stat when you hover, focus or tap it.
 - Click or tap a camp NPC to hear a line from them, and again for the next. The Weaponsmith's and Armorer's stalls open the shops.
-- Choose in Settings when names and titles show over the camp: Off, When zoomed in, or Always, even zoomed out.
 - Resting gladiators lie straight on their beds, with an eye cover and a floating ZzZ.
 - My gladiator and gladiator cards show the extra damage of a critical hit, and how much renown armor and weapons add in the Arena.
 - Sleeping gladiators take off their armour.
@@ -52,6 +50,8 @@ Project folders under `D:\Avi\Projects\Animation\Cloudiator\`.
 ### Planned for 1.9 (added 2026-11-12, not built yet)
 
 - Practice fights: test your build against a dummy with stats you choose, or spar a copy of any gladiator. No stamina, no slot, no rating.
+- A Feedback button: send a bug report or an idea from the game, and read the team's answer.
+- Buy back any of your last 10 sold items until the next game day, for the price you sold it at.
 
 ## 1.8.1 — Clearer gladiator stats (2026-11-11)
 

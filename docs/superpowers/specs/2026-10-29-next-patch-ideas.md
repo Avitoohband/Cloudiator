@@ -183,19 +183,20 @@ evenings. Placement and recommendations are in the [roadmap](../../ROADMAP.md).
 
 58. **Rest without armour?** "Rest no armor?". Read as: a sleeping gladiator is drawn without armour (1.9, client art).
 59. **Homes with trophies.** "Home, with tropies, any one can build home and guest friend" (later; builds on idea 43, needs Friends).
-60. **Dungeon-only items.** "Items that can only be getting in the dungeons" (1.10, boss chests).
-61. **Stripe and Google Pay.** "stripe and google pay for monetization" (1.10 payments; Stripe's support for Israeli sellers is checked first).
+60. **Dungeon-only items.** "Items that can only be getting in the dungeons" (2.0, boss chests).
+61. **Stripe and Google Pay.** "stripe and google pay for monetization" (2.0 payments; Stripe's support for Israeli sellers is checked first).
 62. **What critical damage is.** "What is the dmg of the crit dmg" (1.9: show x1.5).
-63. **Raise critical damage.** "add a way to increas crit dmg ?" (1.10 balance).
-64. **Less luck, more strategy.** "make the battles not RNG only based ... people could interfier with the battle, strategy wise" (later design; the 1.10 potion setting comes first).
-65. **Lower critical chance.** "down the crit rate" (1.10 balance, after the 1.9 simulations).
-66. **Feedback.** "feedback mechanism" (1.10, with ideas 30 and 39).
+63. **Raise critical damage.** "add a way to increas crit dmg ?" (2.0 balance).
+64. **Less luck, more strategy.** "make the battles not RNG only based ... people could interfier with the battle, strategy wise" (later design; the 2.0 potion setting comes first).
+65. **Lower critical chance.** "down the crit rate" (2.0 balance, after the 1.9 simulations).
+66. **Feedback.** "feedback mechanism" (2.0, with ideas 30 and 39).
 67. **Spar a chosen player.** "invite specific player for spar battle (stamina free and slot free)?" (1.9 spars a copy of a gladiator; invitations come with Friends).
 68. **Build-test dummy.** "add option to fight with dummy that I choose stats, for checking my build (stamina free)" (1.9 practice fights).
-69. **Bag slots for real money or coupons.** "bad slots for real money coupons", read as bag slots (1.10 payments).
+69. **Bag slots for real money or coupons.** "bad slots for real money coupons", read as bag slots (2.0 payments).
 70. **PvE roles with abilities.** "pve roles, builds, and abilites (roles: tank, summoner, buffer, adc)" and "parties roles. Tank, etc" (later).
 71. **Check damage against the block share.** Avi, in Hebrew: check that the damage calculation against the block percentage is correct. Checked 2026-11-12 by reading the code: one formula, min(2% per armour point, 70%), in combat and on the card; the card does not show the Arena's renown armour bonus (shown in 1.9).
-72. **Checks for balance.** "check about the 2 handed advanted of one handed", "check about the weapons from renown", "check for the arena algorithm, matches" (1.9 simulations, 1.10 balance; the Arena matching is the 1.10 Arena evenings).
-73. **Pets?** Already planned: the paid pet follower (1.10 payments) and pettable camp animals (later).
-74. **Drop-only gear above level 10.** Avi, 2026-11-12: "I want also items in game, but items that cannot be bought in the store. Items above level 10, like level 12, 15, and more. New armors, new weapons, and all of those." Placed: level 12 tier from dungeon boss chests in 1.10; levels 15-30 with the 1.11 content; shops keep levels 1, 5 and 10.
-75. **Security first.** Avi, 2026-11-12: "add also to do before next patch (after 1.9), security measures, pt testing and all derives from those". Placed: a security pass and penetration test after 1.9 and before 1.10 work starts (ROADMAP "Before 1.10").
+72. **Checks for balance.** "check about the 2 handed advanted of one handed", "check about the weapons from renown", "check for the arena algorithm, matches" (1.9 simulations, 2.0 balance; the Arena matching is the 2.0 Arena evenings).
+73. **Pets?** Already planned: the paid pet follower (2.0 payments) and pettable camp animals (later).
+74. **Drop-only gear above level 10.** Avi, 2026-11-12: "I want also items in game, but items that cannot be bought in the store. Items above level 10, like level 12, 15, and more. New armors, new weapons, and all of those." Placed: level 12 tier from dungeon boss chests in 2.0; levels 15-30 with the 2.1 content; shops keep levels 1, 5 and 10.
+75. **Security first.** Avi, 2026-11-12: "add also to do before next patch (after 1.9), security measures, pt testing and all derives from those". Placed: a security pass and penetration test after 1.9 and before 2.0 work starts (ROADMAP "Before 2.0").
+76. **2.0 is the full release.** Avi, 2026-11-12: "next patch is generally payments and balances, so anything related to payments should be included next as well (dyts, skins, pets and so on.) but for this one, anything non related payments and balance, should be in. next patch might be 2 instead of 1.10 beause it would be the release patch (from open beta to open.) also would consider pay for cloudflrare and supabase for scaling and supporting mass pplayers income". Placed: the payments patch is 2.0 (1.11 is 2.1); Feedback and Buy back move into 1.9 (his choice); dyes, skins and pets join 2.0; scaling prep joins the pre-2.0 security pass. Numbers in ideas above were renamed (1.10 to 2.0, 1.11 to 2.1).

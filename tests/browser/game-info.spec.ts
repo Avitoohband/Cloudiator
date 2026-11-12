@@ -118,6 +118,12 @@ test('Wiki topics are one short scrolling list', async ({ page }) => {
   const sizes = await list.evaluate(element => ({ client: element.clientHeight, scroll: element.scrollHeight }));
   expect(sizes.client).toBeLessThan(rowHeight * 5);
   expect(sizes.scroll).toBeGreaterThan(sizes.client);
+  // Four whole rows and the list's padding fit inside its border (border-box sizing; final review Minor 9): the 4th row is never clipped.
+  const fit = await list.evaluate(element => {
+    const style = getComputedStyle(element), rows = Array.from(element.querySelectorAll('[role="option"]')).slice(0, 4);
+    return { client: element.clientHeight, needed: rows.reduce((sum, row) => sum + row.getBoundingClientRect().height, 0) + parseFloat(style.paddingTop) + parseFloat(style.paddingBottom) };
+  });
+  expect(fit.client, JSON.stringify(fit)).toBeGreaterThanOrEqual(Math.floor(fit.needed));
 
   const inView = async (option: ReturnType<typeof options.nth>) => {
     const [o, l] = [(await option.boundingBox())!, (await list.boundingBox())!];

@@ -246,6 +246,8 @@
 
 .matchCount { min-height: 1.2em; margin: 8px 0 0; color: var(--muted); font-size: .8rem; }
 
+/* 16 px on a phone, so iOS does not zoom in when the field or the Sort select takes the focus. */
 @media (hover: none), (max-width: 480px) {
-  .searchRow .search input { font-size: 16px; }
+  .searchRow .search input,
+  .searchRow .sort select { font-size: 16px; }
 }

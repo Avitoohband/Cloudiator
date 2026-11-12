@@ -41,6 +41,8 @@ export function ShopPanel({ owner, busy, preview, buy, initialMerchant }: {
   const [quantity, setQuantity] = useState(1);
   const [query, setQuery] = useState(''), [sort, setSort] = useState<SortKey>('level');
   const choices = queryItems(shopChoices(filter, currency), choiceView, query, sort);
+  // A search with no match under a chip that hides matches All would show says so ("No match for “sword” in Armor").
+  const hiddenBy = !choices.length && query.trim() && filter !== 'All' && queryItems(shopChoices('All', currency), choiceView, query, sort).length ? filter : undefined;
   // The first visible cell when nothing visible is chosen; remembered, so Buy never sends an offer the grid hides.
   const chosen: ShopChoice | undefined = choices.find(choice => choice.id === chosenId) ?? choices[0];
   if (chosen && chosenId !== chosen.id) setChosenId(chosen.id);
@@ -104,13 +106,13 @@ export function ShopPanel({ owner, busy, preview, buy, initialMerchant }: {
     <div className={styles.top}>
       <h2 id="shops-heading">Shops</h2>
       <p className={styles.wallet}>
-        <span><CurrencyIcon currency="money" size={14} /> Gold <b>{spendable(owner, 'money')}</b></span>
-        <span><CurrencyIcon currency="renown" size={14} /> Renown <b>{spendable(owner, 'renown')}</b></span>
+        <span><CurrencyIcon currency="money" size={14} /> Available gold <b>{spendable(owner, 'money')}</b></span>
+        <span><CurrencyIcon currency="renown" size={14} /> Available renown <b>{spendable(owner, 'renown')}</b></span>
       </p>
     </div>
     <div className={inventory.columns}>
       <div>
-        <ItemSearch query={query} setQuery={setQuery} sorts={SHOP_SORTS} sort={sort} setSort={setSort} />
+        <ItemSearch query={query} setQuery={setQuery} sorts={SHOP_SORTS} sort={sort} setSort={setSort} label="Search the shops" sortLabel="Sort the shops" />
         <div className={styles.bar}>
           <div className={inventory.filters} role="group" aria-label="Shop filters">
             {SHOP_FILTERS.map(option => <button key={option} type="button" aria-pressed={option === filter} onClick={() => setFilter(option)}>{option}</button>)}
@@ -120,12 +122,12 @@ export function ShopPanel({ owner, busy, preview, buy, initialMerchant }: {
           </div>
         </div>
         <div ref={scroller} className={`${inventory.gridScroll} ${styles.scroll}`} role="group" aria-label="Shop items" onKeyDown={move}>
-          {choices.length === 0 ? <NoMatch query={query} clear={() => setQuery('')} /> : <div ref={grid} className={inventory.grid}>
+          {choices.length === 0 ? <NoMatch query={query} clear={() => setQuery('')} filter={hiddenBy} /> : <div ref={grid} className={inventory.grid}>
             {choices.map(cell)}
             {Array.from({ length: Math.max(0, (filter === 'All' && !query.trim() ? 30 : 6) - choices.length) }, (_, index) => <span key={index} className={inventory.emptyCell} aria-hidden="true" />)}
           </div>}
         </div>
-        <MatchCount count={choices.length} query={query} />
+        <MatchCount count={choices.length} query={query} filter={hiddenBy} />
         <p className={`muted ${styles.foot}`}>{EXPLAINERS[currency]} L = level needed; pieces with a lock are above your level. {choices.length} items.</p>
       </div>
       <section id={detailsId} aria-label="Offer details" className={inventory.details}>

@@ -92,6 +92,8 @@ export function InventoryPanel({ owner, gateway, refresh, clock, preview = false
   const tiles = groupStacks(owner.inventory, item => isStackable(owner, item));
   const visibleTiles = queryItems(tiles.filter(tile => matchesFilter(tile.items[0], filter)), tile => itemView(tile.items[0]), query, sort);
   const visibleCount = visibleTiles.reduce((total, tile) => total + tile.items.length, 0);
+  // A search with no match under a chip that hides matches All would show says so ("No match for “sword” in Armor").
+  const hiddenBy = !visibleTiles.length && query.trim() && filter !== 'All' && queryItems(tiles, tile => itemView(tile.items[0]), query, sort).length ? filter : undefined;
   const selected = visibleTiles.find(tile => tile.items.some(item => item.id === selectedId)) ?? visibleTiles[0];
   // Remember the displayed fallback so a refresh cannot replace a still-visible selection.
   if (selectedId !== (selected?.key ?? null)) setSelectedId(selected?.key ?? null);
@@ -311,12 +313,12 @@ export function InventoryPanel({ owner, gateway, refresh, clock, preview = false
     <div className="section-title"><h2>Inventory</h2><span>{owner.inventory.length} / {owner.inventoryCapacity} slots</span></div>
     <div className={styles.columns}>
       <div>
-        <ItemSearch query={query} setQuery={setQuery} sorts={INVENTORY_SORTS} sort={sort} setSort={setSort} />
+        <ItemSearch query={query} setQuery={setQuery} sorts={INVENTORY_SORTS} sort={sort} setSort={setSort} label="Search your items" sortLabel="Sort your items" />
         <div className={styles.filters} role="group" aria-label="Inventory filters">
           {filters.map(option => <button key={option} type="button" aria-pressed={option === filter} onClick={() => setFilter(option)}>{option}</button>)}
         </div>
         <div ref={scroller} className={styles.gridScroll}>
-          {visibleTiles.length === 0 && query.trim() ? <NoMatch query={query} clear={() => setQuery('')} /> : <div className={styles.grid} data-testid="inventory-grid">
+          {visibleTiles.length === 0 && query.trim() ? <NoMatch query={query} clear={() => setQuery('')} filter={hiddenBy} /> : <div className={styles.grid} data-testid="inventory-grid">
             {visibleTiles.map(tile => {
               const item = tile.items[0], count = isMaterial(item) ? item.quantity : tile.items.length;
               const badge = wearBadge(owner, item), listed = item.reservation?.kind === 'listing';
@@ -335,7 +337,7 @@ export function InventoryPanel({ owner, gateway, refresh, clock, preview = false
             {Array.from({ length: Math.max(0, emptyCells) }, (_, index) => <span key={index} className={styles.emptyCell} aria-hidden="true" />)}
           </div>}
         </div>
-        <MatchCount count={visibleCount} query={query} idle={visibleTiles.length > 0 ? `${visibleTiles.length} tile${visibleTiles.length === 1 ? '' : 's'} · ${visibleCount} item${visibleCount === 1 ? '' : 's'} · each item still uses a slot` : ''} />
+        <MatchCount count={visibleCount} query={query} filter={hiddenBy} idle={visibleTiles.length > 0 ? `${visibleTiles.length} tile${visibleTiles.length === 1 ? '' : 's'} · ${visibleCount} item${visibleCount === 1 ? '' : 's'} · each item still uses a slot` : ''} />
       </div>
       <section id={detailsId} aria-label="Item details" className={styles.details}>
         {confirmation === 'stale' && <p ref={staleDiscardNotice} role="alert" tabIndex={-1}>Your inventory changed. Review the updated inventory before discarding.</p>}

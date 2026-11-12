@@ -26,6 +26,13 @@ it('never joins another level, another rarity or another binding', () => {
   expect(shape(state)).toEqual(['p' + (counter - 4) + '+p' + counter, 'p' + (counter - 3), 'p' + (counter - 2), 'p' + (counter - 1)]);
 });
 
+it('never joins pieces of another catalog version, nor counts one as its stack (final review Minor 8)', () => {
+  const [v1a, v2, v1b] = [piece('sword:1:common'), piece('sword:1:common', { catalogVersion: 'v2' }), piece('sword:1:common')];
+  const state = owner([v1a, v2, v1b]);
+  expect(shape(state)).toEqual([`${v1a.id}+${v1b.id}`, v2.id]);
+  expect(joinsStack(owner([v2, v1a]), v2)).toBe(false);
+});
+
 it('keeps a worn, a queued, a listed and a reserved piece on its own tile', () => {
   const [worn, queued, listed, reserved, free1, free2] = ['light-boots:1:common', 'light-boots:1:common', 'light-boots:1:common', 'light-boots:1:common', 'light-boots:1:common', 'light-boots:1:common'].map(id => piece(id));
   listed.reservation = { kind: 'listing', referenceId: 'l' };

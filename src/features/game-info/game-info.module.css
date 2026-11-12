@@ -99,7 +99,8 @@
 .topics {
   --topic-row: 38px;
   position: relative;
-  max-height: calc(var(--topic-row) * 4 + 8px);
+  /* Four rows, the 4 px padding above and below and the 1 px border (box-sizing is border-box), so the 4th row is never clipped. */
+  max-height: calc(var(--topic-row) * 4 + 8px + 2px);
   margin-bottom: 12px;
   padding: 4px;
   overflow-y: auto;

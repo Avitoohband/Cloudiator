@@ -17,12 +17,15 @@ export function isStackable(owner: OwnerState, item: ItemInstance): boolean {
     && !owner.pendingBuild?.reservedItemIds.includes(item.id) && wearBadge(owner, item) === null;
 }
 
-/** The kind pieces stack by: the catalog id (which holds the level and the rarity), the level and rarity themselves, and the binding. */
-const stackKind = (item: ItemInstance) => `${item.catalogId}|${item.tier}|${item.rarity}|${item.binding}`;
+/**
+ * The kind pieces stack by: the catalog id (which holds the level and the rarity) and its catalog version (pieces of two versions may
+ * differ), the level and rarity themselves, and the binding.
+ */
+const stackKind = (item: ItemInstance) => `${item.catalogId}|${item.catalogVersion}|${item.tier}|${item.rarity}|${item.binding}`;
 
 /**
- * The tiles of `items`: stackable pieces of one kind (the catalog id, which holds the level and the rarity, and the binding) share the
- * tile of the first of them; every other piece is a tile of its own. Tiles keep the order of their first piece.
+ * The tiles of `items`: stackable pieces of one kind (the catalog id and version, which hold the level and the rarity, and the binding)
+ * share the tile of the first of them; every other piece is a tile of its own. Tiles keep the order of their first piece.
  */
 export function groupStacks(items: readonly ItemInstance[], canStack: (item: ItemInstance) => boolean): StackTile[] {
   const tiles: StackTile[] = [], stacks = new Map<string, StackTile>();

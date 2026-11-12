@@ -7,6 +7,7 @@ import { RAMP, SKIN, accent, body, chestWrap, heavyArmor, held, helmet, helmetCr
  * Runtime draw order (back to front). Depth inside a frame is resolved by slot clipping. A gladiator draws one body
  * (body, or body-female for a female body), its clothes (cloth or cloth-female) and at most one hair layer (hair is
  * short; hair-long, hair-ponytail; none when bald). Equipment is shared: the female layers stay inside the male masks.
+ * `held` is always drawn, last and untinted: what is carried, and the sleeper's eye cover.
  */
 export const GLADIATOR_LAYERS = [
   { id: 'body', slot: 'body', tintable: true, tint: 'skin' },

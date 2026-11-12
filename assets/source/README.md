@@ -57,7 +57,7 @@ keep an old release's images for its open tabs again, restore a `retained.mjs` l
 - `generators/rig.mjs`: the pose rig and the depth slots used to clip layers.
 - `generators/poses.mjs`: keyframes for all 17 gladiator animations plus the NPC `talk` and `tend` loops.
 - `generators/outfits.mjs`: layer painters for body (male and female), cloth and the female chest wrap, hair
-  (short, long, ponytail, bun), armor, head gear, weapons, shield, held props (barbell, bowl, jug, the night watch's torch),
+  (short, long, ponytail, bun), armor, head gear, weapons, shield, held props (barbell, bowl, jug, the night watch's torch) and the sleeper's eye cover,
   NPC clothing, the porter's shoulder crate and troll features.
 - `generators/gladiator.mjs`, `npcs.mjs`, `creatures.mjs`: actor packages.
 - `generators/tiles.mjs`: corner-based 64×32 isometric autotiles. There are 16 masks per environment.
@@ -118,7 +118,8 @@ keep an old release's images for its open tabs again, restore a `retained.mjs` l
 - Map equipment with `manifest.equipmentLayers`, keyed by the catalog template id (the part of
   `sword:1:common` before the first colon). When the gladiator holds a two-handed weapon (spear or
   bow), hide `offhand-shield`. When it wears head gear, hide every hair layer. Draw `head-helmet-crest`
-  only with `head-helmet`.
+  only with `head-helmet`. Always draw `held`, last: it holds what is carried and the sleeper's eye cover, which is untinted so
+  no skin or hair colour darkens it.
 - Move walkers at `actors.gladiator.walk.tilesPerSecond`, which matches the walk stride.
 - Attack variants: `thrust` for the spear and `shoot` for the bow
   (`actors.gladiator.attackVariants`).

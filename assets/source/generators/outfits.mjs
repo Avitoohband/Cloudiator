@@ -121,7 +121,6 @@ export function body(skin = SKIN.light, figure = 'male') {
       c.stamp(L.head, lit(skin));
       if (view === 'front') face(c, T, skin, pose.face, figure);
       else { c.set(...T.H(DIMS.headRx - 0.8, 0.6), skin.lo); c.set(...T.H(-DIMS.headRx + 0.8, 0.6), skin.lo); }
-      if (pose.face === 'sleep') eyeCover(c, T, L.head);
     });
   };
 }
@@ -179,18 +178,6 @@ function face(c, T, skin, state, figure = 'male') {
   else c.set(...P(3.4, 3.3), female ? 'crimson2' : skin.deep);
 }
 
-/**
- * A sleeper's eye cover (face 'sleep'; Avi, 2026-11-11): a small dark band over the closed eyes, from the brow to the cheek
- * and from the face's front to just behind the eye, with a lit edge toward the light. It paints only inside the head mask,
- * so the head's 1 px outline stays, and the female body (the same mask) keeps the male silhouette.
- */
-function eyeCover(c, T, head) {
-  head.forEach((x, y) => {
-    const [lx, ly] = T.headLocal(x, y);
-    if (lx < 1.4 || ly < -1.8 || ly > 0.6) return;
-    c.set(x, y, ly < -0.8 ? 'gray4' : 'shadow');
-  });
-}
 
 // ---------------------------------------------------------------- cloth
 /** Kilt/loincloth with pleats; length is the fraction of the thigh covered. */
@@ -710,7 +697,24 @@ export function held() {
         c.set(fx, fy - 1, 'fire1');
       });
     }
+    if (pose.face === 'sleep') part('head', c => eyeCover(c, ctx));
   };
+}
+
+/**
+ * A sleeper's eye cover (face 'sleep'; Avi asked for it, 2026-11-11). It is in the untinted `held` layer, which every scene
+ * draws over the hair, so neither the skin nor the hair tint darkens it (final review, 2026-11-12: in the skin-tinted body it
+ * was a faint dark strand on dark skin and black hair). A 2 px band of light blue cloth across the closed eyes, from the face's
+ * front to the hairline, lit toward the brow, with its own 1 px outline. It is painted only inside the head mask, so its outline
+ * stays on the head's, and its part is the head's, so whatever is in front of the head hides it.
+ */
+function eyeCover(c, ctx) {
+  const T = frameTools(ctx);
+  const band = T.regionMask(limbShapes(ctx).head, (x, y) => {
+    const [lx, ly] = T.headLocal(x, y);
+    return lx > 0.4 && ly >= -1.2 && ly < 0.8;
+  });
+  c.stamp(band, (x, y) => (T.headLocal(x, y)[1] < -0.2 ? 'water1' : 'water2'));
 }
 
 /**

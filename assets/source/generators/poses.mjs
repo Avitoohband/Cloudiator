@@ -77,8 +77,8 @@ export const GLADIATOR_ACTIONS = {
     ],
   },
   // Task 11b (Avi approved the after picture, 2026-11-11): the sleeper lies straight along its bed, which runs along map x (2:1
-  // down to the right on screen), with its head on the pillow and its feet on the foot tile, and wears a dark eye cover (face
-  // 'sleep'). The station, walking and depth stay on the bed's head tile, so the frames carry their own anchor: the head tile's
+  // down to the right on screen), with its head on the pillow and its feet on the foot tile, and wears an eye cover (face
+  // 'sleep', drawn in the untinted held layer). The station, walking and depth stay on the bed's head tile, so the frames carry their own anchor: the head tile's
   // centre inside the frame, half a tile (16, 8 px) up and to the left of the bed's middle. Scenes place a sprite by its frame's
   // pivot and mirror a sw-facing actor around it, so no scene code changes. Avi on the first draft: "their neck on the bed looks
   // weird. can you angle it lower a bit?": the head rests 2.5 px lower and 1 px nearer the shoulders (`head`), so the neck no

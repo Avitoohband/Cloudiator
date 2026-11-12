@@ -25,7 +25,10 @@ export const PREVIEW_FRAME_COUNT = 4;
 export const PREVIEW_FRAME_MS = 260;
 /** Art pixels to screen pixels: a whole number, so the pixel art stays sharp. */
 export const PREVIEW_SCALE = 3;
-/** Where the art's anchor (the feet) is, in a 64 px frame; the same as every actor (manifest `actors.gladiator.anchor`). */
+/**
+ * Where the art's anchor (the feet) is in a 64 px idle frame, which the preview and the portrait draw: the manifest's
+ * `actors.gladiator.anchor`. Sleep frames carry their own anchor (`anchorPx`, the bed's head tile), so this is not every frame's.
+ */
 export const PREVIEW_ANCHOR = { x: 32, y: 58 } as const;
 
 export const BODY_NAMES: Record<BodyId, string> = { male: 'Male', female: 'Female' };
@@ -106,7 +109,7 @@ const TINT_KEY = new Map((rawManifest as unknown as { actors: { gladiator: { lay
 /**
  * The layers a gladiator is drawn with, in manifest order: the camp's look (`lookFor`, the legacy look for a null appearance), its gear
  * from the silhouettes included, each tinted by the colour its manifest entry names, exactly as the scenes do. The `held` layer is left
- * out: it only holds what is carried, and every idle frame of it is empty. The profile card's portrait draws these (Task 11c).
+ * out: it holds only what is carried and a sleeper's eye cover, and every idle frame of it is empty. The profile card's portrait draws these (Task 11c).
  */
 export function actorLayers(appearance: Appearance | null, gladiatorId: string, silhouettes: readonly string[]): PreviewLayer[] {
   const { layers, tint } = lookFor(appearance, gladiatorId, silhouettes);

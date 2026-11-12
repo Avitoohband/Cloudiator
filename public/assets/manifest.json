@@ -126,7 +126,7 @@
  },
  "atlases": {
   "gladiators": {
-   "image": "actors/gladiators.93d0dd40e0.png",
+   "image": "actors/gladiators.24d6c39284.png",
    "data": "actors/gladiators.json",
    "width": 2048,
    "height": 2752,
@@ -2738,7 +2738,7 @@
    "walk": {
     "tilesPerSecond": 1
    },
-   "notes": "Draw layers in listed order with identical frame suffixes (layerId/action/dir/index). Draw one body (body, or body-female for a female body) with its clothes (cloth, or cloth-female) and at most one hair layer (hair is short; hair-long, hair-ponytail; none when bald). Multiply-tint layers by their tint key (skin, cloth, hair) per player. Two-handed weapons hide offhand-shield; head gear hides every hair layer; head-helmet-crest only with head-helmet; accent is always drawn. Frames stand on anchor, except the sleep frames, which carry their own (each frame's anchorPx and pivot: the bed's head tile centre, so the body lies along the bed); place every frame by its own pivot."
+   "notes": "Draw layers in listed order with identical frame suffixes (layerId/action/dir/index). Draw one body (body, or body-female for a female body) with its clothes (cloth, or cloth-female) and at most one hair layer (hair is short; hair-long, hair-ponytail; none when bald). Multiply-tint layers by their tint key (skin, cloth, hair) per player. Two-handed weapons hide offhand-shield; head gear hides every hair layer; head-helmet-crest only with head-helmet; accent and held are always drawn (held holds what is carried and the sleeper's eye cover). Frames stand on anchor, except the sleep frames, which carry their own (each frame's anchorPx and pivot: the bed's head tile centre, so the body lies along the bed); place every frame by its own pivot."
   },
   "npcs": [
    {
@@ -3347,9 +3347,9 @@
    "license": "Project-original artwork generated from repository source (assets/source); owned by the Cloudiator project. No third-party assets."
   },
   {
-   "file": "actors/gladiators.93d0dd40e0.png",
-   "sha256": "93d0dd40e01b099e69455950270f175580b9f27a4ee71da9fd2f9ba2893cddc6",
-   "bytes": 172031,
+   "file": "actors/gladiators.24d6c39284.png",
+   "sha256": "24d6c39284be05eb68a4b0c008f5d49f2762886479c65848ee6b30f17a9b7e57",
+   "bytes": 172050,
    "source": "generated",
    "generator": "assets/source/generators/gladiator.mjs",
    "inputs": [
@@ -3369,7 +3369,7 @@
   },
   {
    "file": "actors/gladiators.json",
-   "sha256": "e2f047e638c6ed588aa6482434edfe2956817c3c958256fbab63946752d676be",
+   "sha256": "9564a6e4195b271bf6785976b87918fea5cc2ea1ff6822739efdfe65e4c1f1f8",
    "bytes": 312867,
    "source": "generated",
    "generator": "assets/source/generators/gladiator.mjs",

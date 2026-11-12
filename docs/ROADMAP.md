@@ -56,6 +56,7 @@ Avi's decisions of 2026-11-11. The built items need no server change; the Wiki v
   - **Armour block checked.** The block share is min(2% per armour point, 70%), the same formula in combat and on the profile card (checked by reading the code, 2026-11-12). Gap found: in the Arena, renown armour counts 10% more, but the card shows only the expedition figure; 1.9 shows the Arena figure too.
   - **Sleeping without armour.** Gladiators asleep in bed are drawn without their armour (Claude's reading of "Rest no armor?"; client art only).
   - **Balance checks for 1.10.** Offline simulations of critical chance, two-handed against one-handed with a shield, and renown weapons against gold weapons. 1.9 changes no numbers; the results set the 1.10 balance.
+- **No 1.9.1 (Avi, 2026-11-12).** The review leftovers planned as 1.9.1 (phone tap scrolls the item card into view, the inventory Retry after a refused command, notification focus, card placement on mid-size windows and other small fixes) are fixed inside 1.9, because 1.9 is not released yet. Plan: [1.9 additions](superpowers/plans/2026-11-12-1.9-additions.md), Task 21.
 - Plan: [Wiki list, menu and shop grid](superpowers/plans/2026-11-11-wiki-menu-and-shop-grid.md). Wiki text to change when 1.9 ships: [wiki-1.9-pending](game-info/wiki-1.9-pending.md).
 
 ## Patch 1.10 details (planned; big: payments, economy and balance, server)

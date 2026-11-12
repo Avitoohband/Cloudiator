@@ -48,6 +48,13 @@ Project folders under `D:\Avi\Projects\Animation\Cloudiator\`.
 - Choose in Settings when names and titles show over the camp: Off, When zoomed in, or Always, even zoomed out.
 - Resting gladiators lie straight on their beds, with an eye cover and a floating ZzZ.
 
+### Planned for 1.9 (added 2026-11-12, not built yet)
+
+- Each Wiki topic shows its own YouTube video guide.
+- Practice fights: test your build against a dummy with stats you choose, or spar a copy of any gladiator. No stamina, no slot, no rating.
+- My gladiator shows how much extra damage a critical hit deals, and how much your armour blocks in the Arena.
+- Sleeping gladiators take off their armour.
+
 ## 1.8.1 — Clearer gladiator stats (2026-11-11)
 
 - The profile calls attack speed by name. Hover, focus, or tap a stat or attribute to see what it means and what changes it.

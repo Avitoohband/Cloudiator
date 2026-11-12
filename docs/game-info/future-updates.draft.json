@@ -8,7 +8,12 @@
     {
       "id": "friends",
       "title": "Friends and friend requests",
-      "body": "Send and respond to friend requests, and keep a friends list. This is planned as a standalone social update."
+      "body": "Send friend requests and keep a friends list. Invite a friend to a free spar that costs no stamina and no schedule slot."
+    },
+    {
+      "id": "homes",
+      "title": "Homes and trophies",
+      "body": "Build a home, show off your trophies, and invite friends over as guests."
     },
     {
       "id": "menus",
@@ -30,12 +35,18 @@
     {
       "id": "gear-balance",
       "title": "Gear bonuses and combat balance",
-      "body": "Give two-handed weapons a clear advantage that can compete with a one-handed weapon and shield. Explore gear weight, stat bonuses, and matching-set effects. Show critical chance, critical damage, and matchup dodge odds more clearly. Compare complete builds in PvP before changing Arena balance."
+      "body": "Lower critical chance, add ways to raise critical damage, and give two-handed weapons a real edge over a one-handed weapon and shield. Renown weapons are checked against gold ones. Gear weight, stat bonuses, and matching-set effects are explored later.",
+      "patch": "1.10"
+    },
+    {
+      "id": "strategy",
+      "title": "More strategy in fights",
+      "body": "Fights depend less on luck: set a battle plan before a fight, such as your stance, when to drink a potion, and whom to target."
     },
     {
       "id": "pve-roles",
       "title": "PvE builds and party roles",
-      "body": "Explore elemental damage and defense for PvE and dungeons, distinct jobs for party members, and role levels that let players progress in a role."
+      "body": "Party roles such as tank, summoner, buffer, and ranged damage dealer, each with its own builds and abilities, plus elemental damage and defense for PvE and dungeons, and role levels that let players progress in a role."
     },
     {
       "id": "expedition-xp",
@@ -50,7 +61,7 @@
     {
       "id": "camp-life",
       "title": "More life in camp",
-      "body": "Click an NPC to hear a line about themselves, planned for 1.9. More NPCs, a small rotating crowd behind the Arena spectators every evening, and pettable cats, dogs, rabbits, and birds are also planned."
+      "body": "Talking NPCs arrive in 1.9. More NPCs, a small rotating crowd behind the Arena spectators every evening, and pettable cats, dogs, rabbits, and birds are also planned."
     },
     {
       "id": "seasonal",
@@ -65,7 +76,8 @@
     {
       "id": "cosmetics",
       "title": "Cosmetic companions and gear looks",
-      "body": "The first paid cosmetics planned are a Supporter Banner and an optional pet follower. Later options include weapon and armor dyes and skins. These are appearance items with no combat or progression bonuses."
+      "body": "Real-money purchases arrive with card and Google Pay checkout. The first items are a Supporter Banner and a pet follower. Weapon and armor dyes and skins come later. These are appearance items with no combat or progression bonuses.",
+      "patch": "1.10"
     },
     {
       "id": "shops-grid",
@@ -112,7 +124,7 @@
     {
       "id": "stat-help",
       "title": "Help on stats and attributes",
-      "body": "Hover, focus, or tap any attribute or stat in My gladiator to see what it means.",
+      "body": "Hover, focus, or tap any attribute or stat in My gladiator to see what it means. Critical hits show their extra damage, and armour shows how much it blocks in the Arena too.",
       "patch": "1.9"
     },
     {
@@ -130,7 +142,19 @@
     {
       "id": "sleeping",
       "title": "Sleeping on beds",
-      "body": "Resting gladiators lie straight on their beds, with an eye cover and a floating ZzZ.",
+      "body": "Resting gladiators lie straight on their beds without their armour, with an eye cover and a floating ZzZ.",
+      "patch": "1.9"
+    },
+    {
+      "id": "wiki-guides",
+      "title": "Video guides in the Wiki",
+      "body": "Each Wiki topic gets its own short YouTube guide, shown as a card under the topic title.",
+      "patch": "1.9"
+    },
+    {
+      "id": "practice-fights",
+      "title": "Practice fights",
+      "body": "Test your build against a training dummy with stats you choose, or spar a copy of any gladiator from their profile. Free: no stamina, no schedule slot, no rating.",
       "patch": "1.9"
     },
     {
@@ -148,7 +172,7 @@
     {
       "id": "potions",
       "title": "Stamina and health potions",
-      "body": "Stamina potions restore stamina, with a daily limit. Health potions can be set to be drunk automatically in fights or by you. Details are still being decided.",
+      "body": "Stamina potions restore 30 stamina, at most 2 per game day. A health potion is drunk automatically in a fight when health falls below a level you set, and you can drink one yourself between fights.",
       "patch": "1.10"
     },
     {
@@ -161,6 +185,24 @@
       "id": "arena-evenings",
       "title": "Three Arena bouts an evening",
       "body": "Each Arena entry will get three bouts in an evening, never against the same opponent twice. You will meet fresh faces first, and NPC or bot fighters fill in when there are not enough players. Rewards are shared across the three bouts, so a full evening pays more than one bout does today.",
+      "patch": "1.10"
+    },
+    {
+      "id": "payments",
+      "title": "Bag slots and real-money shop",
+      "body": "Buy extra bag slots with real money, coupons, or renown. Bag slots add space only, never combat power.",
+      "patch": "1.10"
+    },
+    {
+      "id": "dungeon-gear",
+      "title": "Dungeon-only gear",
+      "body": "Dungeon bosses drop gear you cannot buy or find anywhere else.",
+      "patch": "1.10"
+    },
+    {
+      "id": "feedback",
+      "title": "Send feedback",
+      "body": "Send bug reports and ideas from inside the game. The team reads and answers them.",
       "patch": "1.10"
     },
     {

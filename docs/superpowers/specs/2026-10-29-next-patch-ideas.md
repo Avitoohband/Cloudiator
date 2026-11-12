@@ -173,3 +173,27 @@ Avi, 2026-11-01, added a standalone social feature after the economy patch:
     device, so phone and desktop can differ. Handle [browser autoplay restrictions](https://developer.mozilla.org/en-US/docs/Web/Media/Guides/Autoplay#autoplay_availability)
     when starting sound. Music/SFX assets, default levels, sound coverage and the concrete interface need their design
     pass; no release number or asset generation/download is assigned or authorized by this planning entry.
+
+Avi's list of 2026-11-12 (pasted), with "compare it with yours, make sure everything is noted ... anything can be included in 1.9
+should be in" and "next patch should be a big one, implementing payment as well", then "skip questions, do recommendations".
+Numbering continues at 58 because ideas 48-57 live on `claude/task-24`. Items already built or decided are not repeated here:
+mark as read, talking NPCs, names and titles, menu pin and position, attack speed (1.8.1), stat and attribute help, the XP bar,
+stacks with search and sort, the Wiki and Future Updates, salvage, sleeping straight on the bed, harder dungeons and Arena
+evenings. Placement and recommendations are in the [roadmap](../../ROADMAP.md).
+
+58. **Rest without armour?** "Rest no armor?". Read as: a sleeping gladiator is drawn without armour (1.9, client art).
+59. **Homes with trophies.** "Home, with tropies, any one can build home and guest friend" (later; builds on idea 43, needs Friends).
+60. **Dungeon-only items.** "Items that can only be getting in the dungeons" (1.10, boss chests).
+61. **Stripe and Google Pay.** "stripe and google pay for monetization" (1.10 payments; Stripe's support for Israeli sellers is checked first).
+62. **What critical damage is.** "What is the dmg of the crit dmg" (1.9: show x1.5).
+63. **Raise critical damage.** "add a way to increas crit dmg ?" (1.10 balance).
+64. **Less luck, more strategy.** "make the battles not RNG only based ... people could interfier with the battle, strategy wise" (later design; the 1.10 potion setting comes first).
+65. **Lower critical chance.** "down the crit rate" (1.10 balance, after the 1.9 simulations).
+66. **Feedback.** "feedback mechanism" (1.10, with ideas 30 and 39).
+67. **Spar a chosen player.** "invite specific player for spar battle (stamina free and slot free)?" (1.9 spars a copy of a gladiator; invitations come with Friends).
+68. **Build-test dummy.** "add option to fight with dummy that I choose stats, for checking my build (stamina free)" (1.9 practice fights).
+69. **Bag slots for real money or coupons.** "bad slots for real money coupons", read as bag slots (1.10 payments).
+70. **PvE roles with abilities.** "pve roles, builds, and abilites (roles: tank, summoner, buffer, adc)" and "parties roles. Tank, etc" (later).
+71. **Check damage against the block share.** Avi, in Hebrew: check that the damage calculation against the block percentage is correct. Checked 2026-11-12 by reading the code: one formula, min(2% per armour point, 70%), in combat and on the card; the card does not show the Arena's renown armour bonus (shown in 1.9).
+72. **Checks for balance.** "check about the 2 handed advanted of one handed", "check about the weapons from renown", "check for the arena algorithm, matches" (1.9 simulations, 1.10 balance; the Arena matching is the 1.10 Arena evenings).
+73. **Pets?** Already planned: the paid pet follower (1.10 payments) and pettable camp animals (later).

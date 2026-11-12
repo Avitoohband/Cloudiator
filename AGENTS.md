@@ -289,6 +289,16 @@ change the host's last-access setting. Separate
 worktrees each have their own `.next` and may run in parallel on their own
 Playwright ports.
 
+Avi approved on 2026-11-12 (gate lesson): production builds always refuse the
+fixture preview, so every browser case that opens `?mode=fixture` or uses the
+camp harness skips the production run (`PLAYWRIGHT_STATIC === 'true'`), and
+each task that adds or changes such a case runs the affected specs once in
+production mode during its task check, serialized after the isolated build.
+Observed: the `6d19c54` gate failed stage 11 on 15 such cases without the
+skip; tested fix `fb98bf0` (46 skipped; the `722a0f1` gate passed 12/12). The
+task-check run is adopted, not yet tested on a new task. See
+[the gate guide](docs/operations/verification-gates.md#fixture-only-browser-cases-in-the-production-run).
+
 # React effects/state (async data) — persistent project override
 
 Avi approved this correctness supplement to `vercel:react-best-practices` on

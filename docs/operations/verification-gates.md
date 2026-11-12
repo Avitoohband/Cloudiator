@@ -175,6 +175,15 @@ CSP controls, an unchanged Edge guard and retained artifacts. Never splice runs.
 Production build/deployment/live checks and following-boundary health remain
 separate obligations.
 
+## Fixture-only browser cases in the production run
+
+Approved by Avi on 2026-11-12. Production builds always refuse the fixture preview: `next.config.ts` forces `NEXT_PUBLIC_FIXTURE_ENABLED` to `'false'` when `NODE_ENV` is `production`, so `?mode=fixture` shows "Fixture preview is unavailable in this build." and the camp debug hook `window.__cloudiatorCamp` is absent. The gate's production stage (step 5) runs every spec again against that build.
+
+- A browser case that opens `?mode=fixture` or uses the camp harness must skip the production run, as the existing camp specs do: `test.skip(process.env.PLAYWRIGHT_STATIC === 'true', 'The camp harness runs on the fixture preview only.')` (per file in a `beforeEach`, or as the first line of the case).
+- Each task that adds or changes such a case runs the affected specs once in production mode during its task check, after a serialized `CLOUDIATOR_BROWSER_TEST=true NEXT_PUBLIC_FIXTURE_ENABLED=true npm run build` (never during a browser run): `PLAYWRIGHT_STATIC=true PLAYWRIGHT_STATIC_ROOT=.next/browser-test npx playwright test --config <private config> <specs>`. Every fixture-only case must report skipped, not failed or timed out. Record the counts in the task report.
+
+**Observed 2026-11-12 (gate on `6d19c54`):** stages 1-10 and 12 passed, but stage 11 failed 15 production cases from `tests/browser/menu-pin.spec.ts` and the equip fixture-preview case in `tests/browser/equip-from-gladiator.spec.ts`; both opened `?mode=fixture` without the production skip. **Tested fix:** `fb98bf0` added the skip; the production-mode run of both specs reported 46 skipped, and the full gate on `722a0f1` passed 12/12. The task-check run above is adopted as a rule; it is not yet tested on a new task.
+
 ## Parallel work
 
 Separate git worktrees have separate `.next` directories. They may run gates at the same time as long as each uses its own Playwright port and its own static server port.

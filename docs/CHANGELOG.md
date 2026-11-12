@@ -47,10 +47,10 @@ Project folders under `D:\Avi\Projects\Animation\Cloudiator\`.
 - Resting gladiators lie straight on their beds, with an eye cover and a floating ZzZ.
 - My gladiator and gladiator cards show the extra damage of a critical hit, and how much renown armor and weapons add in the Arena.
 - Sleeping gladiators take off their armour.
+- Each Wiki topic shows its own YouTube video guide.
 
 ### Planned for 1.9 (added 2026-11-12, not built yet)
 
-- Each Wiki topic shows its own YouTube video guide.
 - Practice fights: test your build against a dummy with stats you choose, or spar a copy of any gladiator. No stamina, no slot, no rating.
 
 ## 1.8.1 — Clearer gladiator stats (2026-11-11)

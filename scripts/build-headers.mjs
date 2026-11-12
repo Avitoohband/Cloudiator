@@ -62,7 +62,7 @@ export function contentSecurityPolicy(origin) {
     "default-src 'self'",
     "script-src 'self' 'unsafe-inline'",
     "style-src 'self' 'unsafe-inline'",
-    "img-src 'self' data: blob:",
+    "img-src 'self' data: blob: https://i.ytimg.com",
     `connect-src 'self'${origin ? ` ${origin}` : ''}`,
     "object-src 'none'",
     "base-uri 'self'",

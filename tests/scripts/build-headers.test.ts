@@ -10,7 +10,7 @@ import { connectOrigin, contentSecurityPolicy, headersFile } from '../../scripts
 // Decision 2: the hand-written art gallery is not part of a production export. The policy strings are pinned literally here,
 // so widening any directive is a visible test change.
 
-const POLICY = "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; "
+const POLICY = "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https://i.ytimg.com; "
   + "connect-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'none'; form-action 'self'";
 const PROJECT = 'https://abcdefghijklmnop.supabase.co';
 

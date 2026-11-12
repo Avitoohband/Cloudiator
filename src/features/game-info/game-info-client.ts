@@ -1,8 +1,8 @@
 import { getBrowserClient } from '../../lib/api/client';
 
 export type GameInfoTab = 'wiki' | 'future';
-export type GameInfoEntry = { id: string; title: string; body: string; patch?: string };
-export type GameInfoDocument = { entries: GameInfoEntry[]; videos?: [string | null, string | null] };
+export type GameInfoEntry = { id: string; title: string; body: string; patch?: string; video?: string; videoLength?: string };
+export type GameInfoDocument = { entries: GameInfoEntry[] };
 export type GameInfoSnapshot = { version: number; document: GameInfoDocument };
 export type GameInfoPages = Partial<Record<GameInfoTab, GameInfoSnapshot>>;
 type Code = 'forbidden' | 'invalid' | 'conflict' | 'unavailable';
@@ -10,21 +10,44 @@ type EditResult = { ok: true } & GameInfoSnapshot | { ok: false; code: Code };
 type Command = { tab: GameInfoTab; action: 'read' } | { tab: GameInfoTab; action: 'publish'; expectedVersion: number } |
   { tab: GameInfoTab; action: 'save'; expectedVersion: number; document: GameInfoDocument };
 
+const YOUTUBE_LINK = /^https:\/\/(?:(?:www\.)?youtube\.com\/watch\?v=|youtu\.be\/)([A-Za-z0-9_-]{11})$/;
+const GUIDE_LENGTH = /^(?:[0-9]|[1-5][0-9]):[0-5][0-9]$/;
+
+/** A bare YouTube watch or youtu.be link (the same shape the database accepts), or null. */
 export function youtubeLink(value: unknown): string | null {
-  return typeof value === 'string' && /^https:\/\/(?:(?:www\.)?youtube\.com\/watch\?v=|youtu\.be\/)[A-Za-z0-9_-]{11}$/.test(value) ? value : null;
+  return typeof value === 'string' && YOUTUBE_LINK.test(value) ? value : null;
 }
 
-function snapshot(data: unknown, tab: GameInfoTab): GameInfoSnapshot | null {
+/** The video id inside a bare YouTube link, or null. */
+export function youtubeId(link: string): string | null {
+  return YOUTUBE_LINK.exec(link)?.[1] ?? null;
+}
+
+/** A guide length as minutes:seconds, like 1:12 (the same shape the database accepts). */
+export function guideLength(value: unknown): string | null {
+  return typeof value === 'string' && GUIDE_LENGTH.test(value) ? value : null;
+}
+
+/** The picture YouTube serves for a video link, or null when the link is not a bare YouTube link. */
+export function guideThumbnail(link: string): string | null {
+  const id = youtubeId(link);
+  return id ? `https://i.ytimg.com/vi/${id}/mqdefault.jpg` : null;
+}
+
+export function parseGameInfo(data: unknown, tab: GameInfoTab): GameInfoSnapshot | null {
   if (!data || typeof data !== 'object' || !('version' in data) || typeof data.version !== 'number' ||
       !Number.isSafeInteger(data.version) || data.version < 0 || !('document' in data)) return null;
   const doc = data.document as Partial<GameInfoDocument> | null;
   if (!doc || !Array.isArray(doc.entries)) return null;
   const entries = doc.entries.filter(entry => entry && typeof entry.id === 'string' && typeof entry.title === 'string' && typeof entry.body === 'string')
-    .map(({ id, title, body, patch }) => ({ id, title, body, ...(tab === 'future' && typeof patch === 'string' ? { patch } : {}) }));
+    .map(({ id, title, body, patch, video, videoLength }) => {
+      const guide = tab === 'wiki' ? youtubeLink(video) : null;
+      const length = guide ? guideLength(videoLength) : null;
+      return { id, title, body, ...(tab === 'future' && typeof patch === 'string' ? { patch } : {}),
+        ...(guide ? { video: guide } : {}), ...(length ? { videoLength: length } : {}) };
+    });
   if (entries.length !== doc.entries.length) return null;
-  const document: GameInfoDocument = { entries };
-  if (tab === 'wiki') document.videos = [youtubeLink(doc.videos?.[0]), youtubeLink(doc.videos?.[1])];
-  return { version: data.version, document };
+  return { version: data.version, document: { entries } };
 }
 
 export async function loadPublishedGameInfo(): Promise<GameInfoPages> {
@@ -36,7 +59,7 @@ export async function loadPublishedGameInfo(): Promise<GameInfoPages> {
   for (const row of data) {
     if (row.tab !== 'wiki' && row.tab !== 'future') continue;
     const tab: GameInfoTab = row.tab;
-    const page = snapshot(row, tab);
+    const page = parseGameInfo(row, tab);
     if (page) pages[tab] = page;
   }
   return pages;
@@ -53,8 +76,8 @@ export async function loadDraftGameInfo(): Promise<GameInfoPages> {
     const [wiki, future] = await Promise.all([
       import('../../../docs/game-info/wiki.draft.json'), import('../../../docs/game-info/future-updates.draft.json')]);
     const pages: GameInfoPages = {};
-    const wikiPage = snapshot({ version: 0, document: wiki.default }, 'wiki');
-    const futurePage = snapshot({ version: 0, document: future.default }, 'future');
+    const wikiPage = parseGameInfo({ version: 0, document: wiki.default }, 'wiki');
+    const futurePage = parseGameInfo({ version: 0, document: future.default }, 'future');
     if (wikiPage) pages.wiki = wikiPage;
     if (futurePage) pages.future = futurePage;
     return pages;
@@ -76,7 +99,7 @@ export async function editGameInfo(command: Command): Promise<EditResult> {
       if (response.status === 400) return { ok: false, code: 'invalid' };
       return unavailable;
     }
-    const page = data?.ok === true ? snapshot(data, command.tab) : null;
+    const page = data?.ok === true ? parseGameInfo(data, command.tab) : null;
     return page ? { ok: true, ...page } : unavailable;
   } catch { return unavailable; }
 }

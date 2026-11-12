@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { PATCH } from '../../src/lib/patch';
 import { ownerFixture, worldFixture } from '../fixtures/domain';
-import { expect, test } from './fixtures';
+import { expect, test, type Page } from './fixtures';
 import { routeLiveReads, seedSession } from './live-routes';
 import { cornerChip, expectOwnerShown, quietArrivals } from './shell-helpers';
 
@@ -17,7 +17,9 @@ test('visitors can read Game Info and switch tabs with the keyboard', async ({ p
   await expect(wiki).toBeFocused();
   const article = panel.getByRole('article', { name: 'Combat' });
   await expect(article).toContainText('Precision');
-  await expect(panel.getByText('In planning')).toHaveCount(2);
+  await expect(panel.getByText('Video guide coming soon')).toBeVisible();
+  await expect(panel.getByRole('heading', { name: 'YouTube guides' })).toHaveCount(0);
+  await expect(panel.getByText('In planning')).toHaveCount(0);
 
   const copy = (element: Element) => element.dispatchEvent(new Event('copy', { bubbles: true, cancelable: true }));
   await expect(article).toHaveCSS('user-select', 'none');
@@ -157,4 +159,113 @@ test('Wiki topics are one short scrolling list', async ({ page }) => {
   expect(await inView(list.getByRole('option', { selected: true }))).toBe(true);
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
   expect(await panel.evaluate(element => element.scrollWidth <= element.clientWidth)).toBe(true);
+});
+
+// A 1x1 PNG, so the guide thumbnails (https://i.ytimg.com/vi/<id>/mqdefault.jpg) load offline.
+const PIXEL = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==', 'base64');
+type WikiDoc = { entries: { id: string; title: string; body: string; video?: string; videoLength?: string }[] };
+
+async function openGuides(page: Page, { length = '1:12', thumbnails = 'load' }: { length?: string | null; thumbnails?: 'load' | 'fail' } = {}) {
+  test.skip(process.env.PLAYWRIGHT_STATIC === 'true', 'The published Wiki uses the development-only intercepted transport.');
+  const wiki = JSON.parse(readFileSync('docs/game-info/wiki.draft.json', 'utf8')) as WikiDoc;
+  const entries = wiki.entries.map(({ video, videoLength, ...entry }) => entry.id === 'combat'
+    ? { ...entry, video: 'https://youtu.be/AAAAAAAAAAA', ...(length ? { videoLength: length } : {}) } : entry);
+  await quietArrivals(page.context());
+  await routeLiveReads(page.context(), { world: worldFixture, gameInfo: [{ tab: 'wiki', version: 1, document: { entries } }] });
+  const thumbnailRequests: string[] = [];
+  await page.context().route('https://i.ytimg.com/**', route => {
+    thumbnailRequests.push(route.request().url());
+    return thumbnails === 'fail' ? route.abort() : route.fulfill({ body: PIXEL, contentType: 'image/png' });
+  });
+  await page.setViewportSize({ width: 360, height: 700 });
+  await page.goto('/game/');
+  await cornerChip(page).getByRole('button', { name: 'Game Info', exact: true }).click();
+  const panel = page.getByRole('dialog', { name: 'Game Info' });
+  await expect(panel.getByRole('article', { name: 'Combat, dodge, and critical hits' })).toBeVisible();
+  return { panel, entries, thumbnailRequests };
+}
+
+test.describe('Wiki guide cards', () => {
+  test('a topic with a guide shows a card between its heading and its text, with the length', async ({ page }) => {
+    const { panel, thumbnailRequests } = await openGuides(page);
+    const article = panel.getByRole('article', { name: 'Combat, dodge, and critical hits' });
+    const card = article.getByRole('link', { name: 'Watch the guide, 1:12, on YouTube (opens in a new tab)' });
+    await expect(card).toHaveAttribute('href', 'https://youtu.be/AAAAAAAAAAA');
+    await expect(card).toHaveAttribute('target', '_blank');
+    await expect(card).toHaveAttribute('rel', 'noopener noreferrer');
+    await expect(card).toContainText('Watch the guide · 1:12');
+    await expect(card).toContainText('Combat, dodge, and critical hits');
+    await expect(card).toContainText('YouTube ↗');
+    await expect(card).toContainText('▶');
+    const image = card.locator('img');
+    await expect(image).toHaveAttribute('src', 'https://i.ytimg.com/vi/AAAAAAAAAAA/mqdefault.jpg');
+    await expect(image).toHaveAttribute('alt', '');
+    await expect(image).toHaveAttribute('referrerpolicy', 'no-referrer');
+    await expect(image).toHaveAttribute('loading', 'lazy');
+    await expect.poll(() => image.evaluate(element => (element as HTMLImageElement).naturalWidth)).toBe(1);
+    expect(thumbnailRequests).toEqual(['https://i.ytimg.com/vi/AAAAAAAAAAA/mqdefault.jpg']);
+    expect(await article.evaluate(element => Array.from(element.children).map(child => child.tagName))).toEqual(['H3', 'A', 'P']);
+    await expect(panel.getByText('Video guide coming soon')).toHaveCount(0);
+    await expect(panel.getByRole('heading', { name: 'YouTube guides' })).toHaveCount(0);
+  });
+
+  test('a guide without a length reads Watch the guide', async ({ page }) => {
+    const { panel } = await openGuides(page, { length: null });
+    const card = panel.getByRole('article').getByRole('link', { name: 'Watch the guide on YouTube (opens in a new tab)' });
+    await expect(card).toContainText('Watch the guide');
+    await expect(card).not.toContainText('·');
+  });
+
+  test('a topic without a guide says the video is coming soon, and the old two slots are gone', async ({ page }) => {
+    const { panel } = await openGuides(page);
+    await panel.getByRole('option', { name: 'Start in camp' }).click();
+    const article = panel.getByRole('article', { name: 'Start in camp' });
+    await expect(article.getByText('Video guide coming soon')).toBeVisible();
+    await expect(article.getByRole('link')).toHaveCount(0);
+    await expect(panel.getByRole('heading', { name: 'YouTube guides' })).toHaveCount(0);
+    await expect(panel.getByText(/Video [12]$/)).toHaveCount(0);
+  });
+
+  test('only topics with a guide carry a play marker hidden from readers and end their name with video guide', async ({ page }) => {
+    const { panel } = await openGuides(page);
+    const list = panel.getByRole('listbox', { name: 'Wiki topics' });
+    const combat = list.getByRole('option', { name: 'Combat, dodge, and critical hits' });
+    await expect(combat).toHaveAccessibleName('Combat, dodge, and critical hits, video guide');
+    const marker = combat.locator('[aria-hidden="true"]', { hasText: '▶' });
+    await expect(marker).toHaveCount(1);
+    await expect(marker).toBeVisible();
+    const start = list.getByRole('option', { name: 'Start in camp' });
+    await expect(start).toHaveAccessibleName('Start in camp');
+    await expect(start).not.toContainText('▶');
+    await expect(list.getByText('▶')).toHaveCount(1);
+  });
+
+  test('a thumbnail that fails to load leaves the dark frame and the play mark, without a broken image', async ({ page }) => {
+    const { panel } = await openGuides(page, { thumbnails: 'fail' });
+    const card = panel.getByRole('article').getByRole('link', { name: /Watch the guide, 1:12/ });
+    await expect(card).toContainText('▶');
+    await expect(card.locator('img')).toBeHidden();
+    const frame = card.locator('span').first();
+    const box = (await frame.boundingBox())!;
+    expect(box.width).toBeGreaterThan(80);
+    expect(box.height).toBeGreaterThan(40);
+    await expect(frame).toHaveCSS('background-color', 'rgb(0, 0, 0)');
+    await expect(card).toContainText('YouTube ↗');
+  });
+
+  test('on a 360 px phone the card fits with a 96 px picture and the rows stay 44 px', async ({ page }) => {
+    const { panel } = await openGuides(page);
+    const card = panel.getByRole('article').getByRole('link', { name: /Watch the guide, 1:12/ });
+    await expect(card).toBeVisible();
+    const thumb = await card.locator('img').evaluate(element => element.parentElement!.getBoundingClientRect().width);
+    expect(Math.round(thumb)).toBe(96);
+    const [cardBox, panelBox] = await Promise.all([card.boundingBox(), panel.boundingBox()]);
+    expect(cardBox!.x).toBeGreaterThanOrEqual(panelBox!.x);
+    expect(cardBox!.x + cardBox!.width).toBeLessThanOrEqual(panelBox!.x + panelBox!.width);
+    const rows = panel.getByRole('listbox', { name: 'Wiki topics' }).getByRole('option');
+    expect(await rows.evaluateAll(all => all.every(row => Math.abs(row.getBoundingClientRect().height - 44) < 1.5))).toBe(true);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+    expect(await panel.evaluate(element => element.scrollWidth <= element.clientWidth)).toBe(true);
+    expect(await card.evaluate(element => element.scrollWidth <= element.clientWidth)).toBe(true);
+  });
 });

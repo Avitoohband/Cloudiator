@@ -3,13 +3,32 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { ClipboardEvent, KeyboardEvent } from 'react';
 import { GameInfoEditor } from './GameInfoEditor';
-import { editGameInfo, loadDraftGameInfo, loadPublishedGameInfo, type GameInfoPages, type GameInfoSnapshot, type GameInfoTab } from './game-info-client';
+import { editGameInfo, guideThumbnail, loadDraftGameInfo, loadPublishedGameInfo, type GameInfoEntry, type GameInfoPages, type GameInfoSnapshot, type GameInfoTab } from './game-info-client';
 import { futureUpdates, wikiTopics } from './public-content';
 import styles from './game-info.module.css';
 
 const tabs = [{ id: 'wiki', label: 'Wiki' }, { id: 'future', label: 'Future Updates' }] as const;
 const stopCopy = (event: ClipboardEvent) => event.preventDefault();
-const wikiFallback = wikiTopics.map(({ text, ...entry }) => ({ ...entry, body: text }));
+const wikiFallback: GameInfoEntry[] = wikiTopics.map(({ text, ...entry }) => ({ ...entry, body: text }));
+
+/** One Wiki guide: a card with YouTube's picture, the play mark, the length and the topic. A failed picture leaves the dark frame. */
+function GuideCard({ title, video, length }: { title: string; video: string; length?: string }) {
+  const [failed, setFailed] = useState(false);
+  const picture = guideThumbnail(video);
+  return <a className={styles.gcard} href={video} target="_blank" rel="noopener noreferrer"
+    aria-label={`Watch the guide${length ? `, ${length},` : ''} on YouTube (opens in a new tab)`}>
+    <span className={styles.thumb}>
+      {picture && !failed && <img src={picture} alt="" loading="lazy" referrerPolicy="no-referrer" onError={() => setFailed(true)} />}
+      <span className={styles.play} aria-hidden="true">▶</span>
+    </span>
+    <span className={styles.gtext}>
+      <b>Watch the guide{length ? ` · ${length}` : ''}</b>
+      <span>{title}</span>
+      <span className={styles.yt}>YouTube ↗</span>
+    </span>
+  </a>;
+}
+
 const futureIds = ['parties', 'friends', 'items', 'seasonal'];
 const futureFallback = futureUpdates.map(({ title, text }, index) => ({ id: futureIds[index], title, body: text, patch: undefined }));
 
@@ -153,26 +172,19 @@ export function GameInfoPanel({ id, onClose, update, fixture, editorAccount, onD
         aria-activedescendant={article ? optionId(article.id) : undefined} onKeyDown={moveTopic}>
         {wiki.map(item => {
           const chosen = item.id === article?.id;
-          return <div key={item.id} id={optionId(item.id)} role="option" aria-selected={chosen} className={styles.topic}
+          return <div key={item.id} id={optionId(item.id)} role="option" aria-selected={chosen} aria-label={item.video ? `${item.title}, video guide` : undefined} className={styles.topic}
             onClick={() => setTopic(item.id)}>
             <span aria-hidden="true" className={styles.mark}>{chosen ? '✓' : ''}</span>{item.title}
+            {item.video && <span aria-hidden="true" className={styles.pm} title="Has a video guide">▶</span>}
           </div>;
         })}
       </div>
       {article && <article className={`${styles.entry} ${styles.readText}`} onCopy={stopCopy} aria-labelledby={`${id}-article`}>
         <h3 id={`${id}-article`}>{article.title}</h3>
+        {article.video ? <GuideCard key={article.video} title={article.title} video={article.video} length={article.videoLength} />
+          : <p className={styles.soon}>Video guide coming soon</p>}
         <p>{article.body}</p>
       </article>}
-      <section aria-labelledby={`${id}-videos`} className={styles.videos}>
-        <h3 id={`${id}-videos`}>YouTube guides</h3>
-        <ul>{([0, 1] as const).map(index => {
-          const link = pages.wiki?.document.videos?.[index];
-          return <li className={styles.entry} key={index}>
-            {link ? <a href={link} target="_blank" rel="noopener noreferrer">Watch video {index + 1} on YouTube</a>
-              : <><strong>Video {index + 1}</strong><span>In planning</span></>}
-          </li>;
-        })}</ul>
-      </section>
     </section>
     <section id={panelId('future')} role="tabpanel" aria-labelledby={tabId('future')} className={styles.body} hidden={active !== 1 || editing !== null} tabIndex={0}>
       <div className={styles.readText} onCopy={stopCopy}>

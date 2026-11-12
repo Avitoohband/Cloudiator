@@ -4,14 +4,14 @@ import { routeLiveReads, seedSession, SUPABASE_URL } from './live-routes';
 import { cornerChip, expectOwnerShown, quietArrivals } from './shell-helpers';
 
 type Tab = 'wiki' | 'future';
-type Document = { entries: { id: string; title: string; body: string; patch?: string }[]; videos?: [null, null] };
+type Document = { entries: { id: string; title: string; body: string; patch?: string; video?: string; videoLength?: string }[] };
 
-async function setup(page: Page, editor = true) {
+async function setup(page: Page, editor = true, rejectSave = false) {
   const context = page.context();
   await seedSession(context);
   await quietArrivals(context);
   await routeLiveReads(context, { world: worldFixture, owner: ownerFixture });
-  const wiki: Document = { entries: [{ id: 'combat', title: 'Combat', body: 'Public combat guide.' }], videos: [null, null] };
+  const wiki: Document = { entries: [{ id: 'combat', title: 'Combat', body: 'Public combat guide.' }] };
   const future: Document = { entries: [{ id: 'parties', title: 'Party invitations', body: 'Public plan.' }] };
   const published = { wiki: { version: 0, document: wiki }, future: { version: 0, document: future } };
   const drafts = structuredClone(published);
@@ -26,6 +26,7 @@ async function setup(page: Page, editor = true) {
     const answer = (status: number, json: unknown) => route.fulfill({ status, json, headers: cors });
     if (!editor) return answer(403, { ok: false, code: 'forbidden' });
     const draft = drafts[tab];
+    if (rejectSave && action === 'save') return answer(400, { ok: false, code: 'invalid' });
     if (action !== 'read') {
       writes.push(`${tab}/${action}`);
       if (expectedVersion !== draft.version) return answer(409, { ok: false, code: 'conflict' });
@@ -82,7 +83,7 @@ test.describe('Game Info editor', () => {
     await panel.getByRole('button', { name: 'Close Game Info', exact: true }).click();
     await expect(panel.getByLabel('Text', { exact: true })).toHaveValue('Unsaved owner text.');
     drafts.wiki.version++;
-    drafts.wiki.document = { entries: [{ id: 'combat', title: 'Combat', body: 'Newer MCP draft.' }], videos: [null, null] };
+    drafts.wiki.document = { entries: [{ id: 'combat', title: 'Combat', body: 'Newer MCP draft.' }] };
     await panel.getByRole('button', { name: 'Save draft', exact: true }).click();
     await expect(panel.getByRole('alert')).toContainText('changed elsewhere');
     await expect(panel.getByLabel('Text', { exact: true })).toHaveValue('Unsaved owner text.');
@@ -95,5 +96,61 @@ test.describe('Game Info editor', () => {
       await expect(other.panel.getByRole('button', { name: 'Edit Wiki', exact: true })).toHaveCount(0);
       expect(other.writes).toEqual([]);
     } finally { await ordinary.close(); }
+  });
+
+  test('the Wiki editor edits the selected topic guide link and length, and saves and publishes them', async ({ page }) => {
+    const { panel, published, drafts } = await setup(page);
+    await panel.getByRole('button', { name: 'Edit Wiki', exact: true }).click();
+    await expect(panel.getByLabel(/YouTube video [12]/)).toHaveCount(0);
+    const link = panel.getByLabel('YouTube guide', { exact: true });
+    const length = panel.getByLabel('Guide length', { exact: true });
+    await expect(length).toBeDisabled();
+    await link.fill('https://example.com/watch?v=AAAAAAAAAAA');
+    await expect(panel.getByText('Enter a YouTube video URL.')).toBeVisible();
+    await expect(panel.getByRole('button', { name: 'Save draft', exact: true })).toBeDisabled();
+    await link.fill('https://youtu.be/AAAAAAAAAAA');
+    await expect(panel.getByText('Enter a YouTube video URL.')).toHaveCount(0);
+    await expect(length).toBeEnabled();
+    await length.fill('1:99');
+    await expect(panel.getByText('Enter the length as minutes:seconds, like 1:12.')).toBeVisible();
+    await expect(panel.getByRole('button', { name: 'Save draft', exact: true })).toBeDisabled();
+    await length.fill('1:12');
+    await expect(panel.getByText('Enter the length as minutes:seconds, like 1:12.')).toHaveCount(0);
+    await panel.getByRole('button', { name: 'Save draft', exact: true }).click();
+    await expect(panel.getByRole('status')).toHaveText('Draft saved.');
+    expect(drafts.wiki.document.entries[0]).toEqual({ id: 'combat', title: 'Combat', body: 'Public combat guide.', video: 'https://youtu.be/AAAAAAAAAAA', videoLength: '1:12' });
+    expect('videos' in drafts.wiki.document).toBe(false);
+    await panel.getByRole('button', { name: 'Publish', exact: true }).click();
+    expect(published.wiki.document.entries[0].video).toBe('https://youtu.be/AAAAAAAAAAA');
+    await expect(panel.getByRole('link', { name: 'Watch the guide, 1:12, on YouTube (opens in a new tab)' })).toHaveAttribute('href', 'https://youtu.be/AAAAAAAAAAA');
+  });
+
+  test('clearing the link removes both guide keys from the saved document', async ({ page }) => {
+    const { panel, drafts } = await setup(page);
+    drafts.wiki.document.entries[0].video = 'https://youtu.be/AAAAAAAAAAA';
+    drafts.wiki.document.entries[0].videoLength = '1:12';
+    await panel.getByRole('button', { name: 'Edit Wiki', exact: true }).click();
+    const link = panel.getByLabel('YouTube guide', { exact: true });
+    await expect(link).toHaveValue('https://youtu.be/AAAAAAAAAAA');
+    await expect(panel.getByLabel('Guide length', { exact: true })).toHaveValue('1:12');
+    await link.fill('');
+    await expect(panel.getByLabel('Guide length', { exact: true })).toBeDisabled();
+    await panel.getByRole('button', { name: 'Save draft', exact: true }).click();
+    await expect(panel.getByRole('status')).toHaveText('Draft saved.');
+    expect(Object.keys(drafts.wiki.document.entries[0]).sort()).toEqual(['body', 'id', 'title']);
+  });
+
+  test('the Future tab has no guide fields, and a refused save names the guide link and length', async ({ page }) => {
+    const { panel } = await setup(page, true, true);
+    await panel.getByRole('tab', { name: 'Future Updates' }).click();
+    await panel.getByRole('button', { name: 'Edit Future Updates', exact: true }).click();
+    await expect(panel.getByLabel('YouTube guide', { exact: true })).toHaveCount(0);
+    await expect(panel.getByLabel('Guide length', { exact: true })).toHaveCount(0);
+    await panel.getByRole('button', { name: 'Close editor' }).click();
+    await panel.getByRole('tab', { name: 'Wiki' }).click();
+    await panel.getByRole('button', { name: 'Edit Wiki', exact: true }).click();
+    await panel.getByLabel('Text', { exact: true }).fill('Changed.');
+    await panel.getByRole('button', { name: 'Save draft', exact: true }).click();
+    await expect(panel.getByRole('alert')).toHaveText('Check the title, text, patch number, guide link and length before saving.');
   });
 });

@@ -1,13 +1,13 @@
 'use client';
 
 import { useId, useLayoutEffect, useRef, useState } from 'react';
-import { editGameInfo, youtubeLink, type GameInfoEntry, type GameInfoSnapshot, type GameInfoTab } from './game-info-client';
+import { editGameInfo, guideLength, youtubeLink, type GameInfoEntry, type GameInfoSnapshot, type GameInfoTab } from './game-info-client';
 import styles from './game-info.module.css';
 
 const errors = {
   conflict: 'This draft changed elsewhere. Your text is still here. Reload the saved draft when you are ready.',
   forbidden: 'Your account can no longer edit this content.',
-  invalid: 'Check the title, text, patch number and video links before saving.',
+  invalid: 'Check the title, text, patch number, guide link and length before saving.',
   unavailable: 'The editor is unavailable. Your text is still here.',
 };
 
@@ -30,6 +30,9 @@ export function GameInfoEditor({ tab, initial, selectedId, publishedVersion, onC
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<keyof typeof errors | null>(null);
   const entry = draft.entries.find(item => item.id === selected) ?? draft.entries[0];
+  const linkError = (item: GameInfoEntry | undefined) => !!item?.video && !youtubeLink(item.video);
+  const lengthError = (item: GameInfoEntry | undefined) => !!item?.videoLength && !guideLength(item.videoLength);
+  const badEntry = draft.entries.find(item => linkError(item) || lengthError(item));
   const dirty = JSON.stringify(saved.document) !== JSON.stringify(draft);
   useLayoutEffect(() => { (titleInput.current ?? addButton.current)?.focus(); }, []);
   useLayoutEffect(() => { onDirty(dirty); }, [dirty, onDirty]);
@@ -45,7 +48,8 @@ export function GameInfoEditor({ tab, initial, selectedId, publishedVersion, onC
     setBusy(true);
     setNotice(null);
     setError(null);
-    const document = { ...draft, entries: draft.entries.map(({ patch, ...item }) => ({ ...item, ...(patch?.trim() ? { patch: patch.trim() } : {}) })) };
+    const document = { ...draft, entries: draft.entries.map(({ patch, video, videoLength, ...item }) => ({ ...item, ...(patch?.trim() ? { patch: patch.trim() } : {}),
+      ...(tab === 'wiki' && video?.trim() ? { video: video.trim(), ...(videoLength?.trim() ? { videoLength: videoLength.trim() } : {}) } : {}) })) };
     const result = await editGameInfo(action === 'read' ? { tab, action } : action === 'publish'
       ? { tab, action, expectedVersion: saved.version } : { tab, action, expectedVersion: saved.version, document });
     setBusy(false);
@@ -78,29 +82,30 @@ export function GameInfoEditor({ tab, initial, selectedId, publishedVersion, onC
         <input ref={titleInput} id={`${id}-title`} value={entry.title} maxLength={80} required onChange={event => change({ title: event.target.value })} />
         <label htmlFor={`${id}-body`}>Text</label>
         <textarea id={`${id}-body`} value={entry.body} maxLength={4000} rows={4} required onChange={event => change({ body: event.target.value })} />
+        {tab === 'wiki' && <>
+          <label htmlFor={`${id}-video`}>YouTube guide</label>
+          <input id={`${id}-video`} type="url" value={entry.video ?? ''} placeholder="https://youtu.be/..." aria-invalid={linkError(entry)}
+            aria-describedby={linkError(entry) ? `${id}-video-error` : undefined}
+            onChange={event => change(event.target.value ? { video: event.target.value } : { video: undefined, videoLength: undefined })} />
+          {linkError(entry) && <p id={`${id}-video-error`} className={styles.fieldError}>Enter a YouTube video URL.</p>}
+          <label htmlFor={`${id}-length`}>Guide length</label>
+          <input id={`${id}-length`} value={entry.videoLength ?? ''} placeholder="1:12" maxLength={5} disabled={!entry.video} aria-invalid={lengthError(entry)}
+            aria-describedby={lengthError(entry) ? `${id}-length-error` : undefined}
+            onChange={event => change({ videoLength: event.target.value || undefined })} />
+          {lengthError(entry) && <p id={`${id}-length-error`} className={styles.fieldError}>Enter the length as minutes:seconds, like 1:12.</p>}
+        </>}
         {tab === 'future' && <>
           <label htmlFor={`${id}-patch`}>Patch number (optional)</label>
           <input id={`${id}-patch`} value={entry.patch ?? ''} placeholder="1.9" maxLength={11} onChange={event => change({ patch: event.target.value })} />
         </>}
       </>}
-      {tab === 'wiki' && ([0, 1] as const).map(index => <div key={index}>
-        <label htmlFor={`${id}-video-${index}`}>YouTube video {index + 1}</label>
-        <input id={`${id}-video-${index}`} type="url" value={draft.videos?.[index] ?? ''} onChange={event => {
-          const value = event.target.value;
-          event.target.setCustomValidity(!value || youtubeLink(value) ? '' : 'Enter a YouTube video URL.');
-          setDraft(previous => {
-            const videos: [string | null, string | null] = [...(previous.videos ?? [null, null])];
-            videos[index] = value || null;
-            return { ...previous, videos };
-          });
-        }} />
-      </div>)}
       <div className={styles.actions}>
         <button type="button" onClick={onClose}>Close editor</button>
-        <button type="submit" disabled={!dirty}>Save draft</button>
+        <button type="submit" disabled={!dirty || !!badEntry}>Save draft</button>
         <button type="button" disabled={dirty || saved.version === publishedVersion || error === 'conflict'} onClick={() => void submit('publish')}>Publish</button>
       </div>
     </fieldset>
+    {badEntry && badEntry.id !== entry?.id && <p>Fix the guide link or length of {badEntry.title || 'an untitled entry'} before saving.</p>}
     {notice && <p role="status">{notice}</p>}
     {error && <p role="alert">{errors[error]}</p>}
     {error === 'conflict' && <button type="button" disabled={busy} onClick={() => void submit('read')}>Discard local edits and reload</button>}

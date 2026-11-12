@@ -10,7 +10,7 @@
 
 **Tests.** `tests/db/game-info.test.ts` failed 7 of its 8 cases on M32 and passes all 8 on M33. One case runs the sealed M33 file, inside a transaction that rolls back, on M32-shaped Wiki rows at versions 3 and 4 with M32's validator restored as a stand-in. Only the slots go, the versions and entries stay, and the installed validator is byte-equal afterwards. The full `npm run test:db` passed 642/642 tests in 36 files with Edge StartedAt unchanged after a 30.6-second quiet period and the worker's own 401; afterwards the fingerprint and access audit still matched the replay. `npx tsc --noEmit` and all 2,692 unit tests passed. Evidence is in parent `logs/p19-m33-guides-20261112/`.
 
-**Before a hosted push.** Check that the hosted Wiki rows still hold `videos: [null, null]`, because the updates drop the key whatever it holds. Then use the structured `--skip-vault` dry run from AGENTS.md, and push only with Avi's go. The 1.9 client that shows the guides (Task 16) and the publication of `docs/game-info/wiki.draft.json` each need their own go.
+**Before a hosted push.** Check that the hosted Wiki rows still hold `videos: [null, null]`, because the updates drop the key whatever it holds. Then use the structured `--skip-vault` dry run from AGENTS.md, and push only with Avi's go. The 1.9 client that shows the guides (Task 16) and the publication of `docs/game-info/wiki.draft.json` each need their own go. M33 goes to production together with or after this client: the 1.8.1 client has no Game Info, and an older 1.9 client would drop the guides and send `videos`, which M33 refuses.
 
 ## Game Info draft storage, verified locally
 

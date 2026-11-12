@@ -58,6 +58,14 @@ Practice fights: test your build against a dummy with stats you choose, or spar 
 
 Practice uses Arena rules: renown gear counts 10% more.
 
+## Feedback (messages and interface topics)
+
+Found a bug, or have an idea? Open Messages and press Send feedback, or open Settings and use Send in the Help section. Choose what it is about (Bug, Idea, Balance or Other), write at least 10 characters, and press Send. You can send 5 a game day. Include game details adds the patch, the screen you were on, your browser and device, the window size and the time you sent it; press "What is sent?" to see them. The team sees your gladiator's name, and the answer comes to your messages. Please do not include passwords or personal details. My feedback, in Messages, shows what you sent and whether the team has read or answered it. The team's answer arrives in your messages with a green Team reply tag.
+
+## Buy back (shops topic)
+
+Sold gear to a merchant by mistake? In Shops, press Buy back to see your last 10 gear sales of this game day, newest first. Each card shows when you sold it, for how much, and how long you have left. Buy it back for exactly the gold you got: the same item comes back with its level, rarity and stats. You can buy back until the next game day starts (every 4 hours). You need the gold and a free bag slot. Salvage cannot be bought back.
+
 ## Also
 
 - Renown now uses a gold laurel icon, in the corner chip too. Update any Wiki text or picture that shows the old icon.

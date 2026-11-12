@@ -6,8 +6,11 @@
 // "Names and titles" (Task 11), chooses when the camp shows names and worn titles over heads: Off, When zoomed in (the camp
 // before Patch 1.9) or Always, each with a line saying what it does; it works on phones too. With Names Off, Titles is
 // greyed out with a note (its choice is kept for when names come back). Everything applies at once and is saved in this
-// browser only.
-import { useId, type ReactNode } from 'react';
+// browser only. Patch 1.9 (Task 23, the approved feedback mockup): a signed-in account of the live game gets a last section, Help, with
+// "Send feedback" and Send…, which opens the same dialog as the Messages panel's footer.
+import { useId, useRef, useState, type ReactNode } from 'react';
+import { FeedbackDialog } from '../messages/FeedbackDialog';
+import type { FeedbackActions } from '../messages/feedback';
 import type { LabelMode, LabelPrefs, MenuPlace, MenuPrefs } from './menu-prefs';
 import styles from './shell.module.css';
 
@@ -54,13 +57,19 @@ function ModeChoice({ id, label, value, onChange, disabled = false, help }: {
   );
 }
 
-export function SettingsPanel({ prefs, onChange, labels, onLabels, compact }: {
+export function SettingsPanel({ prefs, onChange, labels, onLabels, compact, feedback, onSeeMine }: {
   prefs: MenuPrefs; onChange(change: Partial<MenuPrefs>): void;
   labels: LabelPrefs; onLabels(change: Partial<LabelPrefs>): void;
   compact: boolean;
+  /** Patch 1.9: Feedback (a signed-in account of the live game only); absent shows no Help section. */
+  feedback?: FeedbackActions;
+  /** "See my feedback" once sent: Settings closes and Messages opens on My feedback (absent without a gladiator, which has no Messages). */
+  onSeeMine?(): void;
 }) {
   const id = useId();
   const namesOff = labels.names === 'off';
+  const [writing, setWriting] = useState(false);
+  const sendButton = useRef<HTMLButtonElement>(null);
   return (
     <div className={styles.settings} data-testid="settings-panel">
       <section aria-labelledby={`${id}-menu`} className={styles.settingsSection}>
@@ -96,7 +105,26 @@ export function SettingsPanel({ prefs, onChange, labels, onLabels, compact }: {
             ? <p className={styles.settingsNote}>Titles show only where names show. Turn Names on to choose.</p>
             : <p className={styles.settingsHelp}>{TITLE_HELP[labels.titles]}</p>} />
       </section>
+      {feedback && <section aria-labelledby={`${id}-help`} className={`${styles.settingsSection} ${styles.settingsHelpSection}`}>
+        <h3 id={`${id}-help`} className={styles.settingsHeading}>Help</h3>
+        <div className={styles.settingsRow}>
+          <div>
+            <div className={styles.settingsLabel} id={`${id}-feedback`}>Send feedback</div>
+            <p className={styles.settingsHelp} id={`${id}-feedback-help`}>Report a bug or share an idea. The team answers in your messages.</p>
+          </div>
+          <button ref={sendButton} type="button" className={styles.settingsSend} aria-labelledby={`${id}-feedback`} aria-describedby={`${id}-feedback-help`}
+            aria-haspopup="dialog" onClick={() => setWriting(true)}>
+            <svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M4 5h16v11H9l-5 4z" /></svg>
+            Send…
+          </button>
+        </div>
+      </section>}
       <p className={styles.settingsFoot}>Saved in this browser. Changes apply at once.</p>
+      {writing && feedback && <FeedbackDialog actions={feedback} screen="Settings" canSeeMine={!!onSeeMine} onClose={({ then }) => {
+        setWriting(false);
+        if (then === 'mine') onSeeMine?.();
+        else window.setTimeout(() => sendButton.current?.focus(), 0);
+      }} />}
     </div>
   );
 }

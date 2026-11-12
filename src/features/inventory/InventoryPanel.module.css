@@ -251,3 +251,13 @@
   .searchRow .search input,
   .searchRow .sort select { font-size: 16px; }
 }
+
+/* Patch 1.9: after a gear sale, the line that says it can be bought back, with "Open Buy back" (the approved mockup's gold note). Two classes,
+   so the link wins over the panel's own button size (`.inventory-panel button`). */
+.soldNote { margin: 0 0 8px; padding: 8px 10px; border: 1px solid #6b5520; border-radius: 8px; background: #2a2312; color: #f6e3ae; font-size: .85rem; }
+.soldNote p { display: inline; margin: 0; }
+.soldNote .linkButton { min-height: 0; margin-left: 4px; padding: 0; border: 0; background: none; color: var(--gold); font: inherit; font-weight: 700; text-decoration: underline; text-underline-offset: 3px; cursor: pointer; }
+.soldNote .linkButton:focus-visible { outline: 2px solid var(--gold); outline-offset: 2px; }
+@media (hover: none), (max-width: 480px) {
+  .soldNote .linkButton { display: inline-flex; align-items: center; min-height: 44px; }
+}

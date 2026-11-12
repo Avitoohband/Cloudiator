@@ -1,9 +1,14 @@
 import { expect, it } from 'vitest';
-import type { GameMessage, GameNotification, Inbox } from '@contracts/reads';
+import type { GameMessage, GameNotification, Inbox, OwnFeedback } from '@contracts/reads';
 import {
   badgeText, buttonName, freshNotifications, messagesRequestFor, isNewNotification, isUnread, messageDate, messagesStale, newCount, notificationsMark,
   notificationsStale, tagName,
 } from '../../src/features/messages/messages';
+import {
+  CATEGORIES, canSendFeedback, deviceText, feedbackDate, feedbackDetails, leftToday, limitLine, mineSummary, ownerDetails, ownerStatus, playerStatus, replyFor,
+  sentToday, textProblem, unseenAnswers,
+} from '../../src/features/messages/feedback';
+import { nextGameDayMs, waitText } from '../../src/lib/game-day';
 
 // The pure rules behind the messages button and panel (spec "Decisions": badge, unread, tags, dates), and when a list the panel holds no
 // longer agrees with the owner's inbox (the world revision does not carry the list, so the panel reloads it when the inbox says so).
@@ -151,4 +156,106 @@ it('drops a bootstrap visitor and preserves same-account delayed-owner adoption 
   expect(messagesRequestFor(pending, null, null)).toBeNull();
   expect(messagesRequestFor(ready, 'account-a', 'gladiator-b')).toBeNull();
   expect(messagesRequestFor(null, 'account-b', 'gladiator-b')).toBeNull();
+});
+
+// Patch 1.9 (Task 23): a request may open the panel on My feedback (Settings' "See my feedback"), bound to its account like the others.
+it('binds a My feedback request to its account and owner like a Notifications one', () => {
+  const request = { tab: 'feedback' as const, n: 3, account: 'account-a', owner: 'gladiator-a' };
+  expect(messagesRequestFor(request, 'account-a', 'gladiator-a')).toBe(request);
+  expect(messagesRequestFor(request, 'account-b', 'gladiator-a')).toBeNull();
+});
+
+// Patch 1.9 (Task 23): Feedback (the approved mockup, notes.md "Feedback"). The game day is three 80-minute slots, floor(time / 14,400,000),
+// as the server counts it; the details are exactly the five keys, each at most 80 characters.
+const DAY = 14_400_000;
+const own = (id: number, createdAtMs: number, over: Partial<OwnFeedback> = {}): OwnFeedback =>
+  ({ id, category: 'idea', text: `Feedback number ${id}`, status: 'new', createdAtMs, answeredAtMs: null, ...over });
+const plain = (text: string) => text.replace(/ /g, ' ');
+
+it('counts the feedback sent in the current game day and what is left of 5', () => {
+  const now = 100 * DAY + 2 * 3_600_000;
+  expect(sentToday([], now)).toBe(0);
+  expect(leftToday([], now)).toBe(5);
+  const list = [own(4, now - 60_000), own(3, 100 * DAY), own(2, 100 * DAY - 1), own(1, 99 * DAY)];
+  expect(sentToday(list, now)).toBe(2);
+  expect(leftToday(list, now)).toBe(3);
+  expect(leftToday([1, 2, 3, 4, 5, 6].map(n => own(n, 100 * DAY + n)), now)).toBe(0);
+  // The next game day starts afresh.
+  expect(leftToday(list, 101 * DAY)).toBe(5);
+});
+
+it('writes the limit line, and at 0 when the next game day starts', () => {
+  const now = 101 * DAY - (2 * 3_600_000 + 20 * 60_000);
+  expect(limitLine(3, now)).toBe('You can send 5 a game day; 3 left today.');
+  expect(limitLine(null, now)).toBe('You can send 5 a game day.');
+  expect(plain(limitLine(0, now))).toBe('You have sent 5 today. You can send more on the next game day (in 2 h 20 min).');
+  expect(plain(waitText(45 * 60_000 + 59_000))).toBe('45 min');
+  expect(plain(waitText(3_600_000))).toBe('1 h');
+  expect(waitText(30_000)).toBe('under a minute');
+  expect(nextGameDayMs(100 * DAY)).toBe(101 * DAY);
+  expect(nextGameDayMs(101 * DAY - 1)).toBe(101 * DAY);
+});
+
+it('asks for at least 10 characters once trimmed and refuses a send at 0 left', () => {
+  expect(textProblem('')).toBeNull();
+  expect(textProblem('   short  ')).toBe('Write at least 10 characters.');
+  expect(textProblem('ten chars!')).toBeNull();
+  expect(canSendFeedback('ten chars!', 3)).toBe(true);
+  expect(canSendFeedback('ten chars!', null)).toBe(true);
+  expect(canSendFeedback('ten chars!', 0)).toBe(false);
+  expect(canSendFeedback('  nine ch  ', 3)).toBe(false);
+  expect(CATEGORIES.map(c => c.label)).toEqual(['Bug', 'Idea', 'Balance', 'Other']);
+  expect(CATEGORIES.find(c => c.id === 'bug')?.hint).toBe('Something is broken or shows a wrong number.');
+});
+
+it('names the browser, the system and phone or desktop, and builds exactly the five details', () => {
+  const chrome = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36';
+  const android = 'Mozilla/5.0 (Linux; Android 14; Pixel 7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Mobile Safari/537.36';
+  const iphone = 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Mobile/15E148 Safari/604.1';
+  const firefox = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:132.0) Gecko/20100101 Firefox/132.0';
+  const edge = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36 Edg/131.0.0.0';
+  expect(deviceText(chrome, false)).toBe('Chrome 131 on Windows (desktop)');
+  expect(deviceText(android, true)).toBe('Chrome 131 on Android (phone)');
+  expect(deviceText(iphone, true)).toBe('Safari 18 on iOS (phone)');
+  expect(deviceText(firefox, false)).toBe('Firefox 132 on Windows (desktop)');
+  expect(deviceText(edge, false)).toBe('Edge 131 on Windows (desktop)');
+  expect(deviceText('', false)).toBe('A browser (desktop)');
+  const details = feedbackDetails({ screen: 'Messages', userAgent: chrome, phone: false, width: 1280, height: 720, sentAtMs: 1_791_592_800_000 });
+  expect(details).toEqual({ patch: '1.9', screen: 'Messages', device: 'Chrome 131 on Windows (desktop)', window: '1280 x 720', sentAtMs: 1_791_592_800_000 });
+  expect(Object.keys(details)).toEqual(['patch', 'screen', 'device', 'window', 'sentAtMs']);
+  const long = feedbackDetails({ screen: 'S'.repeat(200), userAgent: `${'x'.repeat(300)} Chrome/1`, phone: true, width: 360.4, height: 780.6, sentAtMs: 5 });
+  for (const key of ['patch', 'screen', 'device', 'window'] as const) expect([...long[key]].length).toBeLessThanOrEqual(80);
+  expect(long.window).toBe('360 x 781');
+});
+
+it('summarises My feedback, names the statuses for the player and the owner, and dates the rows', () => {
+  expect(mineSummary([own(3, 3, { status: 'answered', answeredAtMs: 9 }), own(2, 2, { status: 'read' }), own(1, 1)])).toBe('My feedback · 3 sent · 1 answered');
+  expect(mineSummary([])).toBe('My feedback · 0 sent · 0 answered');
+  expect((['new', 'read', 'answered'] as const).map(playerStatus)).toEqual(['Sent', 'Read', 'Answered']);
+  expect((['new', 'read', 'answered'] as const).map(ownerStatus)).toEqual(['New', 'Read', 'Answered']);
+  const now = new Date(2026, 10, 12, 15, 42).getTime();
+  expect(feedbackDate(new Date(2026, 10, 12, 14, 12).getTime(), now, '24')).toBe('Today 14:12');
+  expect(feedbackDate(new Date(2026, 10, 11, 21, 3).getTime(), now, '24')).toBe('Yesterday');
+  expect(feedbackDate(new Date(2026, 10, 11, 21, 3).getTime(), now, '24', true)).toBe('Yesterday 21:03');
+  expect(feedbackDate(new Date(2026, 10, 10, 9, 0).getTime(), now, '24')).toBe('10 Nov');
+  expect(feedbackDate(new Date(2026, 10, 10, 9, 0).getTime(), now, '24', true)).toBe('10 Nov 09:00');
+});
+
+it('finds the team reply of an answered item and counts the replies not yet seen', () => {
+  const reply = message(7, 5_000, { kind: 'team-reply', title: 'Answer to your bug report' });
+  const other = message(8, 5_000, { kind: 'admin' });
+  const answered = own(1, 1_000, { status: 'answered', answeredAtMs: 5_000 });
+  expect(replyFor(answered, [other, reply])).toBe(reply);
+  expect(replyFor(own(2, 1_000), [other, reply])).toBeNull();
+  expect(replyFor({ ...answered, answeredAtMs: 6_000 }, [other, reply])).toBeNull();
+  expect(unseenAnswers([reply, other], inbox())).toBe(1);
+  expect(unseenAnswers([reply, other], inbox({ readIds: [7] }))).toBe(0);
+  expect(tagName('team-reply')).toBe('Team reply');
+});
+
+it('writes the details the owner sees in one line', () => {
+  const at = new Date(2026, 10, 12, 15, 42).getTime();
+  expect(ownerDetails({ patch: '1.9', screen: 'Arena', device: 'Chrome 131 on Android (phone)', window: '360 x 780', sentAtMs: at }, '24'))
+    .toBe('Patch 1.9 · Arena · Chrome 131 on Android (phone) · 360 x 780 · 15:42');
+  expect(ownerDetails(null, '24')).toBeNull();
 });

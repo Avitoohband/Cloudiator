@@ -6,8 +6,13 @@ import styles from './ShopPanel.module.css';
 
 /** The atlas coin (gold) or laurel (renown) beside a price. */
 export function CurrencyIcon({ currency, size = 12 }: { currency: ShopCurrency; size?: number }) {
-  const frame = atlas.frames[currency].frame, scale = size / frame.w;
-  return <span aria-hidden="true" data-currency-icon={currency} className={styles.coin} style={{
+  return <AtlasIcon frame={currency} size={size} data={{ 'data-currency-icon': currency }} />;
+}
+
+/** One frame of the UI icon atlas, `size` px wide, decorative (Buy back's empty state shows the bag, patch 1.9). */
+export function AtlasIcon({ frame: name, size = 12, data }: { frame: keyof typeof atlas.frames; size?: number; data?: Record<string, string> }) {
+  const frame = atlas.frames[name].frame, scale = size / frame.w;
+  return <span aria-hidden="true" {...data} className={styles.coin} style={{
     width: size,
     height: frame.h * scale,
     backgroundImage: `url(${itemAtlas.url})`,

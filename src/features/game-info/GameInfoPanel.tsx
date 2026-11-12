@@ -3,11 +3,16 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { ClipboardEvent, KeyboardEvent } from 'react';
 import { GameInfoEditor } from './GameInfoEditor';
+import { FeedbackReview } from './FeedbackReview';
+import { listFeedback } from './feedback-review';
 import { editGameInfo, guideThumbnail, loadDraftGameInfo, loadPublishedGameInfo, type GameInfoEntry, type GameInfoPages, type GameInfoSnapshot, type GameInfoTab } from './game-info-client';
 import { futureUpdates, wikiTopics } from './public-content';
 import styles from './game-info.module.css';
 
 const tabs = [{ id: 'wiki', label: 'Wiki' }, { id: 'future', label: 'Future Updates' }] as const;
+/** Patch 1.9: the owner's third tab, shown only when the editor read succeeds (a Game Info editor), with its count of New feedback. */
+const FEEDBACK_TAB = { id: 'feedback', label: 'Feedback' } as const;
+type ShownTab = typeof tabs[number] | typeof FEEDBACK_TAB;
 const stopCopy = (event: ClipboardEvent) => event.preventDefault();
 const wikiFallback: GameInfoEntry[] = wikiTopics.map(({ text, ...entry }) => ({ ...entry, body: text }));
 
@@ -51,11 +56,15 @@ export function GameInfoPanel({ id, onClose, update, fixture, editorAccount, onD
   const [editing, setEditing] = useState<GameInfoSnapshot | null>(null);
   const [loadingEditor, setLoadingEditor] = useState(false);
   const [editorFailed, setEditorFailed] = useState(false);
+  const [feedbackNew, setFeedbackNew] = useState(0);
+  const shownTabs: readonly ShownTab[] = canEdit ? [...tabs, FEEDBACK_TAB] : tabs;
   const pending = useRef(0);
   const wiki = pages.wiki?.document.entries ?? wikiFallback;
   const future = pages.future?.document.entries ?? futureFallback;
   const article = wiki.find(item => item.id === topic) ?? wiki[0];
-  const currentTab = tabs[active];
+  const currentTab = shownTabs[active] ?? tabs[0];
+  /** The tab the editor works on (Wiki or Future Updates; the Feedback tab has no editor). */
+  const editTab = currentTab.id === 'feedback' ? null : currentTab.id;
   const tabId = (key: string) => `${id}-${key}-tab`;
   const panelId = (key: string) => `${id}-${key}-panel`;
   const optionId = (key: string) => `${id}-topic-${key}`;
@@ -94,7 +103,10 @@ export function GameInfoPanel({ id, onClose, update, fixture, editorAccount, onD
       if (alive) setPages(previous => ({ ...next, ...previous }));
     }, () => {});
     if (editorAccount) void editGameInfo({ tab: 'wiki', action: 'read' }).then(result => {
-      if (alive) setCanEdit(result.ok);
+      if (!alive) return;
+      setCanEdit(result.ok);
+      // The Feedback tab's count of New items, before the tab is opened (it reads its own list then).
+      if (result.ok) void listFeedback('new').then(list => { if (alive && list.ok) setFeedbackNew(list.newCount); });
     });
     return () => { alive = false; pending.current++; };
   }, [fixture, editorAccount]);
@@ -123,9 +135,10 @@ export function GameInfoPanel({ id, onClose, update, fixture, editorAccount, onD
   }, []);
 
   function moveTab(event: KeyboardEvent<HTMLButtonElement>, index: number) {
-    const next = event.key === 'Home' ? 0 : event.key === 'End' ? tabs.length - 1
-      : event.key === 'ArrowRight' ? (index + 1) % tabs.length
-      : event.key === 'ArrowLeft' ? (index + tabs.length - 1) % tabs.length : null;
+    const count = shownTabs.length;
+    const next = event.key === 'Home' ? 0 : event.key === 'End' ? count - 1
+      : event.key === 'ArrowRight' ? (index + 1) % count
+      : event.key === 'ArrowLeft' ? (index + count - 1) % count : null;
     if (next === null) return;
     event.preventDefault();
     changeTab(next);
@@ -165,9 +178,15 @@ export function GameInfoPanel({ id, onClose, update, fixture, editorAccount, onD
       <button type="button" onClick={update.reload}>Reload</button>
     </div>}
     <div role="tablist" aria-label="Game information" className={styles.tabs}>
-      {tabs.map((tab, index) => <button key={tab.id} id={tabId(tab.id)} type="button" role="tab" aria-selected={active === index}
-        aria-controls={panelId(tab.id)} tabIndex={active === index ? 0 : -1} ref={button => { tabButtons.current[index] = button; }}
-        disabled={editing !== null} onClick={() => changeTab(index)} onKeyDown={event => moveTab(event, index)}>{tab.label}</button>)}
+      {shownTabs.map((tab, index) => {
+        const count = tab.id === 'feedback' && feedbackNew > 0 ? feedbackNew : 0;
+        return <button key={tab.id} id={tabId(tab.id)} type="button" role="tab" aria-selected={active === index}
+          aria-controls={panelId(tab.id)} tabIndex={active === index ? 0 : -1} ref={button => { tabButtons.current[index] = button; }}
+          aria-label={count > 0 ? `${tab.label}, ${count} new` : undefined}
+          disabled={editing !== null} onClick={() => changeTab(index)} onKeyDown={event => moveTab(event, index)}>
+          {tab.label}{count > 0 && <span className={styles.count} aria-hidden="true">{count > 99 ? '99+' : count}</span>}
+        </button>;
+      })}
     </div>
     <section id={panelId('wiki')} role="tabpanel" aria-labelledby={tabId('wiki')} className={styles.body} hidden={active !== 0 || editing !== null} tabIndex={0}>
       <div ref={topics} role="listbox" aria-label="Wiki topics" tabIndex={0} className={styles.topics}
@@ -198,12 +217,15 @@ export function GameInfoPanel({ id, onClose, update, fixture, editorAccount, onD
         </li>)}</ul>
       </div>
     </section>
-    {editing ? <GameInfoEditor tab={currentTab.id} initial={editing} selectedId={article?.id ?? ''} publishedVersion={pages[currentTab.id]?.version}
+    {canEdit && <section id={panelId('feedback')} role="tabpanel" aria-labelledby={tabId('feedback')} className={styles.body} hidden={currentTab.id !== 'feedback' || editing !== null}>
+      {currentTab.id === 'feedback' && <FeedbackReview onCount={setFeedbackNew} />}
+    </section>}
+    {editing && editTab ? <GameInfoEditor tab={editTab} initial={editing} selectedId={article?.id ?? ''} publishedVersion={pages[editTab]?.version}
       onDirty={onDirty} onClose={() => { if (allowDiscard()) closeEditor(); }}
-      onPublished={snapshot => { setPages(previous => ({ ...previous, [currentTab.id]: snapshot })); closeEditor(); }} />
-      : canEdit && <footer className={styles.editBar}>
+      onPublished={snapshot => { setPages(previous => ({ ...previous, [editTab]: snapshot })); closeEditor(); }} />
+      : canEdit && editTab && <footer className={styles.editBar}>
         {editorFailed && <p role="alert">The draft could not be opened.</p>}
-        <button type="button" disabled={loadingEditor} onClick={() => void beginEdit(currentTab.id)}>Edit {currentTab.label}</button>
+        <button type="button" disabled={loadingEditor} onClick={() => void beginEdit(editTab)}>Edit {currentTab.label}</button>
       </footer>}
   </section>;
 }

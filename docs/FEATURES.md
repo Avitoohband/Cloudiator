@@ -199,6 +199,7 @@ them, don't promise them on an end card, and expect details to change). Avi's vi
 | --- | --- | --- | --- | --- | --- |
 | Shops and inventory | Buy gear from the weaponsmith and the armorer, and keep it in your inventory. | 1.0 | Live | Inventory and shops | Concept trailer |
 | Item cards on phones | On a phone, tapping an inventory tile or a shop cell scrolls its card into view (with small fixes to the inventory, shops, messages, Settings and the Wiki list). | 1.9 | Built | Phone: Inventory and shops → scroll down to the Shops → tap a cell: its card comes up under the grid | — |
+| Buy back | Changed your mind after selling gear to a merchant? Shops → Buy back (n) lists your last 10 gear sales of this game day, newest first, with the same grid and card: when you sold it, for how much, and how long is left. Buy it back for exactly the gold you got: the same item, level, rarity and stats. Until the next game day (every 4 hours); salvage is not bought back. After a sale, the line under the item says so, with Open Buy back. | 1.9 | Built | Fixture camp with `?bag=demo` → Inventory and shops → Shops → Buy back (5): the Sword's card (live: sell an item, then Open Buy back) | — |
 | Player market | Buy from and sell to other players at fixed prices; visitors can browse. | 1.0 | Live | Marketplace (the fixture camp has sample listings) | Concept trailer |
 | A fair market fee | A sale's fee is at least 1 gold and the lowest price is 2 gold; the sell form shows what you receive. | 1.1 | Live | Marketplace → Sell | Looks update |
 | Gold | Money is called gold everywhere; your amount is unchanged. | 1.3 | Live | Marketplace; My gladiator | Messages update |
@@ -214,6 +215,7 @@ them, don't promise them on an end card, and expect details to change). Avi's vi
 | Patch numbers | The menu under your name shows the patch you play, each patch note shows its number, and Patch history lists what every patch added. | 1.4 | Live | The chip menu: tap or click your name for "Patch 1.4" and Patch history ›; a patch note's number opens the history at that patch | — |
 | New patch notice | When a new patch is out, an open game says so, and Reload brings it in. | 1.4 | Live | Needs a server ahead of the game: in the test camp call `setLatestPatch` with a version strictly above the current client `PATCH` (increment its major number), then focus the window; the notice shows under your name | — |
 | Watch from Notifications | Arena and tournament results get ▶ Watch, and expeditions ▶ Watch the trip. | 1.5 | Live | Messages → Notifications → Watch; Back returns to the Notifications tab | — |
+| Feedback | Send the team a bug report, an idea, a balance note or anything else from the game: Messages → Send feedback, or Settings → Help. Up to 5 a game day, with optional game details (patch, screen, device, window size, send time). My feedback shows each one as Sent, Read or Answered, and the team's answer arrives as a green "Team reply" message. | 1.9 | Built | Live game, signed in: Messages → Send feedback (the fixture preview has no feedback) | — |
 
 ### Players and community
 

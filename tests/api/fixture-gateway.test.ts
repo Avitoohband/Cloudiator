@@ -714,7 +714,7 @@ test('fixture preview: the owner’s bouts are the fixtures’ own timelines, ea
   }
 });
 
-test('fixture demo bag: bag=demo gives Aster 18 extra catalog items; the default fixture is unchanged', async () => {
+test('fixture demo bag: bag=demo gives Aster 18 extra catalog items and five sales to buy back; the default fixture is unchanged', async () => {
   const plain = await createFixtureGateway().owner();
   const demo = await createFixtureGateway({ bag: 'demo' }).owner();
   expect(demo.inventory).toHaveLength(plain.inventory.length + 18);
@@ -722,5 +722,19 @@ test('fixture demo bag: bag=demo gives Aster 18 extra catalog items; the default
   const added = demo.inventory.slice(plain.inventory.length);
   expect(new Set(added.map(i => i.id)).size).toBe(18);
   expect(added.filter(i => i.catalogId === 'light-boots:1:common')).toHaveLength(3);
-  expect({ ...demo, inventory: plain.inventory }).toEqual(plain);
+  // Patch 1.9: the mockup's five sales of this game day, newest first, at the prices they were sold for; the plain fixture has none.
+  expect(plain.buyBack).toEqual([]);
+  expect(demo.buyBack.map(sale => [sale.item.catalogId, sale.price])).toEqual([['sword:5:rare', 39], ['iron-helmet:5:uncommon', 34],
+    ['round-shield:1:common', 7], ['round-shield:1:common', 7], ['heavy-boots:1:common', 10]]);
+  expect(new Set(demo.buyBack.map(sale => sale.saleId)).size).toBe(5);
+  // Fix round 1: every sale is from the fixture clock's own game day (it began at 00:00 UTC, 40 minutes before), as the server lists them.
+  const { worldFixture } = await import('../fixtures/domain');
+  const gameDay = (ms: number) => Math.floor(ms / 14_400_000);
+  for (const sale of demo.buyBack) {
+    expect(gameDay(sale.soldAtMs), sale.item.catalogId).toBe(gameDay(worldFixture.serverNowMs));
+    expect(sale.soldAtMs).toBeLessThanOrEqual(worldFixture.serverNowMs);
+    expect(sale.expiresAtMs).toBe((gameDay(worldFixture.serverNowMs) + 1) * 14_400_000);
+  }
+  expect(demo.buyBack.map(sale => sale.soldAtMs)).toEqual([...demo.buyBack.map(sale => sale.soldAtMs)].sort((a, b) => b - a));
+  expect({ ...demo, inventory: plain.inventory, buyBack: plain.buyBack }).toEqual(plain);
 });

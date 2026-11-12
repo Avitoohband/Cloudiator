@@ -16,7 +16,7 @@
 //   other titles are notices of their own, merged with the results by time (`TitleNotices`, `title-notices.ts`). They count in the summary
 //   line and in the badge (the server's `newNotifications`), and the tab is marked seen up to the newest of its results and notices.
 import { useEffect, useId, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
-import type { Inbox, MessageBlock } from '@contracts/reads';
+import type { GameMessage, Inbox, MessageBlock, OwnFeedback } from '@contracts/reads';
 import { PATCH } from '../../lib/patch';
 import { NOTIFICATIONS_PAGE } from '../../lib/api/reads';
 import { notificationEntries, notificationsSummary, resultTitleRows, titleNotices, type TitleNotice } from '../titles/title-notices';
@@ -25,6 +25,10 @@ import {
   type ShownMessage,
 } from './messages';
 import { PatchHistory } from './PatchHistory';
+import { leftToday, unseenAnswers, type FeedbackActions } from './feedback';
+import { FeedbackDialog } from './FeedbackDialog';
+import { MyFeedback } from './MyFeedback';
+import { useMinuteNow } from '../schedule/use-minute-now';
 import { LookDisclaimer } from './LookDisclaimer';
 import { levelUpLine, notificationLines, watchLabel } from './notifications';
 import { NoticeCard, TitleLines, useNoticeWear, type NoticeTitles } from './TitleNotices';
@@ -32,6 +36,11 @@ import { useLoaded, useLoadedList } from './useLoadedList';
 import styles from './messages.module.css';
 
 type Tab = 'messages' | 'notifications';
+/** The tag's colour class: gold patch notes, violet Admin, green Team reply (patch 1.9). */
+const TAG_CLASS: Record<GameMessage['kind'], string> = { 'patch-notes': styles.patch, admin: styles.admin, 'team-reply': styles.team };
+const NO_FEEDBACK = (): Promise<OwnFeedback[]> => Promise.resolve([]);
+/** A footer that is not there (no feedback actions) keeps the panel's clock still. */
+const STILL_CLOCK = { now: () => 0, subscribe: () => () => undefined } as unknown as FeedbackActions['clock'];
 
 /** A message body as paragraphs and bullet lists: consecutive bullet items make one list. Plain text only. */
 function Body({ blocks }: { blocks: readonly MessageBlock[] }) {
@@ -51,6 +60,7 @@ function Body({ blocks }: { blocks: readonly MessageBlock[] }) {
 const Chevron = () => <svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round"><path d="M15 6l-6 6 6 6" /></svg>;
 const Tick = () => <svg aria-hidden="true" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round"><path d="M5 12.5l4.5 4.5L19 7.5" /></svg>;
 const TickAll = () => <svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round"><path d="M1.5 12.5L6 17l7-8.5M10 15.5l1.5 1.5L22 6.5" /></svg>;
+const Speech = () => <svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M4 5h16v11H9l-5 4z" /></svg>;
 const Cross = () => <svg aria-hidden="true" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M6 6l12 12M18 6L6 18" /></svg>;
 
 function Failed({ what, retry }: { what: string; retry(): void }) {
@@ -68,13 +78,13 @@ function PatchNumber({ patch, onOpen }: { patch: string; onOpen(): void }) {
 const NO_NOTICES: readonly TitleNotice[] = [];
 
 export function MessagesPanel({ id, inbox, load, loadNotifications, loadPatches, read, seeNotifications, changeLook, onClose, history, initialTab, watch, latestPatch = null,
-  titles }: MessagingActions & {
+  titles, feedback }: MessagingActions & {
   id: string;
   inbox: Inbox;
   /** The owner's titles, the title worn now and the Wear and "Choose a title" actions (patch 1.7); absent shows no title. */
   titles?: NoticeTitles;
-  /** Explicit origin return overrides the ordinary unread-count choice. */
-  initialTab?: Tab;
+  /** Explicit origin return overrides the ordinary unread-count choice; `feedback` opens on My feedback (patch 1.9). */
+  initialTab?: Tab | 'feedback';
   /** Opens the panel on Patch history, with that patch open (null: the newest). */
   history?: { patch: string | null };
   /** The server's newest patch (the sync's), for Patch history's "Patch 1.5 is out". */
@@ -88,8 +98,15 @@ export function MessagesPanel({ id, inbox, load, loadNotifications, loadPatches,
   const ids = useId();
   // Open on what is new: Notifications when only results are, else Messages.
   // (Opened on Patch history, it stays on Messages beneath it: the results are marked seen only once their tab is shown.)
-  const [tab, setTab] = useState<Tab>(() => (initialTab ?? (!history && inbox.unread === 0 && inbox.newNotifications > 0 ? 'notifications' : 'messages')));
-  useEffect(() => { if (initialTab) root.current?.querySelector<HTMLElement>('[data-tab="' + initialTab + '"]')?.focus(); }, [initialTab]);
+  const [tab, setTab] = useState<Tab>(() => (initialTab === 'feedback' ? 'messages'
+    : initialTab ?? (!history && inbox.unread === 0 && inbox.newNotifications > 0 ? 'notifications' : 'messages')));
+  // Patch 1.9: My feedback, a view under "Back to messages" (only with the feedback actions), and the Send feedback dialog over the panel.
+  const [mine, setMine] = useState(initialTab === 'feedback' && !!feedback && !history);
+  const [writing, setWriting] = useState(false);
+  useEffect(() => {
+    if (initialTab === 'feedback') root.current?.querySelector<HTMLElement>('[data-feedback-back]')?.focus();
+    else if (initialTab) root.current?.querySelector<HTMLElement>('[data-tab="' + initialTab + '"]')?.focus();
+  }, [initialTab]);
   // Retention follows the shared clock even while no inbox read changes the cards.
   const [, tick] = useState(0);
   useEffect(() => {
@@ -106,6 +123,9 @@ export function MessagesPanel({ id, inbox, load, loadNotifications, loadPatches,
   const [seenAtOpen, setSeenAtOpen] = useState(inbox.notificationsSeenMs);
 
   const messages = useLoadedList<ShownMessage>(load, true);
+  // The account's own feedback: read when My feedback is shown (and again after a send), never just because the panel opened.
+  const own = useLoaded<OwnFeedback[]>(feedback ? feedback.load : NO_FEEDBACK, !!feedback && mine);
+  const feedbackNow = useMinuteNow(feedback?.clock ?? STILL_CLOCK);
   const notes = useLoaded(loadNotifications, visitedNotifications);
   const noteItems = notes.value?.items ?? null;
   // Patch 1.7: the owner's title notices, merged with the results read (a notice older than a full page of results is left out).
@@ -213,6 +233,31 @@ export function MessagesPanel({ id, inbox, load, loadNotifications, loadPatches,
     if (row !== null) root.current?.querySelector<HTMLElement>(`[data-message-row="${row}"]`)?.focus();
   }, [current]);
   const detail = current === null ? null : messages.items?.find(message => message.id === current) ?? null;
+  // My feedback: opened from the footer (or a request), closed by "Back to messages", which gives the focus back to My feedback.
+  const mineBack = useRef(false);
+  const openMine = () => { rowToFocus.current = null; setCurrent(null); setPatches(null); setMine(true); };
+  const closeMine = () => { mineBack.current = true; setMine(false); };
+  useEffect(() => {
+    if (mine) { root.current?.querySelector<HTMLElement>('[data-feedback-back]')?.focus(); return; }
+    if (!mineBack.current) return;
+    mineBack.current = false;
+    root.current?.querySelector<HTMLElement>('[data-feedback-mine]')?.focus();
+  }, [mine]);
+  // An answer opened in My feedback marks its team-reply message read, once (the same guard as opening the message).
+  const seeReply = (reply: GameMessage) => {
+    if (readAsked.current.has(reply.id)) return;
+    readAsked.current.add(reply.id);
+    read(reply.id).catch(() => { readAsked.current.delete(reply.id); });
+  };
+  const sendButton = useRef<HTMLButtonElement>(null);
+  const closeDialog = ({ then, sent }: { then: 'mine' | null; sent: boolean }) => {
+    setWriting(false);
+    // My feedback reads its list when it opens; already open, it reads it again to show the new one.
+    if (sent && mine) own.reload();
+    if (then === 'mine' && !mine) { openMine(); return; }
+    window.setTimeout(() => (then === 'mine' ? root.current?.querySelector<HTMLElement>('[data-feedback-back]') : sendButton.current)?.focus(), 0);
+  };
+  const unseen = unseenAnswers(messages.items ?? [], inbox);
   // Patch history: from a note's number (the note, open or in the list, is where Back to messages returns), and back to the list.
   const showHistory = (patch: string, from: number) => { rowToFocus.current = null; setCurrent(null); setPatches({ patch, from }); };
   const historyBack = useRef<number | 'tab' | null>(null);
@@ -305,7 +350,8 @@ export function MessagesPanel({ id, inbox, load, loadNotifications, loadPatches,
   return (
     <section ref={root} id={id} className={styles.panel} aria-label="Messages" data-testid="messages-panel">
       <div className={styles.head}>
-        {patches && !detail ? <button type="button" className={styles.back} onClick={closeHistory}><Chevron />Back to messages</button>
+        {mine && !detail && !patches ? <button type="button" className={styles.back} data-feedback-back="" onClick={closeMine}><Chevron />Back to messages</button>
+          : patches && !detail ? <button type="button" className={styles.back} onClick={closeHistory}><Chevron />Back to messages</button>
           : detail ? <button ref={back} type="button" className={styles.back} onClick={() => setCurrent(null)}><Chevron />Back to messages</button>
           : <div role="tablist" aria-label="Messages and notifications" className={styles.tabs}>
             {tabs.map((t, index) => {
@@ -323,7 +369,7 @@ export function MessagesPanel({ id, inbox, load, loadNotifications, loadPatches,
         {detail ? (
           <article className={styles.detail} aria-labelledby={`${ids}-title`}>
             <span className={styles.rowTop} data-row-top="">
-              <span className={`${styles.tag} ${styles[detail.kind === 'admin' ? 'admin' : 'patch']}`}>{tagName(detail.kind)}</span>
+              <span className={`${styles.tag} ${TAG_CLASS[detail.kind]}`}>{tagName(detail.kind)}</span>
               {detail.patch !== null && <PatchNumber patch={detail.patch} onOpen={() => showHistory(detail.patch!, detail.id)} />}
               <span className={styles.date}>{messageDate(detail.publishedAtMs)}</span>
             </span>
@@ -334,6 +380,8 @@ export function MessagesPanel({ id, inbox, load, loadNotifications, loadPatches,
               <LookDisclaimer />
             </div>}
           </article>
+        ) : mine && feedback ? (
+          <MyFeedback list={own} held={messages.items ?? []} inbox={inbox} nowMs={feedbackNow} onSeen={seeReply} />
         ) : patches ? (
           <PatchHistory load={loadPatches} build={PATCH} latest={latestPatch} open={patches.patch} notes={noteIds} onReadNote={readNote} />
         ) : tab === 'messages' ? (
@@ -360,7 +408,7 @@ export function MessagesPanel({ id, inbox, load, loadNotifications, loadPatches,
                       return <li key={message.id} className={styles.item}>
                         <button type="button" className={styles.row} data-message-row={message.id} data-unread={unread ? '' : undefined} onClick={() => open(message)}>
                           <span className={styles.rowTop}>
-                            <span className={`${styles.tag} ${styles[message.kind === 'admin' ? 'admin' : 'patch']}`} data-message-tag>{tagName(message.kind)}</span>
+                            <span className={`${styles.tag} ${TAG_CLASS[message.kind]}`} data-message-tag>{tagName(message.kind)}</span>
                             {message.patch !== null && <span className={`${styles.patchNumber} ${styles.room}`} aria-hidden="true">Patch {message.patch}</span>}
                             <span className={styles.date}>{messageDate(message.publishedAtMs)}</span>
                           </span>
@@ -439,6 +487,13 @@ export function MessagesPanel({ id, inbox, load, loadNotifications, loadPatches,
           </div>
         )}
       </div>
+      {feedback && !detail && !patches && <div className={styles.foot} data-feedback-foot="">
+        <button ref={sendButton} type="button" className={styles.sendFeedback} aria-haspopup="dialog" onClick={() => setWriting(true)}><Speech />Send feedback</button>
+        {mine ? (own.value && <span className={styles.footHint}>{leftToday(own.value, feedback.clock.now())} left today</span>)
+          : <button type="button" className={styles.mineLink} data-feedback-mine="" aria-label={unseen > 0 ? `My feedback, ${unseen} new answer${unseen === 1 ? '' : 's'}` : undefined}
+            onClick={openMine}>My feedback{unseen > 0 && <span className={styles.ping} aria-hidden="true">{badgeText(unseen)}</span>}</button>}
+      </div>}
+      {writing && feedback && <FeedbackDialog actions={feedback} screen="Messages" canSeeMine onClose={closeDialog} />}
       <div className={styles.sr} role="status" aria-live="polite" data-mark-status>{announce}</div>
     </section>
   );

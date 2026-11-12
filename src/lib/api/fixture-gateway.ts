@@ -68,7 +68,7 @@ const FIXTURE_PROFILES: typeof BASE_PROFILES = Object.fromEntries(Object.entries
 /** The owner's cosmetics: the Arena banner, bound to her account as a bought one is. */
 const OWNER_COSMETICS: OwnerState['ownedCosmetics'] = [{ catalogId: 'banner', catalogVersion: 'v1', binding: 'bound' }];
 
-/** The opt-in demo bag (`?mode=fixture&bag=demo`): 18 extra catalog items, with duplicates, for looking at a fuller inventory. */
+/** The opt-in demo bag (`?mode=fixture&bag=demo`): 18 extra catalog items, with duplicates, for looking at a fuller inventory, and (patch 1.9) five sales to buy back. */
 const DEMO_BAG = ['sword:1:common', 'sword:1:common', 'sword:1:uncommon', 'sword:5:common', 'axe:1:common', 'spear:1:rare', 'bow:5:renown',
   'round-shield:1:common', 'round-shield:1:common', 'leather-hood:1:common', 'iron-helmet:1:uncommon', 'light-armor:1:common', 'light-armor:1:common',
   'heavy-armor:5:common', 'light-boots:1:common', 'light-boots:1:common', 'light-boots:1:common', 'heavy-boots:1:rare'];
@@ -78,7 +78,24 @@ function withDemoBag(owner: OwnerState): OwnerState {
     return entry ? [{ id: fixtureUuid(`demo-bag-${index}`), ownerId: owner.inventory[0]?.ownerId ?? 'aster', catalogId, catalogVersion: CATALOG_V1.version,
       tier: entry.tier, rarity: entry.rarity, stats: structuredClone(entry.stats), quantity: 1, origin: 'shop' as const, binding: entry.binding, reservation: null }] : [];
   });
-  return { ...owner, inventory: [...owner.inventory, ...items] as OwnerState['inventory'] };
+  return { ...owner, inventory: [...owner.inventory, ...items] as OwnerState['inventory'], buyBack: demoSales(owner.inventory[0]?.ownerId ?? 'aster') };
+}
+/**
+ * Patch 1.9: the demo bag's Buy back list, the mockup's five sales of this game day (the fixture's server time), newest first: a rare
+ * Sword L5 sold for 39 gold, an uncommon Iron helmet L5 for 34, two Round shields for 7 each and Heavy boots for 10. The preview refuses
+ * the `buy-back` command, as it refuses every command.
+ */
+function demoSales(ownerId: string): OwnerState['buyBack'] {
+  const now = worldFixture.serverNowMs, gameDay = 14_400_000, expiresAtMs = (Math.floor(now / gameDay) + 1) * gameDay;
+  // Minutes before the fixture's time, all inside its game day (it began at 00:00 UTC, 40 minutes before; fix round 1).
+  const sales: [string, number, number][] = [['sword:5:rare', 39, 5], ['iron-helmet:5:uncommon', 34, 12], ['round-shield:1:common', 7, 24], ['round-shield:1:common', 7, 24],
+    ['heavy-boots:1:common', 10, 36]];
+  return sales.flatMap(([catalogId, price, minutesAgo], index) => {
+    const entry = CATALOG_V1.items[catalogId];
+    return entry ? [{ saleId: 5 - index, price, soldAtMs: now - minutesAgo * 60_000, expiresAtMs,
+      item: { id: fixtureUuid(`demo-sale-${index}`), ownerId, catalogId, catalogVersion: CATALOG_V1.version, tier: entry.tier, rarity: entry.rarity,
+        stats: structuredClone(entry.stats), quantity: 1, origin: 'shop' as const, binding: entry.binding, reservation: null } }] : [];
+  });
 }
 /**
  * The seasons newest first, each with the rules version that opened it (Patch 1.6): the current sample season was opened under the

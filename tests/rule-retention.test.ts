@@ -51,6 +51,11 @@ const REVIEWED_UPDATES = new Map<string, RegExp[]>([
     /^update public\.world_revision_state r set rules_version=private\.active_rules_version\(\) where r\.singleton and /,
     /^update public\.public_profiles p set banner=true where not p\.banner and exists\(select 1 from public\.owned_cosmetics c where /,
   ]],
+  // M33 (patch 1.9): the Wiki's two always-null video slots leave the published and draft Game Info documents (versions kept).
+  ['20261112155112_game_info_guides.sql', [
+    /^update public\.game_info_reads set document = document - 'videos' where tab = 'wiki'$/,
+    /^update private\.game_info_drafts set document = document - 'videos' where tab = 'wiki'$/,
+  ]],
 ]);
 const name = (raw: string) => raw.replace(/"/g, '').toLowerCase();
 

@@ -8,27 +8,37 @@
     {
       "id": "schedule",
       "title": "Your daily schedule",
-      "body": "Open Schedule, choose one activity for morning, afternoon, and evening, and save the whole day. Each slot lasts 80 minutes in real time, so a game day takes four hours. Your schedule repeats while you’re away. Edits apply to slots that haven’t started. Dungeons run in the afternoon and Arena bouts run in the evening."
+      "body": "Open Schedule, choose one activity for morning, afternoon, and evening, and save the whole day. Each slot lasts 80 minutes in real time, so a game day takes four hours. Your schedule repeats while you’re away. Edits apply to slots that haven’t started. Dungeons run in the afternoon and Arena bouts run in the evening.",
+      "video": "https://youtu.be/n_JSh16FMkY",
+      "videoLength": "0:56"
     },
     {
       "id": "stamina",
       "title": "Stamina and Rest",
-      "body": "Activities use stamina. Rest restores it, and Schedule shows the expected recovery. If your gladiator cannot afford an activity, that slot becomes Rest. Heavy gear can raise stamina costs and make your gladiator less effective in combat. Check your load and capacity before planning a busy day."
+      "body": "Activities use stamina. Rest restores it, and Schedule shows the expected recovery. If your gladiator cannot afford an activity, that slot becomes Rest. Heavy gear can raise stamina costs and make your gladiator less effective in combat. Check your load and capacity before planning a busy day.",
+      "video": "https://youtu.be/yjRkEQtAgGk",
+      "videoLength": "0:54"
     },
     {
       "id": "training",
       "title": "Training and leveling",
-      "body": "Training earns attribute points up to your current level’s Training limit. You can complete two Training sessions per game day. A third becomes Rest. Expeditions and dungeons award XP, which raises your level and unlocks harder content and more gear. Spend earned points in My gladiator → Plan a build."
+      "body": "Training earns attribute points up to your current level’s Training limit. You can complete two Training sessions per game day. A third becomes Rest. Expeditions and dungeons award XP, which raises your level and unlocks harder content and more gear. Spend earned points in My gladiator → Plan a build.",
+      "video": "https://youtu.be/5ddb8dLd4Eo",
+      "videoLength": "1:03"
     },
     {
       "id": "attributes",
       "title": "Classes and attributes",
-      "body": "Berserkers favor Strength, Guardians favor Vitality and Endurance, and Duelists favor Agility and Precision. Any class can use any weapon it meets the requirements for.\n\nStrength increases damage. Agility shortens the time between attacks and makes you harder to hit. Vitality raises maximum health. Endurance increases maximum stamina and gear capacity. Precision increases your chances to hit and to land a critical hit. Your class and the points in an active build are fixed."
+      "body": "Berserkers favor Strength, Guardians favor Vitality and Endurance, and Duelists favor Agility and Precision. Any class can use any weapon it meets the requirements for.\n\nStrength increases damage. Agility shortens the time between attacks and makes you harder to hit. Vitality raises maximum health. Endurance increases maximum stamina and gear capacity. Precision increases your chances to hit and to land a critical hit. Your class and the points in an active build are fixed.",
+      "video": "https://youtu.be/RcJHwplvJ9Q",
+      "videoLength": "0:57"
     },
     {
       "id": "combat",
       "title": "Combat, dodge, and critical hits",
-      "body": "Fights play automatically using your build. Offensive stance deals more damage and takes more damage. Defensive stance deals less and takes less. Balanced has no stance adjustment.\n\nAttack speed is shown as the time between attacks. A shorter interval is faster. Your weapon sets the base interval, Agility shortens it, and overload slows it. Accuracy depends on your Precision and the defender’s Agility, so the chance of a dodge depends on the matchup. Critical is the chance per landed hit. A critical hit deals extra damage. Hover, focus, or tap a stat or attribute on a profile to see its help."
+      "body": "Fights play automatically using your build. Offensive stance deals more damage and takes more damage. Defensive stance deals less and takes less. Balanced has no stance adjustment.\n\nAttack speed is shown as the time between attacks. A shorter interval is faster. Your weapon sets the base interval, Agility shortens it, and overload slows it. Accuracy depends on your Precision and the defender’s Agility, so the chance of a dodge depends on the matchup. Critical is the chance per landed hit. A critical hit deals extra damage. Hover, focus, or tap a stat or attribute on a profile to see its help.",
+      "video": "https://youtu.be/VOc0GXqjBQs",
+      "videoLength": "0:47"
     },
     {
       "id": "gear",
@@ -43,12 +53,16 @@
     {
       "id": "dungeons",
       "title": "Party dungeons",
-      "body": "Choose Dungeon in the afternoon. Wolf Den opens at level 3, Raider Stronghold at level 7, and Troll Hall at level 12. Entry costs 40 base stamina. The game automatically groups up to three players going to the same dungeon. Eligible Ludus Nimbus bots fill open seats after players, and hired fighters fill the rest.\n\nEach run has three rooms and a boss. Health carries across fights. You keep the rewards for fights you took part in and your party won, even if the boss wins. Defeat the boss to open a chest. Higher-level gladiators can earn reduced rewards in easier dungeons. Watch the run live or replay it from Results."
+      "body": "Choose Dungeon in the afternoon. Wolf Den opens at level 3, Raider Stronghold at level 7, and Troll Hall at level 12. Entry costs 40 base stamina. The game automatically groups up to three players going to the same dungeon. Eligible Ludus Nimbus bots fill open seats after players, and hired fighters fill the rest.\n\nEach run has three rooms and a boss. Health carries across fights. You keep the rewards for fights you took part in and your party won, even if the boss wins. Defeat the boss to open a chest. Higher-level gladiators can earn reduced rewards in easier dungeons. Watch the run live or replay it from Results.",
+      "video": "https://youtu.be/EA9JzlguHwI",
+      "videoLength": "0:56"
     },
     {
       "id": "arena",
       "title": "Arena and renown",
-      "body": "Choose Arena for the evening to fight automatically in your league. Rated bouts against other players can raise or lower your rating. Renown is a separate currency earned through competition. Bouts against NPCs and Ludus Nimbus bots are unranked. Check Arena for recent opponents and Results → My bouts for your own record."
+      "body": "Choose Arena for the evening to fight automatically in your league. Rated bouts against other players can raise or lower your rating. Renown is a separate currency earned through competition. Bouts against NPCs and Ludus Nimbus bots are unranked. Check Arena for recent opponents and Results → My bouts for your own record.",
+      "video": "https://youtu.be/x6nEEiJNgck",
+      "videoLength": "0:58"
     },
     {
       "id": "tournaments",
@@ -70,9 +84,5 @@
       "title": "Results, replays, and messages",
       "body": "Open Results to review expeditions, dungeon runs, and fights. My bouts shows your Arena and tournament replays and lets you filter by wins or losses. You can pause or speed up a replay, choose when to reveal its result, and advance to the next bout. Notifications report your rewards and link to kept replays. Messages carries patch notes, and Patch history lists earlier updates."
     }
-  ],
-  "videos": [
-    null,
-    null
   ]
 }

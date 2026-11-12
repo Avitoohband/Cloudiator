@@ -9,7 +9,7 @@ const tools = [
   { name: 'game_info_read_draft', description: 'Read the current draft and version of a Game Info tab.', inputSchema: schema({ tab: tabSchema }), annotations: { readOnlyHint: true } },
   { name: 'game_info_save_draft', description: 'Replace a Game Info draft using the version you last read. The owner publishes separately.', inputSchema: schema({
     tab: tabSchema, expectedVersion: { type: 'integer', minimum: 0 }, document: { type: 'object',
-      description: 'Preserve ordered entries with id, title and body. Future entries may include patch. Wiki has two videos, each a YouTube URL or null.' },
+      description: 'Preserve ordered entries with id, title and body. Future entries may include patch. Wiki entries may have video, a YouTube URL, and videoLength, m:ss, only with a video.' },
   }) },
 ];
 

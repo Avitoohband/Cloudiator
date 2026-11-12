@@ -53,6 +53,9 @@ describe('Game Info MCP', () => {
       child.stdin.write('{"jsonrpc":"2.0","method":"notifications/initialized"}\n');
       const tools = (await call('tools/list')).result.tools;
       expect(tools.map((tool: { name: string }) => tool.name)).toEqual(['game_info_list_tabs', 'game_info_read_draft', 'game_info_save_draft']);
+      // M33: one optional guide per Wiki entry; the Wiki's two document-level video slots are gone.
+      expect(tools[2].inputSchema.properties.document.description).toBe('Preserve ordered entries with id, title and body. ' +
+        'Future entries may include patch. Wiki entries may have video, a YouTube URL, and videoLength, m:ss, only with a video.');
       const run = (name: string, args: Record<string, unknown>) => call('tools/call', { name, arguments: args });
       expect((await run('game_info_list_tabs', {})).result.structuredContent).toEqual({ tabs: ['wiki', 'future'] });
       expect((await run('game_info_read_draft', { tab: 'wiki' })).result.structuredContent.version).toBe(2);

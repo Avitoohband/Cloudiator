@@ -179,7 +179,7 @@ export function InventoryPanel({ owner, gateway, refresh, clock, preview = false
             // The command is kept, so Retry resends this very operation (the server answers it again) and reads the bag again; once
             // that read works the refusal stays, with nothing more to retry. Before, the command was dropped here and the "could not
             // be confirmed" Retry that followed sent nothing.
-            if (mounted.current) { setError(`${refusalText(gear, result.code)} Your latest items could not be loaded. Retry to load them.`); setRetry(true); }
+            if (mounted.current) { setError(`${refusalText(gear, result.code)} Your latest items could not be loaded. Retry sends it again and reloads your items.`); setRetry(true); }
             return { ok: false, code: result.code };
           }
         }

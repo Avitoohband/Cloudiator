@@ -10,13 +10,18 @@ import styles from './shell.module.css';
 /** A sheet closes when its top is dragged down at least this far. */
 const SWIPE_PX = 50;
 
-export function MenuSurface({ menu, open, onClose, children }: { menu: MenuDef; open: boolean; onClose(): void; children: ReactNode }) {
+export function MenuSurface({ menu, open, covered = false, onClose, children }: {
+  menu: MenuDef; open: boolean;
+  /** A profile card replaces the panel while it is open (no room beside it, Task 21): hidden and inert until the card closes. */
+  covered?: boolean;
+  onClose(): void; children: ReactNode;
+}) {
   const surface = useRef<HTMLElement>(null);
   const [swipe, setSwipe] = useState<{ pointer: number; y: number } | null>(null);
   useEffect(() => { if (open) surface.current?.focus({ preventScroll: true }); }, [open]);
   return (
     <section ref={surface} id={`menu-${menu.id}`} className={styles.surface} role="dialog" aria-label={menu.label} tabIndex={-1} hidden={!open}
-      data-menu-surface={menu.id}>
+      data-menu-surface={menu.id} data-covered={covered ? '' : undefined} inert={covered || undefined}>
       <div className={styles.top}
         onPointerDown={event => {
           if (event.pointerType === 'mouse' || (event.target as Element).closest('button')) return;

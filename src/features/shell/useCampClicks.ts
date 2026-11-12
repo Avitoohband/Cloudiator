@@ -40,13 +40,26 @@ export function useCampClicks({ bridge, open, viewer, world, show, focusCamp }: 
     const active = document.activeElement;
     setCard({ ...target, n: ++cards.current, returnTo: target.focus && active instanceof HTMLElement ? active : null });
   }, []);
+  /** A row to give the focus back to once the closed card has rendered away (its panel was inert under the card). */
+  const focusBack = useRef<HTMLElement | null>(null);
   const closeCard = useCallback((giveFocusBack: boolean) => {
     const current = cardRef.current;
     setCard(null);
     if (!giveFocusBack || !current) return;
-    if (current.returnTo?.isConnected) current.returnTo.focus({ preventScroll: true });
-    else focusCamp();
+    const back = current.returnTo;
+    if (!back?.isConnected) { focusCamp(); return; }
+    // A card that replaced its panel (Task 21 fix round 1) leaves the panel inert until this close renders: the row takes the
+    // focus once it has (below). Otherwise it takes it at once, as before.
+    if (back.closest('[inert]')) focusBack.current = back;
+    else back.focus({ preventScroll: true });
   }, [focusCamp]);
+  useEffect(() => {
+    const back = focusBack.current;
+    if (card || !back) return;
+    focusBack.current = null;
+    if (back.isConnected && !back.closest('[inert]')) back.focus({ preventScroll: true });
+    else focusCamp();
+  }, [card, focusCamp]);
   /** A list row's card: the gladiator's world name until the card resolves them. */
   const openRow = useCallback((gladiatorId: string, record: ProfileTarget['record'] = null, name?: string) => openCard({
     gladiatorId, name: name ?? worldRef.current?.actors.find(a => a.gladiatorId === gladiatorId)?.name ?? '', screen: null, record, focus: true,

@@ -211,7 +211,7 @@ const clamp = (value: number, min: number, max: number) => Math.max(min, Math.mi
  * when there is no room above; beside the open menu panel otherwise (right of a left panel, left of a right panel, left of a
  * panel above a bottom bar, or right of it when there is no room). Always clear of the rail, below the corner chip, in the view.
  */
-export function placeCard(screen: Point | null, card: Size, view: Size, side: MenuSide = { place: 'left', panel: null }): { left: number; top: number; width?: number } {
+export function placeCard(screen: Point | null, card: Size, view: Size, side: MenuSide = { place: 'left', panel: null }): { left: number; top: number; width?: number; covers?: true } {
   const { place, panel } = side;
   const minLeft = place === 'left' ? RAIL_RIGHT : MARGIN;
   const maxLeft = view.width - card.width - (place === 'right' ? RAIL_SIDE : MARGIN);
@@ -232,9 +232,9 @@ export function placeCard(screen: Point | null, card: Size, view: Size, side: Me
     const room = Math.floor(roomier === 'right' ? rightRoom : leftRoom);
     if (room >= MIN_CARD) return roomier === 'right' ? { left: panelLeft + panelWidth + MARGIN, top, width: room } : { left: panelLeft - MARGIN - room, top, width: room };
     // Task 21: not even the narrowest card fits beside it (a pointer window under about 750 px, or 990 px with the bar at the
-    // bottom). Rather than lie partly over the panel, the card moves above it: on the panel's own box, its width, the list under it
-    // until the card closes.
-    return { left: panelLeft, top, width: panelWidth };
+    // bottom). Rather than lie partly over the panel, the card replaces it while it is open: on the panel's own box, at its width
+    // (`covers`: the shell hides the panel and makes it inert meanwhile, fix round 1).
+    return { left: panelLeft, top, width: panelWidth, covers: true };
   }
   const above = screen.y - ABOVE - card.height, below = screen.y + BELOW;
   const centred = clamp(screen.x - card.width / 2, minLeft, maxLeft);
@@ -260,7 +260,7 @@ function followReasonOf(actor: PublicActor, roster: Roster | null, sceneStatus: 
 }
 
 /** The profile card over the camp: resolves the actor, loads the public profile and places the card. */
-export function ProfileLayer({ target, world, reads, ownerId, ownPlace = null, roster, sceneStatus, following, nowMs, menuPlace = 'left', onFollow, onWatch, onOpenMenu, onClose }: {
+export function ProfileLayer({ target, world, reads, ownerId, ownPlace = null, roster, sceneStatus, following, nowMs, menuPlace = 'left', onFollow, onWatch, onOpenMenu, onClose, onCover }: {
   target: ProfileTarget;
   world: WorldSnapshot | null;
   /** Public profile reads (null until the fixture preview's reads load). */
@@ -281,12 +281,18 @@ export function ProfileLayer({ target, world, reads, ownerId, ownPlace = null, r
   onWatch(activityId: string, gladiatorId: string): void;
   onOpenMenu(id: MenuId): void;
   onClose(): void;
+  /** Whether the card replaces the open panel now (no side of it holds the card: `placeCard`'s `covers`), told on every placement. */
+  onCover?(covers: boolean): void;
 }) {
   const card = useRef<HTMLElement>(null);
   const [loaded, setLoaded] = useState<{ profile: ProfileRead | null; failed: boolean } | null>(null);
   const [place, setPlace] = useState<{ left: number; top: number; width?: number } | null>(null);
   // A card narrowed to fit beside a panel measures its narrow width; its natural one (CARD_WIDTH) is what it asks the room for.
   const narrowed = useRef(false);
+  // The shell's cover callback, read at each placement; the panel comes back when the card goes.
+  const onCoverRef = useRef(onCover);
+  onCoverRef.current = onCover;
+  useLayoutEffect(() => () => onCoverRef.current?.(false), []);
   const id = target.gladiatorId;
 
   useEffect(() => {
@@ -304,12 +310,13 @@ export function ProfileLayer({ target, world, reads, ownerId, ownPlace = null, r
     const element = card.current;
     if (!element) return;
     const update = () => {
-      if (window.matchMedia?.(COMPACT_QUERY).matches) { setPlace(null); return; }
+      if (window.matchMedia?.(COMPACT_QUERY).matches) { setPlace(null); onCoverRef.current?.(false); return; }
       const surface = document.querySelector<HTMLElement>('[data-menu-surface]:not([hidden])');
       const panel = surface ? { left: surface.offsetLeft, top: surface.offsetTop, width: surface.offsetWidth } : null;
       const next = placeCard(screen, { width: narrowed.current ? CARD_WIDTH : element.offsetWidth, height: element.offsetHeight }, { width: window.innerWidth, height: window.innerHeight }, { place: menuPlace, panel });
       narrowed.current = next.width !== undefined;
-      setPlace(current => (current && current.left === next.left && current.top === next.top && current.width === next.width ? current : next));
+      onCoverRef.current?.(!!next.covers);
+      setPlace(current => (current && current.left === next.left && current.top === next.top && current.width === next.width ? current : { left: next.left, top: next.top, width: next.width }));
     };
     update();
     const observer = typeof ResizeObserver === 'function' ? new ResizeObserver(update) : null;

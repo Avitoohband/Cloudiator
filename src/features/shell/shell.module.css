@@ -185,6 +185,11 @@
   display: none;
 }
 
+/* A profile card that replaces the panel (no room beside it, Task 21): the panel keeps its box under the card, unseen and inert. */
+.surface[data-covered] {
+  visibility: hidden;
+}
+
 .surface:focus {
   outline: none;
 }

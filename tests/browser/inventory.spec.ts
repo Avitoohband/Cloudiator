@@ -1914,6 +1914,8 @@ test('a definite refusal whose owner refresh fails leaves a working Retry: the s
   // "could not be confirmed", since the server did answer. Observed before the fix: that sentence, and a Retry that sent nothing.
   await expect.soft(alert).toContainText('Your inventory changed');
   await expect.soft(alert).toContainText('could not be loaded', { timeout: 20_000 });
+  // It says what Retry does: the same trade again, then the items reloaded (fix round 1).
+  await expect.soft(alert).toContainText('Retry sends it again and reloads your items.');
   await expect(retry).toBeVisible({ timeout: 20_000 });
   flow.failOwnerReads(false);
   await retry.click();

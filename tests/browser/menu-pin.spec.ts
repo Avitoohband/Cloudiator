@@ -14,6 +14,8 @@ const positions = (page: Page) => settings(page).getByRole('radiogroup', { name:
 const placeRadio = (page: Page, place: 'Left' | 'Right' | 'Bottom') => positions(page).getByRole('radio', { name: place, exact: true });
 const banner = (page: Page) => page.getByTestId('arrival-banner');
 const notices = (page: Page) => page.locator('[data-notices]');
+/** The Gladiators panel by its element (a card that covers it takes it out of the accessibility tree). */
+const gladiatorsPanel = (page: Page) => page.locator('[data-menu-surface="gladiators"]');
 const settled = async (locator: Locator) => { await locator.evaluate(el => Promise.all(el.getAnimations().map(a => a.finished))); return locator; };
 const shotDir = process.env.MENU_PIN_SHOT_DIR;
 
@@ -294,7 +296,9 @@ for (const place of ['left', 'right', 'bottom'] as const) {
 
     test('never lies partly over the open panel: beside it, narrowed to fit, or where no side holds the card, over the whole panel (Task 21 item 5)', async ({ page }) => {
       await openCamp(page, JSON.stringify({ pinned: true, place }));
-      const list = await settled(await openMenuAt(page, 'Gladiators'));
+      await settled(await openMenuAt(page, 'Gladiators'));
+      // The panel by its element: a card that covers it hides it from the accessibility tree (fix round 1).
+      const list = gladiatorsPanel(page);
       await list.getByRole('button', { name: /^Profile: / }).first().click();
       const card = page.getByRole('dialog', { name: /^Profile: / });
       await expect(card).toBeVisible();
@@ -315,6 +319,47 @@ for (const place of ['left', 'right', 'bottom'] as const) {
         expect(intersects(c, await boxOf(rail(page))), `${width} px: clear of the rail`).toBe(false);
         await expect(card.getByRole('button', { name: 'Close profile' })).toBeInViewport({ ratio: 1 });
       }
+    });
+  });
+}
+
+// Task 21 fix round 1: where no side holds the card, it replaces the panel while it is open: the panel is hidden and inert (no
+// Tab stop under the card), and comes back, with the focus on the row that opened the card, when the card closes.
+for (const [place, width] of [['left', 600], ['bottom', 900]] as const) {
+  test.describe(`a profile card that covers its panel (${width} px, menu on the ${place})`, () => {
+    test.use({ viewport: { width, height: 800 } });
+    test.beforeEach(({}, testInfo) => { test.skip(testInfo.project.name !== 'desktop', 'The pointer layout.'); });
+
+    test('replaces the panel while it is open: hidden and inert, then back with the focus on its row (Task 21 item 5, fix round 1)', async ({ page }) => {
+      await openCamp(page, JSON.stringify({ pinned: true, place }));
+      await settled(await openMenuAt(page, 'Gladiators'));
+      const panel = gladiatorsPanel(page), row = panel.getByRole('button', { name: /^Profile: / }).first();
+      const name = (await row.getAttribute('aria-label')) ?? (await row.textContent())!;
+      await row.click();
+      const card = page.getByRole('dialog', { name: /^Profile: / });
+      await expect(card).toBeVisible();
+      // In the panel's box (its left and width, from its top or higher), and the panel itself hidden and inert.
+      const p = await boxOf(panel);
+      await expect.poll(async () => { const c = await boxOf(card); return Math.abs(c.x - p.x) <= 1 && Math.abs(c.width - p.width) <= 1 && c.y <= p.y + 1; }).toBe(true);
+      await expect(panel).toHaveAttribute('inert', '');
+      await expect(panel).toHaveCSS('visibility', 'hidden');
+      await expect(page.getByRole('dialog', { name: 'Gladiators', exact: true })).toHaveCount(0);
+      // Tab and Shift+Tab from the card never land in the panel under it.
+      await expect(card).toBeFocused();
+      for (const key of ['Tab', 'Shift+Tab']) {
+        await card.focus();
+        for (let i = 0; i < 25; i += 1) {
+          await page.keyboard.press(key);
+          expect(await panel.evaluate(el => el.contains(document.activeElement)), `${key} ${i + 1}`).toBe(false);
+        }
+      }
+      // Closing the card brings the panel back, live, with the focus on the row that opened the card.
+      await card.getByRole('button', { name: 'Close profile' }).click();
+      await expect(card).toHaveCount(0);
+      await expect(panel).not.toHaveAttribute('inert', /.*/);
+      await expect(panel).toHaveCSS('visibility', 'visible');
+      await expect(page.getByRole('dialog', { name: 'Gladiators', exact: true })).toBeVisible();
+      await expect(panel.getByRole('button', { name, exact: true }).first()).toBeFocused();
     });
   });
 }

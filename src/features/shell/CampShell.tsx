@@ -327,6 +327,10 @@ export function CampShell({ fixture, previewAs, previewResting = false, previewB
   }, [send]);
 
   const { card, cardRef, openRow, closeCard, shop } = useCampClicks({ bridge, open, viewer, world, show, focusCamp });
+  // Task 21 fix round 1: a card that no side of the open panel holds replaces it (ProfileLayer's `onCover`): the panel is hidden
+  // and inert while the card is open, and back the moment the card closes.
+  const [cardCovers, setCardCovers] = useState(false);
+  const covering = card !== null && cardCovers;
 
   // The scene's public facts the menus show, kept while they are closed.
   const [fights, setFights] = useState<readonly ArenaFightSummary[]>([]);
@@ -626,11 +630,11 @@ export function CampShell({ fixture, previewAs, previewResting = false, previewB
       </div>
       {away.state && scene === null && <AwayButton state={away.state} onOpen={openFromAway} onClose={away.close} />}
       {menus.map(menu => (menu.id === open || menu.id === 'arena') && (
-        <MenuSurface key={menu.id} menu={menu} open={menu.id === open} onClose={() => close(menu.id)}>{content(menu.id)}</MenuSurface>
+        <MenuSurface key={menu.id} menu={menu} open={menu.id === open} covered={covering && menu.id === open} onClose={() => close(menu.id)}>{content(menu.id)}</MenuSurface>
       ))}
       {card && <ProfileLayer key={card.n} target={card} world={world} reads={reads} ownerId={ownerId} ownPlace={ownPlace} roster={roster} sceneStatus={game.sceneStatus}
         nowMs={nowMs}
-        following={following} menuPlace={prefs.place} onClose={() => closeCard(true)} onOpenMenu={id => { closeCard(false); show(id); }}
+        following={following} menuPlace={prefs.place} onClose={() => closeCard(true)} onCover={setCardCovers} onOpenMenu={id => { closeCard(false); show(id); }}
         onFollow={id => { bridge.emit('follow-character', { gladiatorId: following === id ? null : id }); closeCard(false); handBack(); }}
         onWatch={(activityId, gladiatorId) => { closeCard(false); bridge.emit('open-arena', { activityId, gladiatorId }); }} />}
       <main id="main" className={styles.camp} data-camp-view="" tabIndex={-1}

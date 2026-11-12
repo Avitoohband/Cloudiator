@@ -344,6 +344,12 @@
   font-size: 11.5px;
 }
 
+/* Patch 1.9 Task 13: the Arena's figure under a stat's value (only where it differs). */
+.facts dd .arenaLine {
+  display: block;
+  line-height: 1.25;
+}
+
 .reason {
   margin: 6px 0 0;
   color: var(--ink-dim);

@@ -25,7 +25,7 @@ import { slotTimeText } from '../schedule/slot-time';
 import { TitleButton } from '../titles/TitlePicker';
 import { activityStatus } from './activity-status';
 import { ClassCard } from './ClassCard';
-import { attributeHelp, attributeRows, cardStats, ownBuild, pointsTotal, statHelp, statRows } from './profile-card';
+import { attributeHelp, attributeRows, cardStats, contextLines, ownBuild, pointsTotal, statHelp, statRows } from './profile-card';
 import { useStatHints } from './stat-hints';
 import { attributeNumbers, loadHelp, staminaHelp, statNumbers } from './stat-numbers';
 import { xpView } from './xp-progress';
@@ -84,6 +84,8 @@ function BuildFacts({ owner, hints }: { owner: OwnerState; hints: Hints }) {
   const build = ownBuild(owner);
   const classId = owner.currentBuild.classId;
   const stats = cardStats(classId, build);
+  // Patch 1.9 Task 13: what Damage and Armor are in each context, in the tooltip (only where they differ).
+  const contexts = stats ? contextLines(stats) : {};
   return (
     <div className={styles.facts}>
       <section aria-label="Attributes">
@@ -99,9 +101,9 @@ function BuildFacts({ owner, hints }: { owner: OwnerState; hints: Hints }) {
       {stats && <section aria-label="Stats">
         <h3 className={styles.factsHead}>Stats</h3>
         <ul className={styles.factRows}>
-          {statRows(stats).map(([label, value]) => <li key={label} className={styles.factRow} {...hints.hintRow(label)}>
-            <span className={styles.factName}>{hints.hintLabel(label, statHelp[label], statNumbers[label])}</span>
-            <span className={styles.factValue}>{value}</span>
+          {statRows(stats).map(([label, value, arena]) => <li key={label} className={styles.factRow} {...hints.hintRow(label)}>
+            <span className={styles.factName}>{hints.hintLabel(label, statHelp[label], [statNumbers[label], ...(contexts[label] ?? [])])}</span>
+            <span className={styles.factValue}>{value}{arena && <small className={styles.arenaLine} data-testid="arena-line">{arena}</small>}</span>
           </li>)}
         </ul>
       </section>}

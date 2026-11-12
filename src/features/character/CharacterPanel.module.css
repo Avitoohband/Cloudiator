@@ -402,6 +402,14 @@
   font-variant-numeric: tabular-nums;
 }
 
+/* Patch 1.9 Task 13: the Arena's figure under a value, smaller and dim (only where it differs). */
+.arenaLine {
+  display: block;
+  color: #9fb0c9;
+  font-size: 0.74rem;
+  line-height: 1.25;
+}
+
 .track {
   flex: 1;
   height: 7px;

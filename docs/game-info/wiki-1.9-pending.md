@@ -46,6 +46,12 @@ Click or tap an NPC in camp to hear a line from them, and again for their next o
 
 A resting gladiator lies straight on their bed with an eye cover, and a small ZzZ floats above them. It stops when they get up.
 
+## Combat (critical damage and the Arena)
+
+A critical hit deals 50% more damage than a normal hit.
+
+In the Arena and tournaments, renown armor counts 10% more and a renown weapon deals 10% more.
+
 ## Also
 
 - Renown now uses a gold laurel icon, in the corner chip too. Update any Wiki text or picture that shows the old icon.

@@ -21,7 +21,8 @@ export const statNumbers: Record<keyof typeof statHelp | 'Stamina' | 'Load', str
   Damage: `Each Strength adds ${n(c.strengthDamage)} damage.`,
   'Attack speed': `Each Agility speeds attacks by ${pct(c.agilityRate)}; never faster than every ${n(c.minimumIntervalMs / 1000)} s.`,
   Armor: `Each armor point blocks ${pct(c.armorReductionPerPoint)} of a hit, up to ${pct(c.maximumArmorReduction)}.`,
-  Critical: `Base ${pct(c.criticalBase)}, plus ${pct(c.criticalPrecision)} for each Precision, up to ${pct(c.maximumCritical)}. A critical hits for ${n(c.criticalDamage)} times the damage.`,
+  Critical: `Base ${pct(c.criticalBase)}, plus ${pct(c.criticalPrecision)} for each Precision, up to ${pct(c.maximumCritical)}.`,
+  'Critical damage': `A critical hit deals ${n(c.criticalDamage)} times the damage of a normal hit.`,
   Stamina: `Base ${n(r.staminaBase)}, plus ${n(r.staminaPerEndurance)} for each Endurance.`,
   Load: `Capacity is ${n(r.capacityBase)}, plus ${n(r.capacityPerEndurance)} for each Endurance.`,
 };

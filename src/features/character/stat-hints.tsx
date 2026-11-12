@@ -2,7 +2,7 @@
 
 // The help tooltips on a stat or attribute label (Task 11c's profile card; Patch 1.9 Task 10 shares them with My gladiator). A dotted label is a
 // button: hovering its row (mouse), focusing it by keyboard or pressing it (touch) opens a tooltip with the sentence (and, when given, a second line
-// of numbers); Escape or a press elsewhere closes it. The button is described by its tooltip (`aria-describedby`) while it is open. The tooltip sits
+// of numbers, or several lines); Escape or a press elsewhere closes it. The button is described by its tooltip (`aria-describedby`) while it is open. The tooltip sits
 // below its row, or above when the scrollport has no room below it. One tooltip is open at a time.
 import { useEffect, useId, useLayoutEffect, useRef, useState, type PointerEvent, type ReactNode } from 'react';
 
@@ -86,8 +86,8 @@ export function useStatHints({ buttonClass, tipClass, aboveClass, scrollport = s
     },
     onPointerLeave: () => setHint(current => current?.label === label && current.source === 'hover' ? null : current),
   });
-  /** The label's button, and its tooltip while open: the sentence, then `numbers` as a second line when given. */
-  const hintLabel = (label: string, description: string, numbers?: string): ReactNode => {
+  /** The label's button, and its tooltip while open: the sentence, then `numbers` as a second line (each of several as its own line) when given. */
+  const hintLabel = (label: string, description: string, numbers?: string | string[]): ReactNode => {
     const open = hint?.label === label;
     const id = `${hintId}-${label.toLowerCase().replaceAll(' ', '-')}`;
     return <>
@@ -98,7 +98,7 @@ export function useStatHints({ buttonClass, tipClass, aboveClass, scrollport = s
         onBlur={() => setHint(current => current?.label === label ? null : current)}
         onClick={() => setHint(current => current?.label === label && current.source === 'press' ? null : { label, source: 'press' })}
       >{label}</button>
-      {open && <span ref={tooltipRef} id={id} role="tooltip" className={tipClass}>{description}{numbers && <span className={numbersClass} data-hint-numbers="">{numbers}</span>}</span>}
+      {open && <span ref={tooltipRef} id={id} role="tooltip" className={tipClass}>{description}{[numbers ?? []].flat().map(line => <span key={line} className={numbersClass} data-hint-numbers="">{line}</span>)}</span>}
     </>;
   };
   return { hintRow, hintLabel };

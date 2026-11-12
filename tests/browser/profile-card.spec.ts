@@ -51,7 +51,7 @@ test.describe('the richer profile card', () => {
     expect(await lucilla.getByTestId('profile-look').locator('[data-layer]').count()).toBeGreaterThanOrEqual(3);
     await expect(lucilla.getByTestId('profile-look')).toHaveAttribute('aria-hidden', 'true');
     for (const label of ['Attributes', 'Stats', 'Gear', 'Record']) await expect(section(page, 'Lucilla', label)).toBeVisible();
-    await expect(section(page, 'Lucilla', 'Stats').getByRole('term')).toHaveText(['Health', 'Damage', 'Attack speed', 'Armor', 'Critical']);
+    await expect(section(page, 'Lucilla', 'Stats').getByRole('term')).toHaveText(['Health', 'Damage', 'Attack speed', 'Armor', 'Critical', 'Critical damage']);
     // Avi, 2026-11-04: Damage is a number, as Health is.
     await expect(section(page, 'Lucilla', 'Stats').getByRole('definition').nth(1)).toHaveText(/^\d+$/);
     // Patch 1.6: Lucilla owns no Arena banner, so her card has no banner pill.
@@ -192,6 +192,12 @@ test.describe('the richer profile card', () => {
     expect(await touchLayout(page)).toBe(true);
     const lucilla = await openFromList(page, 'Lucilla');
     await expect(section(page, 'Lucilla', 'Stats')).toContainText('Health');
+    // Patch 1.9 Task 13: six stat tiles in two columns, the sixth "Critical damage +50%".
+    const tiles = section(page, 'Lucilla', 'Stats').locator('dl > div');
+    await expect(tiles).toHaveCount(6);
+    await expect(tiles.nth(5)).toHaveText(/^Critical damage\s*\+50%$/);
+    const [first, last] = [await tiles.nth(4).boundingBox(), await tiles.nth(5).boundingBox()];
+    expect(Math.abs(first!.y - last!.y)).toBeLessThanOrEqual(1);
     const box = (await lucilla.boundingBox())!;
     expect(Math.round(box.x)).toBe(10);
     expect(Math.round(box.x + box.width)).toBe(350);

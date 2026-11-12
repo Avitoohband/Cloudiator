@@ -3,7 +3,7 @@ import type { EquipmentSlot, Stance } from '@contracts/commands';
 import { CATALOG_V1 } from '@domain/catalog-v1';
 import type { PublicBuild, PublicGear } from '../../src/lib/api/reads';
 import type { OwnerState } from '@contracts/reads';
-import { attributeRows, cardStats, gearRows, overloadLine, ownBuild, pointsTotal, recordText, sinceText, statRows } from '../../src/features/character/profile-card';
+import { attributeRows, cardStats, gearRows, overloadLine, ownBuild, pointsTotal, recordText, sinceText, statRows, contextLines } from '../../src/features/character/profile-card';
 import { ownerFixture } from '../fixtures/domain';
 
 // Task 11c (Patch A spec, "A richer profile card"; Avi approved the mockup, 2026-10-29): the card's words from the public build, computed
@@ -20,21 +20,67 @@ const XANTHE: PublicBuild = { stance: 'balanced', allocations: { strength: 6, ag
   equipment: { ...NONE, weapon: gear('axe:5:rare'), offHand: gear('round-shield:5:uncommon'), body: gear('light-armor:5:common') } };
 const ASTER: PublicBuild = { stance: 'balanced', allocations: { strength: 2, agility: 2, vitality: 2, endurance: 2, precision: 2 }, equipment: NONE };
 
+/** Patch 1.9 Task 13 (the approved crit-armour mockup): Aster in shop Sword, Round shield and Light boots and renown Iron helmet and Heavy armor. */
+const ASTER_GEAR = { ...NONE, weapon: gear('sword:1:common'), offHand: gear('round-shield:1:common'), feet: gear('light-boots:1:common'),
+  head: gear('iron-helmet:1:renown'), body: gear('heavy-armor:1:renown') };
+const ASTER_WORN: PublicBuild = { ...ASTER, equipment: ASTER_GEAR };
+const rowOf = (build: PublicBuild, label: string) => statRows(cardStats('guardian', build)!).find(row => row[0] === label)!;
+
+describe('critical damage and the Arena lines', () => {
+  it('says the extra damage of a critical hit and the Arena armor beside the expedition armor', () => {
+    const stats = cardStats('guardian', ASTER_WORN)!;
+    expect(stats.criticalDamage).toBe(1.5);
+    expect(rowOf(ASTER_WORN, 'Armor')).toEqual(['Armor', '13 · blocks 26%', 'Arena 13.9 · blocks 28%']);
+    expect(rowOf(ASTER_WORN, 'Critical')).toEqual(['Critical', '7% of hits']);
+    expect(statRows(stats).map(row => row[0]).slice(4)).toEqual(['Critical', 'Critical damage']);
+    expect(rowOf(ASTER_WORN, 'Critical damage')).toEqual(['Critical damage', '+50%']);
+    // A gold weapon deals the same in the Arena: no line on Damage.
+    expect(rowOf(ASTER_WORN, 'Damage')).toEqual(['Damage', '10']);
+  });
+  it('adds an Arena line to Damage only for a renown weapon whose bonus shows in the rounded hit, and leaves the Armor line alone', () => {
+    const renownSword: PublicBuild = { ...ASTER_WORN, equipment: { ...ASTER_GEAR, weapon: gear('sword:10:renown') } };
+    const stats = cardStats('guardian', renownSword)!;
+    expect(stats.arenaHit).toBeGreaterThan(stats.hit);
+    expect(rowOf(renownSword, 'Damage')).toEqual(['Damage', String(stats.hit), `Arena ${stats.arenaHit}`]);
+    // At level 1 the 10% is under half a point of the rounded hit: nothing to show.
+    expect(rowOf({ ...ASTER_WORN, equipment: { ...ASTER_GEAR, weapon: gear('sword:1:renown') } }, 'Damage')).toHaveLength(2);
+    expect(rowOf(renownSword, 'Armor')).toEqual(['Armor', '13 · blocks 26%', 'Arena 13.9 · blocks 28%']);
+  });
+  it('shows no Arena line with shop gear only, or with no armor at all', () => {
+    const shop: PublicBuild = { ...ASTER_WORN, equipment: { ...ASTER_GEAR, head: gear('iron-helmet:1:common'), body: gear('heavy-armor:1:common') } };
+    for (const row of statRows(cardStats('guardian', shop)!)) expect(row, row[0]).toHaveLength(2);
+    expect(rowOf(ASTER, 'Armor')).toEqual(['Armor', 'None']);
+    // A renown weapon alone: the Armor row has no armor, so none to compare.
+    const onlySword: PublicBuild = { ...ASTER, equipment: { ...NONE, weapon: gear('sword:10:renown') } };
+    expect(rowOf(onlySword, 'Armor')).toEqual(['Armor', 'None']);
+  });
+});
+
+describe('the tooltip lines of each context', () => {
+  it('names the expedition and Arena figures only where they differ', () => {
+    expect(contextLines(cardStats('guardian', ASTER_WORN)!)).toEqual({ Armor: ['Expeditions and dungeons · 13 armor · blocks 26%', 'Arena and tournaments · 13.9 armor · blocks 28%'] });
+    const renownSword: PublicBuild = { ...ASTER_WORN, equipment: { ...ASTER_GEAR, weapon: gear('sword:10:renown') } };
+    const stats = cardStats('guardian', renownSword)!;
+    expect(contextLines(stats).Damage).toEqual([`Expeditions and dungeons · ${stats.hit}`, `Arena and tournaments · ${stats.arenaHit}`]);
+    expect(contextLines(cardStats('guardian', ASTER)!)).toEqual({});
+  });
+});
+
 describe('profile card data', () => {
   it('computes the stats a fight uses, in the card\'s words', () => {
     expect(statRows(cardStats('guardian', LUCILLA)!)).toEqual([['Health', '197'], ['Damage', '15'], ['Attack speed', 'every 1.13 s'],
-      ['Armor', '12.3 · blocks 25%'], ['Critical', '7% of hits']]);
+      ['Armor', '12.3 · blocks 25%'], ['Critical', '7% of hits'], ['Critical damage', '+50%']]);
     expect(statRows(cardStats('guardian', XANTHE)!)).toEqual([['Health', '207'], ['Damage', '21'], ['Attack speed', 'every 1.3 s'],
-      ['Armor', '8.2 · blocks 16%'], ['Critical', '7% of hits']]);
+      ['Armor', '8.2 · blocks 16%'], ['Critical', '7% of hits'], ['Critical damage', '+50%']]);
     expect(statRows(cardStats('guardian', ASTER)!)).toEqual([['Health', '123'], ['Damage', '4'], ['Attack speed', 'every 0.94 s'],
-      ['Armor', 'None'], ['Critical', '7% of hits']]);
+      ['Armor', 'None'], ['Critical', '7% of hits'], ['Critical damage', '+50%']]);
     expect(overloadLine(cardStats('guardian', LUCILLA)!)).toBeNull();
     const heavy: PublicBuild = { stance: 'balanced', allocations: ZERO, equipment: { weapon: gear('axe:1:common'),
       offHand: gear('round-shield:1:common'), head: gear('iron-helmet:1:common'), body: gear('heavy-armor:1:common'), feet: gear('heavy-boots:1:common') } };
     expect(overloadLine(cardStats('guardian', heavy)!)).toBe('Overloaded: load 29 of 20.5, fighting at 79%');
     expect(cardStats('guardian', { ...LUCILLA, stance: 'reckless' as Stance })).toBeNull();
     // Speed rounds half up to hundredths (fix round: 1005 ms is 1.01 s, where 1.005 × 100 in binary would round down).
-    const base = { health: 100, hit: 5, armor: 0, blocks: 0, critical: 0.07, efficiency: 1, load: 0, capacity: 10 };
+    const base = { health: 100, hit: 5, armor: 0, blocks: 0, critical: 0.07, efficiency: 1, load: 0, capacity: 10, arenaHit: 5, arenaArmor: 0, arenaBlocks: 0, criticalDamage: 1.5 };
     expect(statRows({ ...base, intervalMs: 1005 })[2]).toEqual(['Attack speed', 'every 1.01 s']);
     expect(statRows({ ...base, intervalMs: 1296 })[2]).toEqual(['Attack speed', 'every 1.3 s']);
     expect(statRows({ ...base, intervalMs: 935 })[2]).toEqual(['Attack speed', 'every 0.94 s']);
@@ -84,6 +130,6 @@ describe('My gladiator own stats', () => {
     expect(ownBuild(owner)).toEqual(LUCILLA);
     expect(cardStats('guardian', ownBuild(owner))).toEqual(cardStats('guardian', LUCILLA));
     expect(statRows(cardStats('guardian', ownBuild(owner))!)).toEqual([['Health', '197'], ['Damage', '15'], ['Attack speed', 'every 1.13 s'],
-      ['Armor', '12.3 · blocks 25%'], ['Critical', '7% of hits']]);
+      ['Armor', '12.3 · blocks 25%'], ['Critical', '7% of hits'], ['Critical damage', '+50%']]);
   });
 });

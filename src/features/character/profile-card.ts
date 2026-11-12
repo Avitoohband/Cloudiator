@@ -14,9 +14,12 @@ import { GEAR_SLOTS, SLOT_LABELS } from '../inventory/gear';
 import { classBonuses } from './class-bonus';
 import { ATTRIBUTE_KEYS } from './creation-points';
 
-/** What a fight uses, from the published build: an expedition's numbers (the Arena's +10% on renown gear is not added). */
+/**
+ * What a fight uses, from the published build: an expedition's (and dungeon's) numbers in `hit`, `armor` and `blocks`, and the Arena's and
+ * tournaments' (renown gear counts 10% more) in the `arena…` ones; `criticalDamage` is the factor a critical hit multiplies a hit by.
+ */
 export type CardStats = { health: number; hit: number; intervalMs: number; armor: number; blocks: number; critical: number;
-  efficiency: number; load: number; capacity: number };
+  efficiency: number; load: number; capacity: number; arenaHit: number; arenaArmor: number; arenaBlocks: number; criticalDamage: number };
 
 /** A published item in the shape the rules read: its published fields, and the rest as the rules need them (origin from its catalog id). */
 const itemOf = (slot: EquipmentSlot, gear: PublicBuild['equipment'][EquipmentSlot]): ItemInstance | null => gear && {
@@ -30,13 +33,20 @@ export function cardStats(classId: ClassId, build: PublicBuild): CardStats | nul
     const snapshot = { rulesVersion: RULES_V1.version, classId, stance: build.stance, allocations: { ...build.allocations }, equipment };
     const derived = deriveStats(snapshot, RULES_V1);
     const fighter = makeFighter(snapshot, 'expedition', RULES_V1);
+    const arena = makeFighter(snapshot, 'arena', RULES_V1);
     const combat = RULES_V1.combat;
+    const hitOf = (of: typeof fighter) => Math.round(of.baseDamage * of.efficiency * RULES_V1.stances[build.stance].outgoing);
+    const blocksOf = (of: typeof fighter) => Math.round(Math.min(combat.maximumArmorReduction, combat.armorReductionPerPoint * of.armor) * 100);
     return {
       health: fighter.maxHealth,
-      hit: Math.round(fighter.baseDamage * fighter.efficiency * RULES_V1.stances[build.stance].outgoing),
+      hit: hitOf(fighter),
       intervalMs: fighter.attackIntervalMs,
       armor: fighter.armor,
-      blocks: Math.round(Math.min(combat.maximumArmorReduction, combat.armorReductionPerPoint * fighter.armor) * 100),
+      blocks: blocksOf(fighter),
+      arenaHit: hitOf(arena),
+      arenaArmor: arena.armor,
+      arenaBlocks: blocksOf(arena),
+      criticalDamage: combat.criticalDamage,
       critical: criticalProbability(fighter.attributes.precision, RULES_V1),
       efficiency: fighter.efficiency,
       load: derived.load,
@@ -60,12 +70,17 @@ export function ownBuild(owner: OwnerState): PublicBuild {
 /** A number as the card writes it: at most `places` decimals, trailing zeros dropped (12.30 is "12.3", 20.50 is "20.5"). */
 const decimals = (value: number, places: number) => String(Math.round(value * 10 ** places) / 10 ** places);
 
+/** A factor as a percentage more ("1.5" is "50%", "1.1" is "10%"): the Arena's and a critical hit's bonuses are the rules' own. */
+const morePercent = (factor: number) => `${Math.round((factor - 1) * 1000) / 10}%`;
+const ARENA_MORE = morePercent(RULES_V1.shops.renownArenaMultiplier);
+
 export const statHelp = {
   Health: 'Maximum health in combat. Vitality raises it.',
-  Damage: 'Damage from a normal hit before the target’s defenses. Weapon damage, Strength, stance, and gear overload affect it.',
+  Damage: `Damage from a normal hit before the target’s defenses. Weapon damage, Strength, stance, and gear overload affect it. A renown weapon deals ${ARENA_MORE} more in the Arena.`,
   'Attack speed': 'Time between attacks. Your weapon sets the base speed. Agility speeds up attacks, and gear overload slows them.',
-  Armor: 'Equipped armor reduces the damage you take from landed hits.',
-  Critical: 'Chance for a landed hit to deal extra damage. Precision raises it.',
+  Armor: `Equipped armor reduces the damage you take from landed hits. Renown armor counts ${ARENA_MORE} more in the Arena.`,
+  Critical: `Chance for a landed hit to be a critical hit, which deals ${morePercent(RULES_V1.combat.criticalDamage)} more damage. Precision raises it.`,
+  'Critical damage': 'How much more a critical hit deals than a normal hit.',
 } as const;
 
 export const attributeHelp: Record<keyof Attributes, string> = {
@@ -76,17 +91,40 @@ export const attributeHelp: Record<keyof Attributes, string> = {
   precision: 'Raises your chances to hit and to land a critical hit.',
 };
 
-/** The five combat stats in profile order. */
-export function statRows(stats: CardStats): [label: keyof typeof statHelp, value: string][] {
+/** The Armor row's words for one context ("13 · blocks 26%"). */
+const armorText = (armor: number, blocks: number) => `${decimals(armor, 1)} · blocks ${blocks}%`;
+
+/**
+ * The combat stats in profile order: label and value, and as a third element the Arena's line ("Arena 13.9 · blocks 28%") where it differs
+ * from the expedition's figure (Patch 1.9 Task 13: renown gear counts 10% more there). A row that does not differ has two elements.
+ */
+export function statRows(stats: CardStats): ([label: keyof typeof statHelp, value: string] | [label: keyof typeof statHelp, value: string, arena: string])[] {
+  const damageArena = stats.arenaHit !== stats.hit ? [`Arena ${stats.arenaHit}`] as const : [] as const;
+  const armorValue = stats.armor > 0 ? armorText(stats.armor, stats.blocks) : 'None';
+  const armorArena = stats.armor > 0 && armorText(stats.arenaArmor, stats.arenaBlocks) !== armorValue ? [`Arena ${armorText(stats.arenaArmor, stats.arenaBlocks)}`] as const : [] as const;
   return [
     ['Health', String(stats.health)],
     // Avi, 2026-11-04: just the number, as Health is.
-    ['Damage', String(stats.hit)],
+    ['Damage', String(stats.hit), ...damageArena],
     // Half up to hundredths: 1005 ms is 1.01 s (1.005 × 100 in binary is 100.49…, which Math.round would take down).
     ['Attack speed', `every ${String(Math.round(stats.intervalMs / 10) / 100)} s`],
-    ['Armor', stats.armor > 0 ? `${decimals(stats.armor, 1)} · blocks ${stats.blocks}%` : 'None'],
+    ['Armor', armorValue, ...armorArena],
     ['Critical', `${Math.round(stats.critical * 100)}% of hits`],
+    // Today every gladiator has the rules' factor; 1.10 plans a way to raise it, and this row will then differ.
+    ['Critical damage', `+${morePercent(stats.criticalDamage)}`],
   ];
+}
+
+/**
+ * The tooltip lines that say what each context gives (My gladiator's Damage and Armor), only where the figures differ:
+ * "Expeditions and dungeons · 13 armor · blocks 26%" and "Arena and tournaments · 13.9 armor · blocks 28%".
+ */
+export function contextLines(stats: CardStats): Partial<Record<keyof typeof statHelp, string[]>> {
+  const lines: Partial<Record<keyof typeof statHelp, string[]>> = {};
+  if (stats.arenaHit !== stats.hit) lines.Damage = [`Expeditions and dungeons · ${stats.hit}`, `Arena and tournaments · ${stats.arenaHit}`];
+  const [expedition, arena] = [stats.armor, stats.arenaArmor].map((armor, i) => `${decimals(armor, 1)} armor · blocks ${i ? stats.arenaBlocks : stats.blocks}%`);
+  if (stats.armor > 0 && expedition !== arena) lines.Armor = [`Expeditions and dungeons · ${expedition}`, `Arena and tournaments · ${arena}`];
+  return lines;
 }
 
 /** The line under the stats when the gear outweighs the load capacity, or null. */

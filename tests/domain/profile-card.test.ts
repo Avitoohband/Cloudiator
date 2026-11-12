@@ -230,11 +230,20 @@ describe('profile card', () => {
     expect(/<button([^>]*)>Follow<\/button>/.exec(drawn)![1]).not.toContain('disabled');
   });
 
+  // Patch 1.9 Task 13: the card's Stats carry the same Arena sub-lines and the Critical damage row as My gladiator.
+  it('shows the Arena line under a renown armor, and Critical damage after Critical', () => {
+    const renown: PublicBuild = { ...LUCILLA_BUILD, equipment: { ...LUCILLA_BUILD.equipment, head: gear('iron-helmet:1:renown'), body: gear('heavy-armor:1:renown') } };
+    const shown = items(card({ actor: LUCILLA, profile: { ...LUCILLA_PROFILE, build: renown } }));
+    const armor = shown.findIndex(item => item.startsWith('Armor '));
+    expect(shown.slice(armor, armor + 3)).toEqual(['Armor 9 · blocks 18% Arena 9.9 · blocks 20%', 'Critical 7% of hits', 'Critical damage +50%']);
+    expect(items(card({ actor: LUCILLA, profile: LUCILLA_PROFILE })).filter(item => item.includes('Arena '))).toEqual(['Arena record 9–5 · all seasons']);
+  });
+
   // Task 11c (Patch A spec, "A richer profile card"; Avi approved the mockup, 2026-10-29): the card in sections.
   it('shows the look, the class chips, the attributes, the stats, the gear and the record, in that order', () => {
     const html = card({ actor: LUCILLA, profile: LUCILLA_PROFILE });
     const order = ['ATTRIBUTES · 22 POINTS', 'Vitality +5% 9', 'STATS · DEFENSIVE STANCE', 'Health 197', 'Damage 15', 'Attack speed every 1.13 s',
-      'Armor 12.3 · blocks 25%', 'Critical 7% of hits', 'GEAR', 'Weapon Spear · Level 5 · uncommon', 'Off-hand Two-handed weapon', 'RECORD', 'Rating 1040',
+      'Armor 12.3 · blocks 25%', 'Critical 7% of hits', 'Critical damage +50%', 'GEAR', 'Weapon Spear · Level 5 · uncommon', 'Off-hand Two-handed weapon', 'RECORD', 'Rating 1040',
       'Titles 9 earned', 'Arena record 9–5 · all seasons', 'In camp since 2 Oct · 8 days'];
     const shown = items(html);
     let from = -1;

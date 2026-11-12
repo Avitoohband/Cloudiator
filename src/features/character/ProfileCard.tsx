@@ -143,8 +143,8 @@ export function ProfileCard({ actor, profile, profileFailed = false, own, ownPla
         <section className={styles.section} aria-label="Stats">
           <p className="eyebrow">{stats && build ? `STATS · ${build.stance.toUpperCase()} STANCE` : 'STATS'}</p>
           {stats ? <>
-            <dl className={`${styles.facts} ${styles.stats}`}>{statRows(stats).map(([label, value]) => <div key={label} className={styles.statRow} {...hintRow(label)}>
-              <dt>{hintLabel(label, statHelp[label])}</dt><dd>{value}</dd>
+            <dl className={`${styles.facts} ${styles.stats}`}>{statRows(stats).map(([label, value, arena]) => <div key={label} className={styles.statRow} {...hintRow(label)}>
+              <dt>{hintLabel(label, statHelp[label])}</dt><dd>{value}{arena && <small className={styles.arenaLine} data-testid="arena-line">{arena}</small>}</dd>
             </div>)}</dl>
             {overload && <p className={styles.overload}>{overload}</p>}
           </> : <p className={styles.state}>{missing}</p>}

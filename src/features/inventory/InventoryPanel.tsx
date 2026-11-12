@@ -16,6 +16,7 @@ import { ShopPanel } from '../shops/ShopPanel';
 import { useOutcomeFocus } from '../shell/focus-lost';
 import { ItemIcon, ItemStats } from './ItemPresentation';
 import { ItemSearch, MatchCount, NoMatch } from './ItemSearch';
+import { revealCard } from './reveal-card';
 import { groupStacks, isStackable, joinsStack, stackSaleItems, type StackTile } from './stacks';
 import { INVENTORY_SORTS, queryItems, type Queryable, type SortKey } from './item-query';
 import {
@@ -39,6 +40,15 @@ const saleReason = (code: string) => code === 'invalid' ? 'that piece is reserve
   : code === 'processing' ? 'the world is processing previous results' : code === 'unavailable' ? 'the request could not be confirmed'
     : code === 'rate-limited' ? 'too many requests, try again shortly' : code === 'sold' ? 'it was sold on the Marketplace'
       : code === 'expired' ? 'its Marketplace listing expired' : `the server answered ${code}`;
+/** What a refused command says: a gear change in the gear's words (`gearRefusal`), a trade in its own. */
+const refusalText = (gear: boolean, code: string) => gear ? gearRefusal(code) : code === 'processing' ? 'The world is processing previous results. Retry shortly.'
+  : code === 'unavailable' ? 'This request could not be confirmed. Retry the same request.'
+    : code === 'inventory-full' ? 'Your inventory is full. Clear enough slots and try again.'
+      : code === 'insufficient-funds' ? 'Not enough available currency. Held fees cannot be spent.'
+        : code === 'conflict' ? 'Your inventory changed or this cosmetic is already owned. Review the refreshed state.'
+          : code === 'sold' ? 'This item was sold on the Marketplace. Review the refreshed inventory.'
+            : code === 'expired' ? 'Its Marketplace listing has expired and the item is back. Review the refreshed inventory.'
+              : `Request rejected: ${code}.`;
 /** What `send` tells a caller that waits for it: whether the server took the command, or why not; null when it was not sent. */
 type Sent = { ok: true } | { ok: false; code: string } | null;
 const itemLabel = (item: ItemInstance) => `${itemName(item)}, level ${item.tier} ${item.rarity}`;
@@ -69,8 +79,10 @@ export function InventoryPanel({ owner, gateway, refresh, clock, preview = false
   const [quantities, setQuantities] = useState<Record<string, number>>({});
   const [filter, setFilter] = useState<Filter>('All');
   const [query, setQuery] = useState(''), [sort, setSort] = useState<SortKey>('newest');
-  const scroller = useRef<HTMLDivElement>(null);
+  const scroller = useRef<HTMLDivElement>(null), detailsBox = useRef<HTMLElement>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  /** Counts tile taps: each one brings the chosen card into view on a phone (`revealCard`, Task 21). */
+  const [reveal, setReveal] = useState(0);
   const [retry, setRetry] = useState(false);
   /** A sale of several pieces in progress: one `sell-item` per piece, in a row (`sellTile`). */
   const [selling, setSelling] = useState<{ key: string; name: string; done: number; total: number } | null>(null);
@@ -95,8 +107,9 @@ export function InventoryPanel({ owner, gateway, refresh, clock, preview = false
   // A search with no match under a chip that hides matches All would show says so ("No match for “sword” in Armor").
   const hiddenBy = !visibleTiles.length && query.trim() && filter !== 'All' && queryItems(tiles, tile => itemView(tile.items[0]), query, sort).length ? filter : undefined;
   const selected = visibleTiles.find(tile => tile.items.some(item => item.id === selectedId)) ?? visibleTiles[0];
-  // Remember the displayed fallback so a refresh cannot replace a still-visible selection.
-  if (selectedId !== (selected?.key ?? null)) setSelectedId(selected?.key ?? null);
+  // Remember the displayed fallback so a refresh cannot replace a still-visible selection. With nothing shown (a search or a chip
+  // with no match) the choice is kept, so clearing the search brings it back, as the Shops do (Task 21).
+  if (selected && selectedId !== selected.key) setSelectedId(selected.key);
   // After a filter, search or sort change the chosen piece is brought into view inside the grid only (never the page or the menu).
   const latest = useRef(selected?.key);
   latest.current = selected?.key;
@@ -107,6 +120,7 @@ export function InventoryPanel({ owner, gateway, refresh, clock, preview = false
     if (top < 0) box.scrollTop += top;
     else if (bottom > 0) box.scrollTop += bottom;
   }, [filter, query, sort]);
+  useLayoutEffect(() => { if (reveal) revealCard(detailsBox.current); }, [reveal]);
   const discardRequest = confirmation === 'stale' ? null : confirmation;
   const confirmingItem = discardRequest && owner.inventory.find(item => item.id === discardRequest.itemId);
   const canConfirmDiscard = !!(discardRequest && confirmingItem && !isReserved(owner, confirmingItem) && discardRequest.quantity <= confirmingItem.quantity);
@@ -153,17 +167,23 @@ export function InventoryPanel({ owner, gateway, refresh, clock, preview = false
       } else {
         const transient = ['processing', 'unavailable', 'rate-limited'].includes(result.code);
         if (!quiet) setRetry(transient);
-        if (!quiet) setError(gear ? gearRefusal(result.code) : result.code === 'processing' ? 'The world is processing previous results. Retry shortly.'
-          : result.code === 'unavailable' ? 'This request could not be confirmed. Retry the same request.'
-            : result.code === 'inventory-full' ? 'Your inventory is full. Clear enough slots and try again.'
-              : result.code === 'insufficient-funds' ? 'Not enough available currency. Held fees cannot be spent.'
-                : result.code === 'conflict' ? 'Your inventory changed or this cosmetic is already owned. Review the refreshed state.'
-                  : result.code === 'sold' ? 'This item was sold on the Marketplace. Review the refreshed inventory.'
-                    : result.code === 'expired' ? 'Its Marketplace listing has expired and the item is back. Review the refreshed inventory.'
-                      : `Request rejected: ${result.code}.`);
-        if (!transient) attempt.current = null;
+        if (!quiet) setError(refusalText(gear, result.code));
         // A gear change the server finds `invalid` no longer fits the build or the bag (`gearRefusal`): reload them.
-        if (['conflict', 'not-found', 'inventory-full', 'sold', 'expired'].includes(result.code) || result.code === 'invalid' || (quiet && result.code === 'unavailable')) await refresh();
+        const reload = ['conflict', 'not-found', 'inventory-full', 'sold', 'expired'].includes(result.code) || result.code === 'invalid' || (quiet && result.code === 'unavailable');
+        if (!transient && (quiet || !reload)) attempt.current = null;
+        if (reload) {
+          try { await refresh(); } catch (failure) {
+            // A sale in a run is reported by the run (`sellTile`), which reads the bag again and calls the result unknown, as before.
+            if (quiet) throw failure;
+            // Task 21 (the HANDOFF's pre-existing Retry issue): the refusal stands, but the bag it refers to could not be read again.
+            // The command is kept, so Retry resends this very operation (the server answers it again) and reads the bag again; once
+            // that read works the refusal stays, with nothing more to retry. Before, the command was dropped here and the "could not
+            // be confirmed" Retry that followed sent nothing.
+            if (mounted.current) { setError(`${refusalText(gear, result.code)} Your latest items could not be loaded. Retry to load them.`); setRetry(true); }
+            return { ok: false, code: result.code };
+          }
+        }
+        if (!transient) attempt.current = null;
         return { ok: false, code: result.code };
       }
     } catch {
@@ -326,7 +346,7 @@ export function InventoryPanel({ owner, gateway, refresh, clock, preview = false
               const word = badge ? (badge === 'wears-from' ? 'Next' : 'Worn') : listed ? 'Listed' : '';
               return <button key={tile.key} type="button" className={styles.tile} data-testid={`tile-${tile.key}`} data-rarity={item.rarity} data-stack={tile.items.length > 1 ? tile.items.length : undefined}
                 aria-label={[itemLabel(item), itemBinding(item), count > 1 && `${count} owned`, status].filter(Boolean).join(', ')}
-                aria-description={`Weight ${item.stats.weight}`} aria-controls={detailsId} aria-pressed={tile.key === selected?.key} onClick={() => setSelectedId(tile.key)}>
+                aria-description={`Weight ${item.stats.weight}`} aria-controls={detailsId} aria-pressed={tile.key === selected?.key} onClick={() => { setSelectedId(tile.key); setReveal(n => n + 1); }}>
                 <ItemIcon catalogId={item.catalogId} />
                 <span className={styles.level} aria-hidden="true">L{item.tier}</span>
                 {word && <span className={styles.mark} data-mark={word.toLowerCase()} aria-hidden="true">{word}</span>}
@@ -339,7 +359,7 @@ export function InventoryPanel({ owner, gateway, refresh, clock, preview = false
         </div>
         <MatchCount count={visibleCount} query={query} filter={hiddenBy} idle={visibleTiles.length > 0 ? `${visibleTiles.length} tile${visibleTiles.length === 1 ? '' : 's'} · ${visibleCount} item${visibleCount === 1 ? '' : 's'} · each item still uses a slot` : ''} />
       </div>
-      <section id={detailsId} aria-label="Item details" className={styles.details}>
+      <section ref={detailsBox} id={detailsId} aria-label="Item details" className={styles.details}>
         {confirmation === 'stale' && <p ref={staleDiscardNotice} role="alert" tabIndex={-1}>Your inventory changed. Review the updated inventory before discarding.</p>}
         {place === 'sale' && outcomes}
         {selected ? itemCard(selected) : <p className="muted">{query.trim() ? 'Nothing to show. Clear the search to see every item.' : owner.inventory.length ? `No ${filter.toLowerCase()} in your inventory.` : 'Your inventory is empty.'}</p>}

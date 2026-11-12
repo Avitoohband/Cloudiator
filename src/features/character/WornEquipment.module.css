@@ -552,6 +552,11 @@
   margin-top: 6px;
 }
 
+/* An outcome from before the open picker (Task 21): hidden, keeping its room, until the picker closes and it goes. */
+.stale {
+  visibility: hidden;
+}
+
 .message,
 .alert {
   margin: .6rem 0 0;

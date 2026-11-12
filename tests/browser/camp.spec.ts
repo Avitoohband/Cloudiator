@@ -10,7 +10,7 @@ import { SLOT_MS } from '../../src/game/lighting';
 import type { MapData } from '../../src/game/assets';
 import { createDemoWorld } from '../../src/game/demo-world';
 import { REPLAY_FIXTURES } from '../fixtures/replay-ids';
-import { SLEEP_NAME_LIFT } from '../../src/game/sleep-zzz';
+import { SLEEP_NAME_LIFT, ZZZ_FADE_MS } from '../../src/game/sleep-zzz';
 import { closeMenu, openMenu, revealRail, touchLayout } from './shell-helpers';
 
 const production = process.env.PLAYWRIGHT_STATIC === 'true';
@@ -315,6 +315,51 @@ test.describe('living isometric camp', () => {
     await expect.poll(async () => (await campState(page)).ring).toEqual({ x: feet.x + 16, y: feet.y + 8 });
     await expect(page.getByRole('dialog', { name: `Profile: ${sleeper.name}`, exact: true })).toBeVisible();
   });
+
+  for (const reduced of [false, true]) {
+    test(`a sleeper who gets up ${reduced ? 'loses its ZzZ at once with reduced motion' : 'fades its ZzZ out over the letters\' own fade time, over its bed'} (Task 21 item 10)`, async ({ page }) => {
+      if (reduced) await page.emulateMedia({ reducedMotion: 'reduce' });
+      await openCamp(page);
+      const onBed = (a: { x: number; y: number }) => [14, 16, 18].includes(Math.floor(a.x)) && [35, 36, 39, 40].includes(Math.floor(a.y));
+      const players = (await campState(page)).actors.filter(a => a.kind === 'player' && !a.walking);
+      const sleeper = players.find(a => a.action === 'sleep' && onBed(a))!;
+      const awake = players.find(a => a.action !== 'sleep' && a.zone !== 'rest' && a.location)!;
+      await page.evaluate(({ x, y }) => window.__cloudiatorCamp!.centerOn(x, y, 3), { x: sleeper.x, y: sleeper.y });
+      // The camp's clock held, so the fade is read at exact times.
+      const t0 = await page.evaluate(() => window.__cloudiatorShell!.clock.now());
+      const at = (ms: number) => page.evaluate(m => window.__cloudiatorCamp!.freezeClock(m), ms).then(() => nextFrames(page));
+      await at(t0);
+      const read = async () => (await campState(page)).actors.find(a => a.id === sleeper.id)!;
+      const asleep = (await read()).zzz;
+      expect(asleep.length).toBeGreaterThanOrEqual(2);
+      // It gets up: its public location moves to the training ground, and it walks there.
+      await page.evaluate(({ id, location }) => {
+        const hook = window.__cloudiatorCamp!;
+        const world = hook.world()!;
+        hook.setWorld({ ...world, actors: world.actors.map(a => (a.gladiatorId === id ? { ...a, location: location as typeof a.location } : a)) });
+      }, { id: sleeper.id, location: awake.location! });
+      await expect.poll(async () => (await read()).action).not.toBe('sleep');
+      if (reduced) {
+        expect((await read()).zzz).toEqual([]);
+        return;
+      }
+      // At first the letters are as they were; halfway through the fade they are at most half opaque, still over the bed (the
+      // exact opacity over the fade is the unit test's, tests/domain/sleep-zzz.test.ts).
+      expect((await read()).zzz).toEqual(asleep);
+      await at(t0 + ZZZ_FADE_MS / 2);
+      const half = (await read()).zzz;
+      expect(half.length).toBeGreaterThan(0);
+      for (const z of half) {
+        expect(z.alpha).toBeGreaterThan(0);
+        expect(z.alpha).toBeLessThanOrEqual(0.5 + 1e-6);
+        expect(asleep.some(a => Math.abs(a.x - z.x) <= 6 && Math.abs(a.y - z.y) <= 18), 'over the bed').toBe(true);
+      }
+      await at(t0 + ZZZ_FADE_MS - 20);
+      expect((await read()).zzz.length, 'still fading').toBeGreaterThan(0);
+      await at(t0 + ZZZ_FADE_MS + 20);
+      expect((await read()).zzz).toEqual([]);
+    });
+  }
 
   test('takes the armor and helmet off a sleeper and brings its hair back, and keeps them on an awake gladiator (Task 14)', async ({ page }) => {
     await openCamp(page);

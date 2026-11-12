@@ -338,7 +338,41 @@ describe('profile card', () => {
     expect(placeCard({ x: 640, y: 680 }, tall, view)).toEqual({ left: 380, top: 76 });
     // Opened from a list row: beside the open menu panel.
     expect(placeCard(null, size, view)).toEqual({ left: 458, top: 64 });
-    expect(placeCard(null, size, { width: 600, height: 720 })).toEqual({ left: 328, top: 64 });
+    // Task 21: 130 px beside the panel holds no card, so it replaces the panel rather than lie partly over it (it was { left: 328 }).
+    expect(placeCard(null, size, { width: 600, height: 720 })).toEqual({ left: 66, top: 64, width: 380, covers: true });
+  });
+
+  it('never lies partly over the open panel on a pointer window 481-1000 px wide: it narrows beside it, or covers it (Task 21)', () => {
+    const card = { width: 520, height: 540 };
+    const at = (width: number) => ({ width, height: 800 });
+    // Left: right of the panel. 1000 px hold the whole card; 800 px leave 330 px, and it narrows to them; 700 px leave 230 px,
+    // under the narrowest card (280 px), so it covers the panel, on its box.
+    expect(placeCard(null, card, at(1000))).toEqual({ left: 458, top: 64 });
+    expect(placeCard(null, card, at(800))).toEqual({ left: 458, top: 64, width: 330 });
+    expect(placeCard(null, card, at(800), { place: 'left', panel: { left: 66, top: 64, width: 380 } })).toEqual({ left: 458, top: 64, width: 330 });
+    expect(placeCard(null, card, at(700))).toEqual({ left: 66, top: 64, width: 380, covers: true });
+    // Right: left of the panel (78 px from the right edge). 800 px leave 318 px beside it; 700 px leave 218 px.
+    const right = (width: number) => ({ place: 'right' as const, panel: { left: width - 78 - 380, top: 156, width: 380 } });
+    expect(placeCard(null, card, at(800), right(800))).toEqual({ left: 12, top: 156, width: 318 });
+    expect(placeCard(null, card, at(700), right(700))).toEqual({ left: 242, top: 156, width: 380, covers: true });
+    // Bottom: either side of the centred panel. 1000 px leave 286 px each side (it was a 300 px floor over the panel); 800 px, 186 px.
+    const bottom = (width: number) => ({ place: 'bottom' as const, panel: { left: (width - 380) / 2, top: 156, width: 380 } });
+    expect(placeCard(null, card, at(1000), bottom(1000))).toEqual({ left: 12, top: 156, width: 286 });
+    expect(placeCard(null, card, at(800), bottom(800))).toEqual({ left: 210, top: 156, width: 380, covers: true });
+    // Every width from 481 to 1000 px, every place: beside the panel (clear of it and in the window), or over its whole width.
+    for (let width = 481; width <= 1000; width += 1) {
+      for (const side of [{ place: 'left' as const, panel: { left: 66, top: 64, width: 380 } }, right(width), bottom(width)]) {
+        const { left, width: narrowed, covers } = placeCard(null, card, at(width), side), cardWidth = narrowed ?? card.width, { panel } = side;
+        const beside = left + cardWidth <= panel.left || left >= panel.left + panel.width;
+        // Only a card that replaces its panel says so (the shell hides the panel then, fix round 1).
+        expect(covers, `${side.place} ${width}`).toBe(beside ? undefined : true);
+        if (beside) {
+          expect(cardWidth, `${side.place} ${width}`).toBeGreaterThanOrEqual(280);
+          expect(left, `${side.place} ${width}`).toBeGreaterThanOrEqual(side.place === 'left' ? 66 : 12);
+          expect(left + cardWidth, `${side.place} ${width}`).toBeLessThanOrEqual(width - (side.place === 'right' ? 66 : 12));
+        } else expect({ left, cardWidth }, `${side.place} ${width}`).toEqual({ left: panel.left, cardWidth: panel.width });
+      }
+    }
   });
 
   it('sits beside the open panel when the menu is on the right or at the bottom (Settings)', () => {

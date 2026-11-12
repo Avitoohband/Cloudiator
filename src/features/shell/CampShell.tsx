@@ -333,6 +333,10 @@ export function CampShell({ fixture, previewAs, previewResting = false, previewB
   }, [send]);
 
   const { card, cardRef, openRow, closeCard, shop } = useCampClicks({ bridge, open, viewer, world, show, focusCamp });
+  // Task 21 fix round 1: a card that no side of the open panel holds replaces it (ProfileLayer's `onCover`): the panel is hidden
+  // and inert while the card is open, and back the moment the card closes.
+  const [cardCovers, setCardCovers] = useState(false);
+  const covering = card !== null && cardCovers;
 
   // The scene's public facts the menus show, kept while they are closed.
   const [fights, setFights] = useState<readonly ArenaFightSummary[]>([]);
@@ -523,7 +527,8 @@ export function CampShell({ fixture, previewAs, previewResting = false, previewB
   // When the camp shows names and titles (Settings, Task 11): the same on phones, applied to the camp at once.
   const [labels, setLabels] = useLabelPrefs();
   // An NPC's speech bubble keeps clear of the pinned menu rail: its laid-out box (offsets leave out the slide transform) and
-  // 8 px more, at the side or along the bottom it sits on; measured again when the window resizes (Task 11 review).
+  // 8 px more, at the side or along the bottom it sits on; measured again when the window resizes (Task 11 review) or the rail's
+  // box changes (Task 21).
   const [talkInsets, setTalkInsets] = useState<TalkInsets | undefined>(undefined);
   useEffect(() => {
     if (!prefs.pinned) { setTalkInsets(undefined); return; }
@@ -539,7 +544,12 @@ export function CampShell({ fixture, previewAs, previewResting = false, previewB
     };
     measure();
     window.addEventListener('resize', measure);
-    return () => window.removeEventListener('resize', measure);
+    // Task 21: the rail's width also changes with no window resize (its buttons shrink or grow as the notices over a right-hand rail
+    // come and go), so it is measured again whenever its box changes.
+    const rail = shellRef.current?.querySelector<HTMLElement>('[data-testid="menu-rail"]');
+    const observer = rail && typeof ResizeObserver === 'function' ? new ResizeObserver(measure) : null;
+    if (rail) observer?.observe(rail);
+    return () => { window.removeEventListener('resize', measure); observer?.disconnect(); };
   }, [prefs.pinned, prefs.place]);
   const railShown = railVisible(rail, prefs.pinned);
   const [patchLater, setPatchLater] = useState<string | null>(null);
@@ -631,11 +641,11 @@ export function CampShell({ fixture, previewAs, previewResting = false, previewB
       </div>
       {away.state && scene === null && !practising && <AwayButton state={away.state} onOpen={openFromAway} onClose={away.close} />}
       {menus.map(menu => (menu.id === open || menu.id === 'arena') && (
-        <MenuSurface key={menu.id} menu={menu} open={menu.id === open} onClose={() => close(menu.id)}>{content(menu.id)}</MenuSurface>
+        <MenuSurface key={menu.id} menu={menu} open={menu.id === open} covered={covering && menu.id === open} onClose={() => close(menu.id)}>{content(menu.id)}</MenuSurface>
       ))}
       {card && <ProfileLayer key={card.n} target={card} world={world} reads={reads} ownerId={ownerId} ownPlace={ownPlace} roster={roster} sceneStatus={game.sceneStatus}
         nowMs={nowMs}
-        following={following} menuPlace={prefs.place} onClose={() => closeCard(true)} onOpenMenu={id => { closeCard(false); show(id); }}
+        following={following} menuPlace={prefs.place} onClose={() => closeCard(true)} onCover={setCardCovers} onOpenMenu={id => { closeCard(false); show(id); }}
         onFollow={id => { bridge.emit('follow-character', { gladiatorId: following === id ? null : id }); closeCard(false); handBack(); }}
         onWatch={(activityId, gladiatorId) => { closeCard(false); bridge.emit('open-arena', { activityId, gladiatorId }); }}
         onSpar={viewer === 'player' && owner ? practice.spar : undefined} />}

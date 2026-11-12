@@ -198,6 +198,7 @@ them, don't promise them on an end card, and expect details to change). Avi's vi
 | Feature | What players get | Patch | Status | How to film it | Shown in video |
 | --- | --- | --- | --- | --- | --- |
 | Shops and inventory | Buy gear from the weaponsmith and the armorer, and keep it in your inventory. | 1.0 | Live | Inventory and shops | Concept trailer |
+| Item cards on phones | On a phone, tapping an inventory tile or a shop cell scrolls its card into view (with small fixes to the inventory, shops, messages, Settings and the Wiki list). | 1.9 | Built | Phone: Inventory and shops → scroll down to the Shops → tap a cell: its card comes up under the grid | — |
 | Player market | Buy from and sell to other players at fixed prices; visitors can browse. | 1.0 | Live | Marketplace (the fixture camp has sample listings) | Concept trailer |
 | A fair market fee | A sale's fee is at least 1 gold and the lowest price is 2 gold; the sell form shows what you receive. | 1.1 | Live | Marketplace → Sell | Looks update |
 | Gold | Money is called gold everywhere; your amount is unchanged. | 1.3 | Live | Marketplace; My gladiator | Messages update |

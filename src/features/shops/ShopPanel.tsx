@@ -1,12 +1,13 @@
 'use client';
 
-import { useEffect, useId, useRef, useState, type KeyboardEvent } from 'react';
+import { useEffect, useId, useLayoutEffect, useRef, useState, type KeyboardEvent } from 'react';
 import type { OwnerState } from '@contracts/reads';
 import { CATALOG_V1 } from '@domain/catalog-v1';
 import type { Merchant } from '@domain/inventory';
 import { ItemIcon } from '../inventory/ItemPresentation';
 import { MatchCount, ItemSearch, NoMatch } from '../inventory/ItemSearch';
 import { SHOP_SORTS, queryItems, type SortKey } from '../inventory/item-query';
+import { revealCard } from '../inventory/reveal-card';
 import inventory from '../inventory/InventoryPanel.module.css';
 import { BannerArt, CurrencyIcon } from './ShopArt';
 import { BannerCard, OfferCard, spendable } from './ShopCard';
@@ -31,11 +32,14 @@ const EXPLAINERS: Record<ShopCurrency, string> = {
 export function ShopPanel({ owner, busy, preview, buy, initialMerchant }: {
   owner: OwnerState; busy: boolean; preview: boolean; buy(catalogId: string, quantity: number): void; initialMerchant?: Merchant;
 }) {
-  const section = useRef<HTMLElement>(null), grid = useRef<HTMLDivElement>(null), scroller = useRef<HTMLDivElement>(null);
+  const section = useRef<HTMLElement>(null), grid = useRef<HTMLDivElement>(null), scroller = useRef<HTMLDivElement>(null), detailsBox = useRef<HTMLElement>(null);
   useEffect(() => { if (initialMerchant) scrollToTop(section.current); }, [initialMerchant]);
   const [filter, setFilter] = useState<ShopFilter>(merchantFilter(initialMerchant));
   const [currency, setCurrency] = useState<ShopCurrency>('money');
   const [chosenId, setChosenId] = useState<string | null>(null);
+  /** Counts cell taps: each one brings the chosen offer's card into view on a phone (`revealCard`, Task 21). */
+  const [reveal, setReveal] = useState(0);
+  useLayoutEffect(() => { if (reveal) revealCard(detailsBox.current); }, [reveal]);
   /** The cell the arrow keys last reached: the grid's one Tab stop while it is shown, else the chosen cell. */
   const [stopId, setStopId] = useState<string | null>(null);
   const [quantity, setQuantity] = useState(1);
@@ -91,7 +95,7 @@ export function ShopPanel({ owner, busy, preview, buy, initialMerchant }: {
     return <button key={choice.id} type="button" className={`${inventory.tile} ${styles.cell}`} data-shop-cell="" data-testid={`offer-${choice.id}`}
       data-locked={locked ? '' : undefined} data-poor={poor ? '' : undefined}
       aria-label={name.filter(Boolean).join(', ')} aria-description={description} aria-controls={detailsId} aria-pressed={choice.id === chosen?.id}
-      tabIndex={choice.id === tabStop ? 0 : -1} onFocus={() => setStopId(choice.id)} onClick={() => setChosenId(choice.id)}>
+      tabIndex={choice.id === tabStop ? 0 : -1} onFocus={() => setStopId(choice.id)} onClick={() => { setChosenId(choice.id); setReveal(n => n + 1); }}>
       {offer ? <ItemIcon catalogId={offer.catalogId} /> : <BannerArt />}
       {offer ? <span className={styles.level} data-shop-level="" aria-hidden="true">L{offer.requiredLevel}</span>
         : owned && <span className={styles.owned} aria-hidden="true">✓</span>}
@@ -130,7 +134,7 @@ export function ShopPanel({ owner, busy, preview, buy, initialMerchant }: {
         <MatchCount count={choices.length} query={query} filter={hiddenBy} />
         <p className={`muted ${styles.foot}`}>{EXPLAINERS[currency]} L = level needed; pieces with a lock are above your level. {choices.length} items.</p>
       </div>
-      <section id={detailsId} aria-label="Offer details" className={inventory.details}>
+      <section ref={detailsBox} id={detailsId} aria-label="Offer details" className={inventory.details}>
         {!chosen ? <p>{query.trim() ? 'Nothing to show. Clear the search to see every item.' : 'Nothing here.'}</p> : chosen.kind === 'offer' ? <OfferCard offer={chosen.offer} quantity={quantity} setQuantity={setQuantity} {...purchase} /> : <BannerCard {...purchase} />}
       </section>
     </div>

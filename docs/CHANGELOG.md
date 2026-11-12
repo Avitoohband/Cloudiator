@@ -47,6 +47,7 @@ Project folders under `D:\Avi\Projects\Animation\Cloudiator\`.
 - Sleeping gladiators take off their armour.
 - Each Wiki topic shows its own YouTube video guide.
 - Practice fights: test your build against a dummy with stats you choose, or spar a copy of any gladiator. No stamina, no slot, no rating, nothing saved.
+- Phones scroll a tapped item's card into view, plus small fixes to the inventory, shops, messages, Settings and the Wiki list.
 
 ### Planned for 1.9 (added 2026-11-12, not built yet)
 

@@ -5,11 +5,13 @@
 // sits over their whole climb, so nothing shifts as they rise.
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { decodePng } from '../../assets/source/tools/png.mjs';
 import { loadAssetManifest } from '@/game/assets';
+import { NAME_LABEL_STYLE } from '@/game/map-layer';
 import {
-  SLEEP_NAME_LIFT, ZZZ_CYCLE_MS, ZZZ_GLYPHS, ZZZ_TOP, zzzLetters, zzzPhase, zzzPixels, type ZzzLetter,
+  SLEEP_NAME_LIFT, ZZZ_CYCLE_MS, ZZZ_FADE_MS, ZZZ_GLYPHS, ZZZ_TEXTURE, ZZZ_TOP, drawZzz, ensureZzzTexture, zzzDebug, zzzLetters, zzzPhase, zzzPixels,
+  type ZzzLetter, type ZzzSprites,
 } from '@/game/sleep-zzz';
 
 const STEP = 10;
@@ -55,7 +57,11 @@ describe('the ZzZ letters', () => {
     for (const p of phases) { expect(p).toBeGreaterThanOrEqual(0); expect(p).toBeLessThan(ZZZ_CYCLE_MS); }
     const phase = zzzPhase('glad-3');
     expect(zzzLetters(4000, phase, false, false)).toEqual(zzzLetters(4000, phase, false, false));
-    expect(zzzLetters(4000, phase, false, false)).toEqual(zzzLetters(4000 + phase - zzzPhase('glad-3'), zzzPhase('glad-3'), false, false));
+    // Task 21 (it compared a call with itself): the clock and the phase only add up, so another actor shows at 4000 ms what this one
+    // shows its phase difference later, and nothing but the clock given moves them.
+    const other = zzzPhase('glad-4'), lead = other - phase;
+    expect(lead).not.toBe(0);
+    expect(zzzLetters(4000 + lead, phase, false, false)).toEqual(zzzLetters(4000, other, false, false));
     expect(zzzLetters(4000, zzzPhase('glad-3'), false, false)).not.toEqual(zzzLetters(4000, zzzPhase('glad-4'), false, false));
   });
 
@@ -108,6 +114,94 @@ describe('the ZzZ pixel glyphs', () => {
     // The colours are the palette's (the same cream and outline as the camp's names).
     expect(manifest.palette.canvas1).toBeDefined();
     expect(manifest.palette.outline).toBeDefined();
+    expect([NAME_LABEL_STYLE.color, NAME_LABEL_STYLE.stroke]).toEqual([manifest.palette.canvas1, manifest.palette.outline]);
+  });
+
+  it('are drawn by ensureZzzTexture pixel by pixel in those colours: the fill cream, the outline dark (Task 21)', () => {
+    const { palette } = loadAssetManifest();
+    const painted: { colour: string; x: number; y: number }[] = [];
+    const context = { fillStyle: '', fillRect(x: number, y: number, w: number, h: number) { expect([w, h]).toEqual([1, 1]); painted.push({ colour: this.fillStyle, x, y }); } };
+    const canvas = { width: 0, height: 0, getContext: (kind: string) => (kind === '2d' ? context : null) };
+    const frames: [string, number, number, number, number, number][] = [];
+    const scene = { textures: { exists: () => false, addCanvas: (key: string, source: unknown) => {
+      expect([key, source]).toEqual([ZZZ_TEXTURE, canvas]);
+      return { add: (...frame: [string, number, number, number, number, number]) => { frames.push(frame); } };
+    } } };
+    vi.stubGlobal('document', { createElement: (tag: string) => { expect(tag).toBe('canvas'); return canvas; } });
+    try { ensureZzzTexture(scene as never, palette); } finally { vi.unstubAllGlobals(); }
+    // Both glyphs side by side, every pixel the shape names in its colour, and nothing else painted.
+    const expected: typeof painted = [];
+    let x0 = 0;
+    for (const glyph of ['Z', 'z'] as const) {
+      const { width } = ZZZ_GLYPHS[glyph];
+      zzzPixels(glyph).forEach((p, i) => { if (p) expected.push({ colour: p === 'fill' ? palette.canvas1 : palette.outline, x: x0 + (i % width), y: Math.floor(i / width) }); });
+      x0 += width;
+    }
+    expect(painted).toEqual(expected);
+    expect(new Set(painted.map(p => p.colour))).toEqual(new Set([palette.canvas1, palette.outline]));
+    expect([canvas.width, canvas.height]).toEqual([ZZZ_GLYPHS.Z.width + ZZZ_GLYPHS.z.width, ZZZ_GLYPHS.Z.height]);
+    expect(frames).toEqual([['Z', 0, 0, 0, ZZZ_GLYPHS.Z.width, ZZZ_GLYPHS.Z.height], ['z', 0, ZZZ_GLYPHS.Z.width, 0, ZZZ_GLYPHS.z.width, ZZZ_GLYPHS.z.height]]);
+  });
+});
+
+describe('a sleeper who gets up (Task 21)', () => {
+  /** Three stand-in letter images that keep what the scene sets on them. */
+  const sprites = (id = 'glad-7'): ZzzSprites => {
+    const images = ['Z', 'z', 'Z'].map(glyph => {
+      const image = { frame: { name: glyph }, x: 0, y: 0, alpha: 1, visible: false,
+        setFrame(name: string) { image.frame = { name }; return image; }, setPosition(x: number, y: number) { image.x = x; image.y = y; return image; },
+        setAlpha(a: number) { image.alpha = a; return image; }, setVisible(v: boolean) { image.visible = v; return image; } };
+      return image;
+    });
+    return { images: images as never, phase: zzzPhase(id), letters: [], shown: false, fade: null };
+  };
+  const bed = { x: 300, y: 500 };
+  const drawnNow = (z: ZzzSprites) => zzzDebug(z).map(({ glyph, x, y, alpha }) => ({ glyph, x, y, alpha }));
+
+  it('fades the letters out over the time they fade at the top (FADE_OUT of a cycle), where they were, then hides them', () => {
+    expect(ZZZ_FADE_MS).toBe(1200);
+    const z = sprites();
+    drawZzz(z, true, bed, 10_000, true, false);
+    const asleep = drawnNow(z);
+    expect(asleep.length).toBeGreaterThan(0);
+    // Up, and already walking off: the letters stay over the bed, keep rising and fade from where they were.
+    drawZzz(z, false, { x: 340, y: 520 }, 10_000, false, false);
+    expect(drawnNow(z)).toEqual(asleep);
+    for (const elapsed of [300, 600, 900, 1_150]) {
+      drawZzz(z, false, { x: 400, y: 560 }, 10_000 + elapsed, false, false);
+      const own = zzzLetters(10_000 + elapsed, z.phase, true, false);
+      const shown = drawnNow(z);
+      expect(shown, `${elapsed} ms`).toEqual(own.flatMap(l => {
+        const alpha = l.alpha * (1 - elapsed / ZZZ_FADE_MS);
+        return alpha > 0 ? [{ glyph: l.glyph, x: bed.x + l.left, y: bed.y + l.bottom - ZZZ_GLYPHS[l.glyph].height, alpha: expect.closeTo(alpha, 6) }] : [];
+      }));
+    }
+    drawZzz(z, false, bed, 10_000 + ZZZ_FADE_MS, false, false);
+    expect(drawnNow(z)).toEqual([]);
+    expect(z.images.every(image => !image.visible)).toBe(true);
+    // Lying down again shows them whole at once.
+    drawZzz(z, true, bed, 20_000, true, false);
+    expect(drawnNow(z).length).toBeGreaterThan(0);
+  });
+
+  it('hides them at once with reduced motion, and when the scene\'s clock goes back (a replay seeks or leaves the chapter)', () => {
+    const still = sprites();
+    drawZzz(still, true, bed, 10_000, false, true);
+    expect(drawnNow(still)).toHaveLength(3);
+    drawZzz(still, false, bed, 10_000, false, true);
+    expect(drawnNow(still)).toEqual([]);
+    expect(still.images.every(image => !image.visible)).toBe(true);
+    const z = sprites();
+    drawZzz(z, true, bed, 10_000, false, false);
+    drawZzz(z, false, bed, 10_200, false, false);
+    expect(drawnNow(z).length).toBeGreaterThan(0);
+    drawZzz(z, false, { x: 0, y: 0 }, 0, false, false);
+    expect(drawnNow(z)).toEqual([]);
+    // A fade under way stops when motion is reduced.
+    drawZzz(z, true, bed, 30_000, false, false);
+    drawZzz(z, false, bed, 30_100, false, false);
+    drawZzz(z, false, bed, 30_200, false, true);
+    expect(drawnNow(z)).toEqual([]);
   });
 });
 

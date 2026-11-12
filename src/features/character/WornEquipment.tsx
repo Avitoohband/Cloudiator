@@ -83,6 +83,8 @@ export function WornEquipment({ owner, gateway, refresh, clock, preview = false,
   /** A slot to give the focus to once the page shows it (after the picker, or the phone's sheet over it, has closed). */
   const [focusTo, setFocusTo] = useState<EquipmentSlot | null>(null);
   const [busy, setBusy] = useState(false), [outcome, setOutcome] = useState<Outcome | null>(null), [retry, setRetry] = useState(false);
+  /** The outcome line and Retry are from before the open picker (Task 21): hidden while it is open, gone once it closes. */
+  const [stale, setStale] = useState(false);
   const attempt = useRef<GearCommand | null>(null), success = useRef(''), sending = useRef(false), mounted = useRef(false);
   const nowMs = useMinuteNow(clock), clockMode = useClockMode();
   const effective = owner.pendingBuild ? slotTimeText(owner.pendingBuild.effectiveSlotIndex * RULES_V1.clock.slotMs, nowMs, clockMode) : '';
@@ -96,6 +98,7 @@ export function WornEquipment({ owner, gateway, refresh, clock, preview = false,
 
   useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
   useEffect(() => { onPicking?.(open !== null); }, [open, onPicking]);
+  useEffect(() => { if (open === null && stale) { setStale(false); setOutcome(null); setRetry(false); } }, [open, stale]);
   useEffect(() => () => onPicking?.(false), [onPicking]);
   useLayoutEffect(() => {
     if (!focusTo || open) return;
@@ -150,7 +153,7 @@ export function WornEquipment({ owner, gateway, refresh, clock, preview = false,
     const command = attempt.current && comparable(attempt.current) === comparable(intent) ? attempt.current : intent;
     begin();
     success.current = done; attempt.current = command; sending.current = true;
-    setBusy(true); setOutcome(null); setRetry(false);
+    setBusy(true); setOutcome(null); setRetry(false); setStale(false);
     try {
       const result = await gateway.command(command);
       if (!mounted.current) return;
@@ -168,9 +171,14 @@ export function WornEquipment({ owner, gateway, refresh, clock, preview = false,
     } finally { sending.current = false; end(); if (mounted.current) setBusy(false); }
   }
 
-  /** Opens the picker over the panel. The last outcome (and its Retry) stays until the next command, so nothing below the slots moves; it is inert under the picker. */
+  /**
+   * Opens the picker over the panel. It clears the last outcome line and its Retry (Task 21), so Retry cannot resend a command from
+   * before it opened once it closes: they are hidden at once, keeping their room so nothing under the desktop popover moves (the
+   * approved overlay), and removed when the picker closes. A command still on its way keeps its answer, which shows when it comes.
+   */
   function openPicker(slot: EquipmentSlot) {
     setOpen(slot); setChosen(null); setStop(null);
+    if (!sending.current && (outcome || retry)) setStale(true);
   }
   function closePicker(slot: EquipmentSlot) {
     setOpen(null); setChosen(null); setStop(null); setFocusTo(slot);
@@ -365,7 +373,7 @@ export function WornEquipment({ owner, gateway, refresh, clock, preview = false,
       <p>{pendingNote(effective)}{keepsOtherChanges(owner) && ' Cancel changes puts the gear back; your other queued build changes stay.'}</p>
       <button type="button" className={`${styles.small} ${styles.cancel}`} disabled={preview} {...busyProps} onClick={cancel}>Cancel changes</button>
     </section>}
-    {outcome && <p ref={outcomeRef} className={outcome.role === 'alert' ? styles.alert : styles.message} role={outcome.role} tabIndex={-1} inert={covered} {...target}>{outcome.text}</p>}
-    {retry && <button type="button" className={styles.small} inert={covered} {...busyProps} onClick={() => { if (attempt.current && !sending.current) void send(attempt.current, success.current); }}>Retry request</button>}
+    {outcome && <p ref={outcomeRef} className={`${outcome.role === 'alert' ? styles.alert : styles.message}${stale ? ` ${styles.stale}` : ''}`} role={outcome.role} tabIndex={-1} inert={covered} {...target}>{outcome.text}</p>}
+    {retry && <button type="button" className={`${styles.small}${stale ? ` ${styles.stale}` : ''}`} inert={covered} {...busyProps} onClick={() => { if (attempt.current && !sending.current && !stale) void send(attempt.current, success.current); }}>Retry request</button>}
   </section>;
 }

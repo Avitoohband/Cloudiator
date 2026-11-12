@@ -59,7 +59,7 @@ Avi's decisions of 2026-11-11. The built items need no server change; the Wiki v
 - **Moved in from the next patch (Avi, 2026-11-12: "anything non related payments and balance, should be in").** Not built yet. Mockups approved by Avi on 2026-11-12 (`.superpowers/design/2026-11-12-feedback-buyback/`): Send feedback in Messages (team answers arrive as "Team reply" messages), the owner's Feedback tab in Game Info, and Buy back as a Shops filter.
   - **Feedback from the game.** A Feedback button sends a bug report or idea with a category; the team reads and answers them (ideas 30 and 39, player support with triage).
   - **Buy back.** Buy back your last 10 sold items until the next game day, for the price you sold them at.
-- **No 1.9.1 (Avi, 2026-11-12).** The review leftovers planned as 1.9.1 (phone tap scrolls the item card into view, the inventory Retry after a refused command, notification focus, card placement on mid-size windows and other small fixes) are fixed inside 1.9, because 1.9 is not released yet. Plan: [1.9 additions](superpowers/plans/2026-11-12-1.9-additions.md), Task 21.
+- **No 1.9.1 (Avi, 2026-11-12).** The review leftovers planned as 1.9.1 (phone tap scrolls the item card into view, the inventory Retry after a refused command, notification focus, card placement on mid-size windows and other small fixes) are built inside 1.9 (Task 21, 2026-11-12), because 1.9 is not released yet. Plan: [1.9 additions](superpowers/plans/2026-11-12-1.9-additions.md), Task 21.
 - Plan: [Wiki list, menu and shop grid](superpowers/plans/2026-11-11-wiki-menu-and-shop-grid.md). Wiki text to change when 1.9 ships: [wiki-1.9-pending](game-info/wiki-1.9-pending.md).
 
 ## Before 2.0: security pass, penetration test and scaling (planned)

@@ -454,17 +454,50 @@ test.describe('equip from My gladiator (live)', () => {
     expect(steps.filter(step => step.at === 'covered'), JSON.stringify(steps)).toEqual([]);
     expect(steps.filter(step => COVERED.test(step.name)), JSON.stringify(steps)).toEqual([]);
     expect(steps.at(-1)?.at, JSON.stringify(steps)).toBe('outside');
-    // Escape closes the picker: the slot has the focus, and Tab reaches Undo, Cancel changes and Retry again.
+    // Escape closes the picker: the slot has the focus, and Tab reaches Undo and Cancel changes again. The Retry is gone: opening
+    // the picker cleared the last outcome and its Retry (Task 21 item 6).
     await wearButton(dialog).focus();
     await page.keyboard.press('Escape');
     await expect(dialog).toHaveCount(0);
     await expect(weapon).toBeFocused();
     const names: string[] = [];
-    for (let i = 0; i < 15 && names.at(-1) !== 'Retry request'; i += 1) {
+    for (let i = 0; i < 15 && names.at(-1) !== 'Cancel changes'; i += 1) {
       await page.keyboard.press('Tab');
       names.push(await page.evaluate(() => document.activeElement?.getAttribute('aria-label') ?? document.activeElement?.textContent?.trim() ?? ''));
     }
-    expect(names.filter(name => COVERED.test(name)), JSON.stringify(names)).toEqual(['Undo Weapon change', 'Cancel changes', 'Retry request']);
+    expect(names.filter(name => COVERED.test(name)), JSON.stringify(names)).toEqual(['Undo Weapon change', 'Cancel changes']);
+    await expect(worn.getByRole('button', { name: 'Retry request', exact: true })).toHaveCount(0);
+  });
+
+  test('opening a picker clears the last outcome and its Retry, so Retry cannot resend an older command once it closes (Task 21 item 6)', async ({ page, context }, info) => {
+    if (info.project.name === 'mobile') await page.setViewportSize({ width: 360, height: 740 });
+    const sword = piece('sword:1:common'), uncommon = piece('sword:1:uncommon');
+    const flow = await gearFlow(context, state => {
+      state.inventory = [sword, uncommon];
+      state.currentBuild.equipment = { ...state.currentBuild.equipment, weapon: sword.id };
+    });
+    await page.goto('/game/');
+    const menu = await openMenu(page, 'My gladiator');
+    const weapon = slotButton(menu, 'Weapon'), worn = wornRegion(menu), dialog = picker(menu, 'Weapon');
+    const refusal = 'The world is processing previous results. Retry shortly.';
+    flow.reject('processing');
+    await weapon.click();
+    await pick(dialog, uncommon).click();
+    await wearButton(dialog).click();
+    await expect(worn.getByRole('alert')).toHaveText(refusal);
+    await expect(worn.getByRole('button', { name: 'Retry request', exact: true })).toBeVisible();
+    flow.reject('');
+    // The player opens the picker again (the old outcome and Retry hide at once, keeping their room under the desktop popover) and
+    // closes it without choosing: they are gone.
+    await weapon.click();
+    await expect(dialog).toBeVisible();
+    await expect(worn.getByText(refusal)).toBeHidden();
+    await expect(worn.getByRole('button', { name: 'Retry request', exact: true })).toBeHidden();
+    await page.keyboard.press('Escape');
+    await expect(dialog).toHaveCount(0);
+    await expect(worn.getByText(refusal)).toHaveCount(0);
+    await expect(worn.getByRole('button', { name: 'Retry request', exact: true })).toHaveCount(0);
+    expect(flow.commands).toHaveLength(1);
   });
 
   test('Escape that closes the Load tooltip leaves the picker open', async ({ page, context, hasTouch }, info) => {

@@ -268,6 +268,30 @@ test.describe('talking camp NPCs', () => {
     }
   });
 
+  test('the bubble measures a pinned rail again whenever its width changes, with no window resize (Task 21 item 8)', async ({ page }) => {
+    await openCamp(page);
+    test.skip(await touchLayout(page), "The pinned rail is the pointer layout's.");
+    const rail = page.getByTestId('menu-rail');
+    await page.evaluate(([key, value]) => localStorage.setItem(key, value), [MENU_PREFS_KEY, JSON.stringify({ pinned: true, place: 'left' })]);
+    await page.reload();
+    await page.waitForFunction(() => window.__cloudiatorCamp?.state()?.ready === true, null, { timeout: 45_000 });
+    await page.evaluate(() => window.__cloudiatorCamp!.freezeClock(window.__cloudiatorShell!.clock.now()));
+    await expect(rail).toHaveAttribute('data-revealed', 'true');
+    await settled(rail);
+    const at = await clickBody(page, 'npc:trainer', { zoom: 2 });
+    await expect(bubble(page)).toBeVisible();
+    // The trainer goes behind the rail.
+    await page.evaluate(d => window.__cloudiatorCamp!.emit('camera-pan', d), { dx: 12 - at.x, dy: 0 });
+    await nextFrames(page);
+    const before = (await rail.boundingBox())!;
+    expect((await bubble(page).boundingBox())!.x).toBeGreaterThanOrEqual(before.x + before.width + 7);
+    // The rail's buttons grow (as a rail's do when the notices over a right-hand rail shrink): it is wider, the window is not.
+    await rail.evaluate(el => el.style.setProperty('--rb', '52px'));
+    await expect.poll(async () => (await rail.boundingBox())!.width).toBeGreaterThan(before.width + 8);
+    const r = (await rail.boundingBox())!;
+    await expect.poll(async () => (await bubble(page).boundingBox())!.x, 'the bubble starts right of the wider rail').toBeGreaterThanOrEqual(r.x + r.width + 7);
+  });
+
   test('NPCs show a pointer and a gold ring on hover; gladiators do not', async ({ page }) => {
     await openCamp(page);
     test.skip(await touchLayout(page), 'Hover is the pointer layout\'s.');

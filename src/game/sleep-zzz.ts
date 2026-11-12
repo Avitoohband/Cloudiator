@@ -6,7 +6,8 @@
 //
 // The loop runs on the scene's own clock (the camp's display time, the replay chapter's elapsed time) with a phase fixed per
 // actor (`zzzPhase`), so it is the same for every viewer, holds while the scene is paused and never moves in step with a
-// neighbour's; with reduced motion the three letters hold still. They stay clear of the lying body (the sleep frames reach 16 px
+// neighbour's; with reduced motion the three letters hold still. A sleeper that gets up fades them out where it lay over the time a
+// letter takes to fade at the top (Task 21; reduced motion: at once). They stay clear of the lying body (the sleep frames reach 16 px
 // over the feet), and a sleeper's name sits SLEEP_NAME_LIFT over its feet, over the letters' whole climb, so nothing shifts as
 // they rise. Positions are art px from the sleeper's feet (its station's tile centre, the sleep frames' own anchor); a
 // sleeper facing south-west is mirrored, as its sprite is.
@@ -38,6 +39,8 @@ const DRIFT = 6;
 /** A letter fades in over the first 15% of its life and out over the last 40%. */
 const FADE_IN = 0.15;
 const FADE_OUT = 0.4;
+/** How long a letter takes to fade out at the top (ms); a sleeper who gets up fades its ZzZ out over the same time (Task 21). */
+export const ZZZ_FADE_MS = FADE_OUT * ZZZ_CYCLE_MS;
 /** With reduced motion: the three letters held at a sixth, a half and five sixths of their climb, fully drawn. */
 const STILL = [5 / 6, 1 / 2, 1 / 6];
 
@@ -124,37 +127,62 @@ export function ensureZzzTexture(scene: PhaserNS.Scene, palette: Record<string, 
   texture.add('z', 0, ZZZ_GLYPHS.Z.width, 0, ZZZ_GLYPHS.z.width, ZZZ_GLYPHS.z.height);
 }
 
-/** One sleeper's three letter images, its phase, and the letters drawn last (reused every frame). */
-export type ZzzSprites = { images: PhaserNS.GameObjects.Image[]; phase: number; letters: ZzzLetter[]; shown: boolean };
+/**
+ * One sleeper's three letter images, its phase, and the letters drawn last (reused every frame). `shown`: drawn over a sleeper now.
+ * Task 21: `fade` is when the sleeper got up (the scene's clock), while its letters fade out where it lay (`at`: its feet and facing
+ * the last time it was drawn asleep); null otherwise.
+ */
+export type ZzzSprites = {
+  images: PhaserNS.GameObjects.Image[]; phase: number; letters: ZzzLetter[]; shown: boolean;
+  fade?: number | null; at?: { x: number; y: number; flip: boolean };
+};
 
 /** Three hidden letter images for the actor `id` (call `ensureZzzTexture` first). */
 export function createZzz(scene: PhaserNS.Scene, id: string): ZzzSprites {
   const images = ORDER.map(glyph => scene.add.image(0, 0, ZZZ_TEXTURE, glyph).setOrigin(0, 1).setDepth(ZZZ_DEPTH).setVisible(false));
-  return { images, phase: zzzPhase(id), letters: [], shown: false };
+  return { images, phase: zzzPhase(id), letters: [], shown: false, fade: null };
 }
 
-/** Draws the letters over feet `feet` (world px) at `timeMs`, or hides them (`shown` false). */
-export function drawZzz(z: ZzzSprites, shown: boolean, feet: { x: number; y: number }, timeMs: number, flip: boolean, reduced: boolean): void {
-  if (!shown) {
-    if (z.shown) for (const image of z.images) image.setVisible(false);
-    z.shown = false;
-    return;
-  }
-  z.shown = true;
+/** Puts the letters over feet (`x`, `y`) at `timeMs`, each at its own opacity times `opacity`. */
+function placeLetters(z: ZzzSprites, x: number, y: number, timeMs: number, flip: boolean, reduced: boolean, opacity: number): void {
   zzzLetters(timeMs, z.phase, flip, reduced, z.letters);
   z.letters.forEach((l, i) => {
-    const image = z.images[i];
+    const image = z.images[i], alpha = l.alpha * opacity;
     if (image.frame.name !== l.glyph) image.setFrame(l.glyph);
-    image.setPosition(feet.x + l.left, feet.y + l.bottom);
-    if (image.alpha !== l.alpha) image.setAlpha(l.alpha);
-    const visible = l.alpha > 0;
+    image.setPosition(x + l.left, y + l.bottom);
+    if (image.alpha !== alpha) image.setAlpha(alpha);
+    const visible = alpha > 0;
     if (image.visible !== visible) image.setVisible(visible);
   });
 }
 
-/** The letters drawn now, as world-space boxes with their opacity (debug state for the browser tests); empty when hidden. */
+/**
+ * Draws the letters over feet `feet` (world px) at `timeMs`, or hides them (`shown` false). Task 21: a sleeper that gets up fades
+ * them out where they were, still rising, over ZZZ_FADE_MS (the time a letter takes to fade at the top) instead of dropping them at
+ * once; with reduced motion they go at once, as they do when the scene's clock goes back (a replay seeks, or leaves the chapter).
+ */
+export function drawZzz(z: ZzzSprites, shown: boolean, feet: { x: number; y: number }, timeMs: number, flip: boolean, reduced: boolean): void {
+  if (shown) {
+    z.shown = true;
+    z.fade = null;
+    if (z.at) { z.at.x = feet.x; z.at.y = feet.y; z.at.flip = flip; } else z.at = { x: feet.x, y: feet.y, flip };
+    placeLetters(z, feet.x, feet.y, timeMs, flip, reduced, 1);
+    return;
+  }
+  if (z.shown && !reduced && z.at) z.fade = timeMs;
+  z.shown = false;
+  const elapsed = z.fade != null && !reduced ? timeMs - z.fade : -1;
+  if (z.at && elapsed >= 0 && elapsed < ZZZ_FADE_MS) {
+    placeLetters(z, z.at.x, z.at.y, timeMs, z.at.flip, false, 1 - elapsed / ZZZ_FADE_MS);
+    return;
+  }
+  z.fade = null;
+  for (const image of z.images) if (image.visible) image.setVisible(false);
+}
+
+/** The letters drawn now (fading ones too), as world-space boxes with their opacity (debug state for the browser tests); empty when hidden. */
 export function zzzDebug(z: ZzzSprites | null | undefined): { glyph: ZzzGlyph; x: number; y: number; width: number; height: number; alpha: number }[] {
-  if (!z?.shown) return [];
+  if (!z || (!z.shown && z.fade == null)) return [];
   return z.letters.flatMap((l, i) => {
     const image = z.images[i];
     if (!image.visible) return [];

@@ -31,7 +31,7 @@ async function inventoryFlow(context: BrowserContext, options: { gear?: boolean;
     for (const worn of [pieces.sword, pieces.shield, pieces.armor]) worn.reservation = { kind: 'equipment', referenceId: state.gladiatorId };
   }
   const commands: GameCommand[] = [], receipts = new Map<string, unknown>();
-  let lose = false, code = '', sales = 0, refuseAt = 0, refuseCode = '';
+  let lose = false, code = '', sales = 0, refuseAt = 0, refuseCode = '', ownerDown = false;
   const user = { id: randomUUID(), aud: 'authenticated', role: 'authenticated', email: 'inventory@example.invalid',
     app_metadata: { provider: 'google', providers: ['google'] }, user_metadata: {}, identities: [], created_at: new Date().toISOString() };
   await context.addInitScript(({ user }) => {
@@ -48,7 +48,8 @@ async function inventoryFlow(context: BrowserContext, options: { gear?: boolean;
     if (request.method() === 'OPTIONS') return route.fulfill({ status: 204, headers });
     if (path === '/auth/v1/user') return json(user);
     if (path === '/auth/v1/logout') return route.fulfill({ status: 204, headers });
-    if (path === '/rest/v1/owner_state') return json([{ state }]);
+    // `failOwnerReads(true)`: the owner read fails (a server error) until it is turned off again.
+    if (path === '/rest/v1/owner_state') return ownerDown ? json({ message: 'unavailable' }, 503) : json([{ state }]);
     // The player's presence (Task 23.9) is the live transport's.
     if (path === '/functions/v1/game-command' && isPresence(request)) return route.fallback();
     if (path === '/functions/v1/game-command') {
@@ -95,7 +96,8 @@ async function inventoryFlow(context: BrowserContext, options: { gear?: boolean;
     }
     return route.fallback();
   });
-  return { commands, state, pieces, live, loseNext: () => { lose = true; }, refuseSale: (at: number, value: string) => { refuseAt = at; refuseCode = value; sales = 0; }, reject: (value: string) => { code = value; } };
+  return { commands, state, pieces, live, loseNext: () => { lose = true; }, refuseSale: (at: number, value: string) => { refuseAt = at; refuseCode = value; sales = 0; }, reject: (value: string) => { code = value; },
+    failOwnerReads: (on: boolean) => { ownerDown = on; } };
 }
 
 test.beforeEach(() => { test.skip(process.env.PLAYWRIGHT_STATIC === 'true', 'Live UI uses development-only intercepted identity transport.'); });
@@ -1833,4 +1835,118 @@ test('describes Sell by the listing for a listed piece above the player\'s level
   await expect(sellButton(inv)).toBeDisabled();
   await expect(sellButton(inv)).toHaveAccessibleDescription('Listed for sale');
   await expect(details(inv).getByRole('button', { name: /^Wear / })).toHaveAccessibleDescription('Needs level 5');
+});
+
+// ---- Review leftovers (Patch 1.9, Task 21: planned as 1.9.1, folded into 1.9) -----------------------------------------------
+
+/** Where `target` is in the menu body's visible part (clipped to the window): its top in view, wholly in view, its top at the view's top. */
+const placeIn = async (body: Locator, target: Locator) => target.evaluate((el, scroller) => {
+  const box = el.getBoundingClientRect(), view = (scroller as HTMLElement).getBoundingClientRect();
+  const top = Math.max(view.top, 0), bottom = Math.min(view.bottom, innerHeight);
+  return { topIn: box.top >= top - 1 && box.top < bottom - 1, whole: box.top >= top - 1 && box.bottom <= bottom + 1, atTop: Math.abs(box.top - top) <= 2 };
+}, await body.elementHandle());
+/** Scrolls the menu body so `target`'s top sits just under the body's visible bottom, out of view (as far as the body scrolls). */
+const hideBelow = async (body: Locator, target: Locator) => target.evaluate((el, scroller) => {
+  const box = scroller as HTMLElement;
+  box.scrollTop += el.getBoundingClientRect().top - Math.min(box.getBoundingClientRect().bottom, innerHeight) + 8;
+}, await body.elementHandle());
+/** Scrolls the menu body so `target`'s top is the body's visible top (as far as the body scrolls). */
+const toTop = async (body: Locator, target: Locator) => target.evaluate((el, scroller) => {
+  const box = scroller as HTMLElement;
+  box.scrollTop += el.getBoundingClientRect().top - Math.max(box.getBoundingClientRect().top, 0);
+}, await body.elementHandle());
+/** The first of `cells` whose box lies wholly inside the window and the menu body's visible part. */
+async function visibleCell(body: Locator, cells: Locator) {
+  const view = (await body.boundingBox())!, height = await body.evaluate(() => innerHeight);
+  for (const cell of await cells.all()) {
+    const box = await cell.boundingBox();
+    if (box && box.y >= Math.max(view.y, 0) && box.y + box.height <= Math.min(view.y + view.height, height)) return cell;
+  }
+  throw new Error('no cell in view');
+}
+
+test('on a phone a tapped tile or shop cell brings its card into view; a pointer leaves the menu where it is (Task 21 item 1)', async ({ page }, info) => {
+  const mobile = info.project.name === 'mobile';
+  const menu = await demoBag(page);
+  await settled(menu);
+  const body = menu.getByTestId('menu-body'), inv = inventoryRegion(menu), shops = shopsRegion(menu);
+  const invGrid = inv.getByTestId('inventory-grid'), shopGrid = shops.getByRole('group', { name: 'Shop items', exact: true });
+  for (const [name, grid, cells, card] of [
+    ['inventory', invGrid, invGrid.locator('[data-testid^="tile-"]'), details(inv)],
+    ['shops', shopGrid, shopGrid.locator('[data-shop-cell]'), offerDetails(shops)],
+  ] as const) {
+    // A phone shows the card under its grid: as far out of view below as the menu scrolls (at rest the Inventory's card shows only
+    // its first lines). A pointer window shows it beside the grid, from the grid's top row up: the grid goes to the menu's top.
+    if (mobile) await hideBelow(body, card); else await toTop(body, grid);
+    const before = await placeIn(body, card);
+    if (mobile || name === 'inventory') expect(before.whole, `${name}: the card starts partly or wholly out of view`).toBe(false);
+    if (!mobile && name === 'inventory') expect(before.topIn, 'its top out of view').toBe(false);
+    const scrolled = await body.evaluate(el => el.scrollTop);
+    const cell = await visibleCell(body, cells);
+    if (mobile) await cell.tap(); else await cell.click();
+    await expect(cell).toHaveAttribute('aria-pressed', 'true');
+    if (mobile) {
+      // The card comes into view: whole, or (taller than the view) from its top.
+      await expect.poll(async () => { const now = await placeIn(body, card); return now.topIn && (now.whole || now.atTop); }, `${name}: the tapped card is in view`).toBe(true);
+    } else {
+      await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+      expect(await body.evaluate(el => el.scrollTop), `${name}: a pointer click moves nothing`).toBe(scrolled);
+    }
+    // The page itself never scrolls.
+    expect(await page.evaluate(() => [scrollX, scrollY])).toEqual([0, 0]);
+  }
+});
+
+test('a definite refusal whose owner refresh fails leaves a working Retry: the same operation again, then the refusal once the bag loads (Task 21 item 2)', async ({ page, context }) => {
+  // HANDOFF (pre-existing): a definitive refusal followed by a failed owner refresh.
+  const flow = await inventoryFlow(context);
+  await page.goto('/game/');
+  const menu = await openMenu(page, 'Inventory and shops');
+  const inv = inventoryRegion(menu);
+  const axe = flow.state.inventory[0];
+  await selectItem(inv, axe);
+  flow.reject('conflict');
+  flow.failOwnerReads(true);
+  await sellButton(inv).click();
+  const alert = details(inv).getByRole('alert'), retry = details(inv).getByRole('button', { name: 'Retry request' });
+  await expect(alert).toBeVisible();
+  // The refusal is said, then (once the owner read has given up, after its own retries) that the bag could not be read again: not
+  // "could not be confirmed", since the server did answer. Observed before the fix: that sentence, and a Retry that sent nothing.
+  await expect.soft(alert).toContainText('Your inventory changed');
+  await expect.soft(alert).toContainText('could not be loaded', { timeout: 20_000 });
+  // It says what Retry does: the same trade again, then the items reloaded (fix round 1).
+  await expect.soft(alert).toContainText('Retry sends it again and reloads your items.');
+  await expect(retry).toBeVisible({ timeout: 20_000 });
+  flow.failOwnerReads(false);
+  await retry.click();
+  await expect.poll(() => flow.commands.length, 'Retry sends the command again').toBe(2);
+  expect(flow.commands[1]).toEqual(flow.commands[0]);
+  // The server refuses it again and the bag now loads: the refusal stands, with nothing more to retry.
+  await expect(alert).toHaveText('Your inventory changed or this cosmetic is already owned. Review the refreshed state.');
+  await expect(retry).toHaveCount(0);
+});
+
+test('clearing a search with no match brings back the chosen piece in the Inventory, as it does in the Shops (Task 21 item 3)', async ({ page }, info) => {
+  if (info.project.name === 'mobile') await page.setViewportSize({ width: 360, height: 740 });
+  const menu = await demoBag(page);
+  const inv = inventoryRegion(menu), field = searchField(inv, ITEM_SEARCH);
+  const chosen = (await tileIds(inv))[3];
+  await inv.getByTestId(`tile-${chosen}`).click();
+  await expect(inv.getByTestId(`tile-${chosen}`)).toHaveAttribute('aria-pressed', 'true');
+  for (const clear of ['button', 'escape'] as const) {
+    await field.fill('dagger');
+    await expect(inv.getByText('No items match “dagger”')).toBeVisible();
+    if (clear === 'button') await inv.getByRole('button', { name: 'Clear search', exact: true }).last().click();
+    else await field.press('Escape');
+    await expect(field).toHaveValue('');
+    await expect(inv.getByTestId(`tile-${chosen}`), `cleared by ${clear}`).toHaveAttribute('aria-pressed', 'true');
+    await expect(inv.getByTestId(`item-${chosen}`)).toBeVisible();
+  }
+  // The Shops already do so.
+  const shops = shopsRegion(menu), shopField = searchField(shops);
+  await offerCell(shops, 'axe:1:common').click();
+  await shopField.fill('dagger');
+  await expect(shops.getByText('No items match “dagger”')).toBeVisible();
+  await shops.getByRole('button', { name: 'Clear search', exact: true }).last().click();
+  await expect(offerCell(shops, 'axe:1:common')).toHaveAttribute('aria-pressed', 'true');
 });

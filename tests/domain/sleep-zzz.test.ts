@@ -9,7 +9,7 @@ import { describe, expect, it } from 'vitest';
 import { decodePng } from '../../assets/source/tools/png.mjs';
 import { loadAssetManifest } from '@/game/assets';
 import {
-  SLEEP_NAME_LIFT, ZZZ_CYCLE_MS, ZZZ_GLYPHS, ZZZ_TOP, zzzLetters, zzzPhase, zzzPixels, type ZzzLetter,
+  SLEEP_NAME_LIFT, ZZZ_CYCLE_MS, ZZZ_FADE_MS, ZZZ_GLYPHS, ZZZ_TOP, drawZzz, zzzDebug, zzzLetters, zzzPhase, zzzPixels, type ZzzLetter, type ZzzSprites,
 } from '@/game/sleep-zzz';
 
 const STEP = 10;
@@ -108,6 +108,67 @@ describe('the ZzZ pixel glyphs', () => {
     // The colours are the palette's (the same cream and outline as the camp's names).
     expect(manifest.palette.canvas1).toBeDefined();
     expect(manifest.palette.outline).toBeDefined();
+  });
+});
+
+describe('a sleeper who gets up (Task 21)', () => {
+  /** Three stand-in letter images that keep what the scene sets on them. */
+  const sprites = (id = 'glad-7'): ZzzSprites => {
+    const images = ['Z', 'z', 'Z'].map(glyph => {
+      const image = { frame: { name: glyph }, x: 0, y: 0, alpha: 1, visible: false,
+        setFrame(name: string) { image.frame = { name }; return image; }, setPosition(x: number, y: number) { image.x = x; image.y = y; return image; },
+        setAlpha(a: number) { image.alpha = a; return image; }, setVisible(v: boolean) { image.visible = v; return image; } };
+      return image;
+    });
+    return { images: images as never, phase: zzzPhase(id), letters: [], shown: false, fade: null };
+  };
+  const bed = { x: 300, y: 500 };
+  const drawnNow = (z: ZzzSprites) => zzzDebug(z).map(({ glyph, x, y, alpha }) => ({ glyph, x, y, alpha }));
+
+  it('fades the letters out over the time they fade at the top (FADE_OUT of a cycle), where they were, then hides them', () => {
+    expect(ZZZ_FADE_MS).toBe(1200);
+    const z = sprites();
+    drawZzz(z, true, bed, 10_000, true, false);
+    const asleep = drawnNow(z);
+    expect(asleep.length).toBeGreaterThan(0);
+    // Up, and already walking off: the letters stay over the bed, keep rising and fade from where they were.
+    drawZzz(z, false, { x: 340, y: 520 }, 10_000, false, false);
+    expect(drawnNow(z)).toEqual(asleep);
+    for (const elapsed of [300, 600, 900, 1_150]) {
+      drawZzz(z, false, { x: 400, y: 560 }, 10_000 + elapsed, false, false);
+      const own = zzzLetters(10_000 + elapsed, z.phase, true, false);
+      const shown = drawnNow(z);
+      expect(shown, `${elapsed} ms`).toEqual(own.flatMap(l => {
+        const alpha = l.alpha * (1 - elapsed / ZZZ_FADE_MS);
+        return alpha > 0 ? [{ glyph: l.glyph, x: bed.x + l.left, y: bed.y + l.bottom - ZZZ_GLYPHS[l.glyph].height, alpha: expect.closeTo(alpha, 6) }] : [];
+      }));
+    }
+    drawZzz(z, false, bed, 10_000 + ZZZ_FADE_MS, false, false);
+    expect(drawnNow(z)).toEqual([]);
+    expect(z.images.every(image => !image.visible)).toBe(true);
+    // Lying down again shows them whole at once.
+    drawZzz(z, true, bed, 20_000, true, false);
+    expect(drawnNow(z).length).toBeGreaterThan(0);
+  });
+
+  it('hides them at once with reduced motion, and when the scene\'s clock goes back (a replay seeks or leaves the chapter)', () => {
+    const still = sprites();
+    drawZzz(still, true, bed, 10_000, false, true);
+    expect(drawnNow(still)).toHaveLength(3);
+    drawZzz(still, false, bed, 10_000, false, true);
+    expect(drawnNow(still)).toEqual([]);
+    expect(still.images.every(image => !image.visible)).toBe(true);
+    const z = sprites();
+    drawZzz(z, true, bed, 10_000, false, false);
+    drawZzz(z, false, bed, 10_200, false, false);
+    expect(drawnNow(z).length).toBeGreaterThan(0);
+    drawZzz(z, false, { x: 0, y: 0 }, 0, false, false);
+    expect(drawnNow(z)).toEqual([]);
+    // A fade under way stops when motion is reduced.
+    drawZzz(z, true, bed, 30_000, false, false);
+    drawZzz(z, false, bed, 30_100, false, false);
+    drawZzz(z, false, bed, 30_200, false, true);
+    expect(drawnNow(z)).toEqual([]);
   });
 });
 

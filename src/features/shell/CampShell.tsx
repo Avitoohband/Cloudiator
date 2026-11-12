@@ -513,7 +513,8 @@ export function CampShell({ fixture, previewAs, previewResting = false, previewB
   // When the camp shows names and titles (Settings, Task 11): the same on phones, applied to the camp at once.
   const [labels, setLabels] = useLabelPrefs();
   // An NPC's speech bubble keeps clear of the pinned menu rail: its laid-out box (offsets leave out the slide transform) and
-  // 8 px more, at the side or along the bottom it sits on; measured again when the window resizes (Task 11 review).
+  // 8 px more, at the side or along the bottom it sits on; measured again when the window resizes (Task 11 review) or the rail's
+  // box changes (Task 21).
   const [talkInsets, setTalkInsets] = useState<TalkInsets | undefined>(undefined);
   useEffect(() => {
     if (!prefs.pinned) { setTalkInsets(undefined); return; }
@@ -529,7 +530,12 @@ export function CampShell({ fixture, previewAs, previewResting = false, previewB
     };
     measure();
     window.addEventListener('resize', measure);
-    return () => window.removeEventListener('resize', measure);
+    // Task 21: the rail's width also changes with no window resize (its buttons shrink or grow as the notices over a right-hand rail
+    // come and go), so it is measured again whenever its box changes.
+    const rail = shellRef.current?.querySelector<HTMLElement>('[data-testid="menu-rail"]');
+    const observer = rail && typeof ResizeObserver === 'function' ? new ResizeObserver(measure) : null;
+    if (rail) observer?.observe(rail);
+    return () => { window.removeEventListener('resize', measure); observer?.disconnect(); };
   }, [prefs.pinned, prefs.place]);
   const railShown = railVisible(rail, prefs.pinned);
   const [patchLater, setPatchLater] = useState<string | null>(null);

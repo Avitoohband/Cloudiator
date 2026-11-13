@@ -18,7 +18,7 @@
     {
       "id": "menus",
       "title": "More room in menus",
-      "body": "A new Settings menu lets you pin the menu and place it on the left, bottom, or right of the screen on desktop, remembered in this browser. Still planned: long menus that turn into pages with Back and Next instead of scrolling, and wider menus. Controls stay usable on phones.",
+      "body": "A new Settings menu lets you pin the menu and place it on the left, bottom, or right of the screen on desktop, remembered in this browser. Long menus turn into pages with Back and Next instead of long scrolling. Wider menus are still planned. Controls stay usable on phones.",
       "patch": "1.9"
     },
     {

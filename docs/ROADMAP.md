@@ -66,6 +66,8 @@ Avi's decisions of 2026-11-11. The built items need no server change; the Wiki v
   - **Tournament fights look different** (built 2026-11-13, Tasks 27 and 28). A gold tournament header band, tournament rows in history, and their own arena scene "League Stands": stands in the four league colours and league banners.
 - **Added 2026-11-13 (Avi's words in ideas 82-84; mockup approved by Avi on 2026-11-13):**
   - **Stamina warnings and "rested instead"** (built 2026-11-13, Task 29; client only). The Schedule marks a part that will not run (not enough stamina, or a third Training of a game day) and shows the stamina after the parts that run; a camp notice warns before the next slot; the running card, Notifications and the owner's own Results line say the gladiator rested instead and why (others see only "finished resting"); after a lost expedition fight the expedition view and away button say it rests at the safe return point; the owner's screens wait for the server at a slot boundary.
+- **Added 2026-11-13, evening (Avi's words in idea 85):**
+  - **Menus with Back and Next** (planned for 1.9; mockup being prepared, not built). Long menus turn into pages with Back and Next instead of long scrolling. Avi, asked whether to hold the release for it: "Inside 1.9, hold the gate". The 1.9 gate runs after it is built and reviewed.
 - **No 1.9.1 (Avi, 2026-11-12).** The review leftovers planned as 1.9.1 (phone tap scrolls the item card into view, the inventory Retry after a refused command, notification focus, card placement on mid-size windows and other small fixes) are built inside 1.9 (Task 21, 2026-11-12), because 1.9 is not released yet. Plan: [1.9 additions](superpowers/plans/2026-11-12-1.9-additions.md), Task 21.
 - Plan: [Wiki list, menu and shop grid](superpowers/plans/2026-11-11-wiki-menu-and-shop-grid.md). Wiki text to change when 1.9 ships: [wiki-1.9-pending](game-info/wiki-1.9-pending.md).
 
@@ -113,7 +115,7 @@ Avi's decisions of 2026-11-11. Needs its own design and mockups.
 
 - **1.9, in development.** Square inventory grid with recognizable pixel-art items. My gladiator shows stats and weight for worn and replacement gear on hover, focus, or tap.
 - Reuse item icons in shops as a future follow-up.
-- **Menus with Back and Next (Avi's reminder, 2026-11-13: "Menus next and backwards instead of scrolling").** Long menus turn into pages with Back and Next instead of long scrolling; wider menus with adjustable desktop widths stay planned with it. Keep the controls usable on phones. Mockup first. Not in the 1.9 gate candidate. *Recommended*: 1.9.1, right after the 1.9 release, so the release is not held; Avi decides with the mockup. Pinning the menu and choosing its screen edge are in 1.9.
+- **Menus with Back and Next (Avi's reminder, 2026-11-13: "Menus next and backwards instead of scrolling").** Long menus turn into pages with Back and Next instead of long scrolling; wider menus with adjustable desktop widths stay planned with it. Keep the controls usable on phones. Mockup first. Placed in 1.9 by Avi on 2026-11-13 ("Inside 1.9, hold the gate"); see the 1.9 details. Pinning the menu and choosing its screen edge are in 1.9.
 - Split character creation into Look, Class, and Attributes steps with Back and Next.
 - Show the quantity already owned beside shop and market items. Design when a purchase can be undone.
 - Renown skins and dyes for clothing and weapons, plus an appearance-change option in the menu: with the 2.0 cosmetics (Avi, 2026-11-12: everything paid or cosmetic goes with payments).

@@ -231,6 +231,13 @@ test.describe('stamina notices', () => {
     }
     await page.waitForFunction(() => window.__cloudiatorCamp?.state()?.ready === true, null, { timeout: 45_000 });
     await shot(page, testInfo, 'popup');
+    // On a 360 px phone the pop-up wraps inside the view: no sideways scroll (both projects; the size is put back for the steps below).
+    const size = page.viewportSize()!;
+    await page.setViewportSize({ width: 360, height: 740 });
+    await expect(popup(page).locator('p')).toBeVisible();
+    expect(await fitsWidth(popup(page)), 'the pop-up fits at 360 px').toBe(true);
+    expect(await noHorizontalScroll(page), 'no sideways scroll at 360 px').toBe(true);
+    await page.setViewportSize(size);
     // Open schedule opens the Schedule, where the running card says the same.
     await popup(page).getByRole('button', { name: 'Open schedule', exact: true }).click();
     await openMenu(page, 'Schedule');

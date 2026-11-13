@@ -1621,6 +1621,10 @@ test.describe('Watch from Notifications', () => {
       const { commands, server } = await player(page, { holdChange: held });
       try {
         await openLive(page);
+        // The camp starts on its own after the owner chip shows (Phaser and the art load as separate chunks), so wait until it draws the owner
+        // before the one-shot read below; on a loaded machine the dialog can open, send and close before the camp has started (Task 29 flake).
+        await page.waitForFunction(() => window.__cloudiatorCamp?.state()?.ready === true, null, { timeout: 45_000 });
+        await expect.poll(async () => (await campLook(page))?.layers ?? []).toContain('body');
         const dialog = await openLookDialog(page);
         await lookGroups(dialog).body.getByRole('button', { name: 'Female', exact: true }).click();
         await saveButton(dialog).click();
@@ -1629,6 +1633,7 @@ test.describe('Watch from Notifications', () => {
         await expect(dialog).toBeVisible();
         for (let press = 0; press < 5 && await dialog.isVisible(); press++) await page.keyboard.press('Escape');
         await expect(dialog).toBeHidden();
+        // While the look is held the camp still draws the stored (legacy) one.
         expect((await campLook(page))?.layers).toContain('body');
         release();
         await expect.poll(async () => (await campLook(page))?.layers ?? [], { timeout: 4_000 }).toContain('body-female');

@@ -190,7 +190,10 @@ export function MarketOffers({ model, access, ownerId, now, busy, onBuy, onCance
       ? <div className={styles.failed} role="alert"><p>Listings could not be loaded right now.</p><button type="button" onClick={onRetry}>Try again</button></div>
       : status === 'loading' && rows.length === 0 ? <p className="muted" role="status">Loading listings…</p>
         : rows.length === 0 || (!shown.length && !searched) ? <div className={styles.empty}>
-          <p className="muted" role="status">{mine ? 'You have no open listings.' : 'No open listings right now.'}</p>
+          <p className="muted" role="status">{mine ? 'You have no open listings.'
+            // Final review (fix round 1): under an empty Weapons or Armor chip, while the market has listings, say what is missing.
+            : rows.length > 0 && filter === 'Weapons' ? 'No weapons listed right now.' : rows.length > 0 && filter === 'Armor' ? 'No armor listed right now.'
+              : 'No open listings right now.'}</p>
           {mine && onSell && <button type="button" className={styles.ghost} onClick={onSell}>List an item</button>}
         </div>
           : !shown.length ? <NoMatch query={query} clear={() => onClearQuery?.()} filter={hiddenBy} />

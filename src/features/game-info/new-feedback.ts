@@ -6,7 +6,8 @@
 //   remembered in this browser for that account, so at camp load the chip asks the game-info function nothing for any other account (a
 //   player who is not an editor, a visitor, the fixture preview) and the count starts at once for the editor. An owner `list` answered
 //   `forbidden` (no longer an editor) forgets it.
-// - When: at once, again when Game Info closes, and every 3 minutes while the page is visible (never more often than every 2 minutes).
+// - When: at once, again when Game Info closes and when the page becomes visible again, and every 3 minutes while it is visible (the timer
+//   never more often than every 2 minutes).
 // - What: `newCount` from the owner `list` action (Task 22's M34, through `listFeedback`). A failed read keeps the count shown.
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { listFeedback } from './feedback-review';
@@ -31,12 +32,22 @@ export function rememberEditor(account: string, editor: boolean): void {
 /** One read of the count: the number, `forbidden` (not an editor), or null (it failed: keep what is shown). */
 export type NewFeedbackRead = () => Promise<number | 'forbidden' | null>;
 
+/** Calls `onVisible` each time the page becomes visible again; answers how to stop. Without a document (a server render) it never does. */
+function watchDocumentVisible(onVisible: () => void): () => void {
+  if (typeof document === 'undefined' || typeof document.addEventListener !== 'function') return () => undefined;
+  const listener = () => { if (document.visibilityState === 'visible') onVisible(); };
+  document.addEventListener('visibilitychange', listener);
+  return () => document.removeEventListener('visibilitychange', listener);
+}
+
 /**
- * Reads the count now, on `refresh()`, and every `intervalMs` (at least 2 minutes) while `visible()`. One read at a time: a refresh during a
- * read reads once more after it. After `stop()` nothing is read and a read still out reports nothing.
+ * Reads the count now, on `refresh()`, when the page becomes visible again (final review, fix round 1), and every `intervalMs` (at least 2
+ * minutes) while `visible()`. One read at a time: a refresh during a read reads once more after it. After `stop()` nothing is read and a read
+ * still out reports nothing.
  */
 export function pollNewFeedback(read: NewFeedbackRead, report: (result: number | 'forbidden') => void,
-  { intervalMs = NEW_FEEDBACK_POLL_MS, visible = () => document.visibilityState === 'visible' }: { intervalMs?: number; visible?: () => boolean } = {},
+  { intervalMs = NEW_FEEDBACK_POLL_MS, visible = () => document.visibilityState === 'visible', watchVisible = watchDocumentVisible }:
+  { intervalMs?: number; visible?: () => boolean; watchVisible?: (onVisible: () => void) => () => void } = {},
 ): { refresh(): void; stop(): void } {
   let stopped = false, reading = false, again = false;
   const tick = () => {
@@ -49,8 +60,9 @@ export function pollNewFeedback(read: NewFeedbackRead, report: (result: number |
     });
   };
   const timer = setInterval(() => { if (visible()) tick(); }, Math.max(NEW_FEEDBACK_MIN_POLL_MS, intervalMs));
+  const unwatch = watchVisible(tick);
   tick();
-  return { refresh: tick, stop: () => { stopped = true; clearInterval(timer); } };
+  return { refresh: tick, stop: () => { stopped = true; clearInterval(timer); unwatch(); } };
 }
 
 const readNewCount: NewFeedbackRead = async () => {

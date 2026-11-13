@@ -423,6 +423,8 @@ async function owner(page: Page, editor: boolean, options: { suggestions?: boole
     }
   }
   const actions: Record<string, unknown>[] = [];
+  /** Task 27 fix round 1: while set, the owner's list reads fail (a reload after a refused send that cannot say why). */
+  const lists = { fail: false };
   /** Every game-info post, an editor's or not (the corner chip's count reads are among them). */
   const posts: Record<string, unknown>[] = [];
   const cors = { 'access-control-allow-origin': '*', 'access-control-allow-headers': 'authorization, apikey, content-type, x-client-info' };
@@ -436,6 +438,7 @@ async function owner(page: Page, editor: boolean, options: { suggestions?: boole
     actions.push(body);
     const newCount = () => items.filter(i => i.status === 'new').length;
     if (body.action === 'list') {
+      if (lists.fail) return answer(500, { ok: false, code: 'unavailable' });
       const list = items.filter(i => body.filter === 'all' || i.status === body.filter).map(({ who: _who, ...item }) => item);
       return answer(200, { ok: true, items: list, newCount: newCount() });
     }
@@ -456,14 +459,14 @@ async function owner(page: Page, editor: boolean, options: { suggestions?: boole
   await page.goto('/game/');
   await expectOwnerShown(page, ownerFixture.name);
   const info = cornerChip(page).getByRole('button', { name: /^Game Info/ });
-  if (remembered) return { panel: page.getByRole('dialog', { name: 'Game Info' }), actions, items, posts, info, user };
+  if (remembered) return { panel: page.getByRole('dialog', { name: 'Game Info' }), actions, items, posts, info, user, lists };
   // An account this browser has not seen as an editor: the chip asks the game-info function nothing at camp load.
   await expect(cornerChip(page).getByRole('button', { name: 'Game Info', exact: true })).toBeVisible();
   expect(posts).toEqual([]);
   await cornerChip(page).getByRole('button', { name: 'Game Info', exact: true }).click();
   const panel = page.getByRole('dialog', { name: 'Game Info' });
   await expect(panel).toBeVisible();
-  return { panel, actions, items, posts, info, user };
+  return { panel, actions, items, posts, info, user, lists };
 }
 
 test('the Feedback tab is hidden from a player who is not an editor', async ({ page }) => {
@@ -720,4 +723,40 @@ test('a box whose item was answered meanwhile closes on the conflict', async ({ 
   await expect(idea.getByRole('alert')).toHaveText('This feedback was already answered.');
   await expect(idea).toContainText(/Idea\s*Answered/);
   await expect(box).toHaveCount(0);
+});
+
+// Task 27 fix round 1 (with the final review's client minor): a refused send whose reason the reloaded list cannot show (the item left the list
+// shown, or the reload failed) says so in neutral words, and keeps the owner's box and draft; only an item known to be answered closes it.
+const CHANGED = 'This feedback changed. It may have been answered, or Claude replaced the suggestion. Reload and check before sending.';
+
+test('an approval refused for an item that left the list says it changed, in neutral words, where it can be read', async ({ page }) => {
+  const { panel, actions, items: owned } = await owner(page, true, { suggestions: true });
+  await panel.getByRole('tab', { name: /^Feedback/ }).click();
+  const bug = panel.locator('[data-feedback-item]').filter({ hasText: 'The Arena result says I lost' });
+  await expect(bug.locator('[data-feedback-suggestion]')).toBeVisible();
+  // Meanwhile Claude replaces the suggestion and the item is marked read: it leaves the New list.
+  Object.assign(owned.find(i => i.id === 4)!, { suggestion: 'A newer suggestion.', suggestedAtMs: Date.now(), status: 'read' });
+  await bug.getByRole('button', { name: 'Approve and send', exact: true }).click();
+  await expect(bug).toHaveCount(0);
+  await expect(panel.getByRole('alert')).toHaveText(CHANGED);
+  await expect(panel).not.toContainText('This feedback was already answered.');
+  expect(actions.filter(a => a.action === 'answer')).toHaveLength(1);
+  expect(owned.find(i => i.id === 4)).toMatchObject({ status: 'read', answer: null });
+});
+
+test('an edit refused while the list cannot be read again keeps the box and the draft, and says the feedback changed', async ({ page }) => {
+  const { panel, items: owned, lists } = await owner(page, true, { suggestions: true });
+  await panel.getByRole('tab', { name: /^Feedback/ }).click();
+  await panel.getByRole('group', { name: 'Show' }).getByRole('button', { name: 'All', exact: true }).click();
+  const balance = panel.locator('[data-feedback-item]').filter({ hasText: 'Heavy armor is too heavy' });
+  await balance.getByRole('button', { name: 'Edit', exact: true }).click();
+  const box = balance.getByRole('textbox', { name: 'Answer to this player (they get a message)' });
+  const draft = `${SUGGESTED[2]} My own words too.`;
+  await box.fill(draft);
+  Object.assign(owned.find(i => i.id === 2)!, { suggestion: 'Replaced.', suggestedAtMs: Date.now() });
+  lists.fail = true;
+  await balance.getByRole('button', { name: 'Send answer', exact: true }).click();
+  await expect(balance.getByRole('alert')).toHaveText(CHANGED);
+  await expect(box).toBeVisible();
+  await expect(box).toHaveValue(draft);
 });

@@ -7,7 +7,7 @@
 // player, counted so every click opens the shops there again, and My gladiator's sign-in prompt for anyone else. Since
 // Patch 1.9 (Task 11) a click on Brutus or Livia themselves talks, as every camp NPC does; only their stalls open the shops.
 import { useCallback, useEffect, useRef, useState } from 'react';
-import type { PublicActor, WorldSnapshot } from '@contracts/reads';
+import type { HistoryKind, PublicActor, WorldSnapshot } from '@contracts/reads';
 import type { Merchant } from '@domain/inventory';
 import type { SceneBridge } from '../../game/bridge';
 import type { ProfileTarget } from '../character/ProfileCard';
@@ -64,6 +64,10 @@ export function useCampClicks({ bridge, open, viewer, world, show, focusCamp }: 
   const openRow = useCallback((gladiatorId: string, record: ProfileTarget['record'] = null, name?: string) => openCard({
     gladiatorId, name: name ?? worldRef.current?.actors.find(a => a.gladiatorId === gladiatorId)?.name ?? '', screen: null, record, focus: true,
   }), [openCard]);
+  /** Patch 1.9 Task 27 fix round 1: a gladiator's card opened on its History at a chip (Back from a scene a History row opened). */
+  const openHistory = useCallback((gladiatorId: string, kind: HistoryKind, name?: string) => openCard({
+    gladiatorId, name: name ?? worldRef.current?.actors.find(a => a.gladiatorId === gladiatorId)?.name ?? '', screen: null, record: null, focus: true, history: kind,
+  }), [openCard]);
 
   useEffect(() => { setCard(null); }, [open]);
   useEffect(() => { if (open !== 'inventory') setShop(null); }, [open]);
@@ -82,5 +86,5 @@ export function useCampClicks({ bridge, open, viewer, world, show, focusCamp }: 
     show('inventory');
   }), [bridge, show]);
 
-  return { card, cardRef, openRow, closeCard, shop };
+  return { card, cardRef, openRow, openHistory, closeCard, shop };
 }

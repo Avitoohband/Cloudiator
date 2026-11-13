@@ -65,7 +65,8 @@ export function createHistoryStore(reads: HistoryReads, gladiatorId: string, own
       if (found.size === 0) return;
       emit({ ...state, rewards: new Map([...state.rewards, ...found]) });
     }, () => {
-      // Rows show without rewards; a later page asks only about its own rows.
+      // Rows show without rewards for now; these are asked again with the next page or chip read (fix round 1).
+      for (const id of ids) asked.delete(id);
     });
   };
   const loadCounts = () => {

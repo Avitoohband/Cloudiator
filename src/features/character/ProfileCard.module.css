@@ -577,6 +577,12 @@
     padding: 12px 14px 4px;
   }
 
+  /* Task 27 fix round 1: the History fills the sheet with an opaque ground, so the panel behind never shows through under its rows. */
+  .historyBody {
+    flex: 1;
+    background: #15131c;
+  }
+
   .head {
     grid-template-columns: 80px minmax(0, 1fr);
     gap: 12px;

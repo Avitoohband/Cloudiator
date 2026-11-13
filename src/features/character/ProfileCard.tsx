@@ -56,7 +56,7 @@ import { attributeHelp, attributeRows, cardStats, compareStats, gearRows, overlo
 import { CompareBlock } from './ProfileCompare';
 import { GladiatorHistory } from './GladiatorHistory';
 import { createHistoryStore, type HistoryReads, type HistoryStore } from './history-store';
-import type { SceneView } from '../shell/scene-url';
+import { withHistoryOrigin, type SceneView } from '../shell/scene-url';
 import { copySide, type PracticeSide } from '../practice/practice';
 import styles from './ProfileCard.module.css';
 
@@ -77,6 +77,8 @@ export type ProfileTarget = {
   record: ProfileRecord | null;
   /** Opened from a list row (a keyboard path): the card takes the focus. */
   focus: boolean;
+  /** Opens on the History view at this chip (Patch 1.9 Task 27 fix round 1: Back from a scene opened from a History row). */
+  history?: HistoryKind;
 };
 
 const RARITY_CLASS = { common: styles.rCommon, uncommon: styles.rUncommon, rare: styles.rRare } as const;
@@ -85,7 +87,7 @@ const RARITY_CLASS = { common: styles.rCommon, uncommon: styles.rUncommon, rare:
 export type CompareProp = { mine: CompareSide; on: boolean; onToggle(): void };
 
 export function ProfileCard({ actor, profile, profileFailed = false, own, ownPlace = null, record = null, followReason = null, following = false, nowMs, onFollow,
-  onWatch, onOpenMenu, onSpar, compare, history = null, onWatchHistory }: {
+  onWatch, onOpenMenu, onSpar, compare, history = null, onWatchHistory, initialHistory }: {
   actor: PublicActor;
   /** The public profile with its card data, once loaded (null while it loads or when it failed). */
   profile: ProfileRead | null;
@@ -114,13 +116,15 @@ export function ProfileCard({ actor, profile, profileFailed = false, own, ownPla
   compare?: CompareProp;
   /** The card's history (Patch 1.9 Task 27): its lists, counts and (own card) rewards; without it the card offers no History. */
   history?: HistoryStore | null;
-  /** ▶ Watch on a history row: the scene to open over the camp. */
-  onWatchHistory?(view: SceneView): void;
+  /** ▶ Watch on a history row: the scene to open over the camp, and the chip it was under. */
+  onWatchHistory?(view: Exclude<SceneView, { kind: 'bout' }>, kind: HistoryKind): void;
+  /** Opens on the History view at this chip (Back from a scene opened from a History row). */
+  initialHistory?: HistoryKind;
 }) {
   const reasonId = useId();
   // The History view (Task 27): open or not, and the chip chosen (kept while the card is open). The focus goes to ← when it opens and
   // back to what opened it (📜 History or See all) when it closes.
-  const [shown, setShown] = useState<{ open: boolean; kind: HistoryKind }>({ open: false, kind: 'arena' });
+  const [shown, setShown] = useState<{ open: boolean; kind: HistoryKind }>({ open: initialHistory !== undefined, kind: initialHistory ?? 'arena' });
   const historyButton = useRef<HTMLButtonElement>(null);
   const seeAll = useRef<HTMLButtonElement>(null);
   const historyBack = useRef<HTMLButtonElement>(null);
@@ -172,7 +176,7 @@ export function ProfileCard({ actor, profile, profileFailed = false, own, ownPla
   if (historyOpen && history) {
     return <div ref={bodyRef} className={`${styles.body} ${styles.historyBody}`} data-testid="profile-body">
       <GladiatorHistory store={history} kind={shown.kind} onKind={kind => setShown({ open: true, kind })} name={actor.name} own={own} nowMs={nowMs}
-        onBack={() => setShown(current => ({ ...current, open: false }))} onWatch={view => onWatchHistory?.(view)} backRef={historyBack} />
+        onBack={() => setShown(current => ({ ...current, open: false }))} onWatch={view => onWatchHistory?.(view, shown.kind)} backRef={historyBack} />
     </div>;
   }
   return <>
@@ -238,6 +242,8 @@ export function ProfileCard({ actor, profile, profileFailed = false, own, ownPla
         </section>
       </div>}
       {followReason && <p id={reasonId} className={styles.reason}>{followReason}</p>}
+      {/* One live region, mounted with the card and filled when Compare turns on, so its sentence is announced (final review, fix round 1). */}
+      {compare && !own && <p className={styles.srOnly} role="status" data-compare-status="">{comparing ? `Showing a comparison of your gladiator with ${actor.name}.` : ''}</p>}
     </div>
     <div className={styles.actions} data-card-actions="">
       {own && <>
@@ -362,8 +368,8 @@ export function ProfileLayer({ target, world, reads, ownerId, ownPlace = null, r
   onSpar?(copy: PracticeSide): void;
   /** ⇄ Compare with mine: a player's (Patch 1.9 Task 23c); the state is the shell's. */
   compare?: CompareProp;
-  /** ▶ Watch on a history row (Patch 1.9 Task 27): the shell opens the scene. */
-  onWatchHistory?(view: SceneView): void;
+  /** ▶ Watch on a history row (Patch 1.9 Task 27): the shell opens the scene (its origin this card's History), told the gladiator's name. */
+  onWatchHistory?(view: SceneView, name: string): void;
 }) {
   const card = useRef<HTMLElement>(null);
   const [loaded, setLoaded] = useState<{ profile: ProfileRead | null; failed: boolean } | null>(null);
@@ -385,7 +391,8 @@ export function ProfileLayer({ target, world, reads, ownerId, ownPlace = null, r
     return () => { alive = false; };
   }, [reads, id]);
 
-  useEffect(() => { if (target.focus) card.current?.focus({ preventScroll: true }); }, [target.focus]);
+  // A card that opens on its History gives the focus to the History's ← instead (ProfileCard), once its gladiator is known.
+  useEffect(() => { if (target.focus && !target.history) card.current?.focus({ preventScroll: true }); }, [target.focus, target.history]);
 
   // Placed before paint, and again when the card's size (a loaded profile) or the window changes. Touch: CSS places the sheet.
   const screen = target.screen;
@@ -421,7 +428,8 @@ export function ProfileLayer({ target, world, reads, ownerId, ownPlace = null, r
       {actor ? (
         <ProfileCard key={id} actor={actor} profile={loaded?.profile ?? null} profileFailed={loaded?.failed ?? false} own={ownerId === id} ownPlace={ownPlace} record={target.record}
           followReason={followReasonOf(actor, roster, sceneStatus)} following={following === id} nowMs={nowMs} onFollow={onFollow}
-          onWatch={activityId => onWatch(activityId, id)} onOpenMenu={onOpenMenu} onSpar={onSpar} compare={compare} history={history} onWatchHistory={onWatchHistory} />
+          onWatch={activityId => onWatch(activityId, id)} onOpenMenu={onOpenMenu} onSpar={onSpar} compare={compare} history={history} initialHistory={target.history}
+          onWatchHistory={(view, kind) => onWatchHistory?.(withHistoryOrigin(view, { gladiatorId: id, kind }), actor.name)} />
       ) : <div className={styles.body} data-testid="profile-body">
         <div className={styles.headPlain}><h2 className={styles.name}>{name}</h2></div>
         {target.record && <dl className={styles.facts}><div><dt>Record</dt><dd>{target.record.wins}–{target.record.losses}</dd></div></dl>}

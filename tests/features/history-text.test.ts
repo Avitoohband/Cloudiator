@@ -35,7 +35,8 @@ describe('the history view words', () => {
     expect(HISTORY_KINDS.map(kind => chipCount(kind, counts))).toEqual(['21–3', '4', '12']);
     expect(HISTORY_KINDS.map(kind => chipCount(kind, null))).toEqual(['', '', '']);
     expect(HISTORY_KINDS.map(retentionText)).toEqual([
-      'Replays are kept for 7 days. ▶ Watch shows where a replay is still kept.',
+      // The controller's ruling (fix round 1): the Arena line says what the list (and its chip) counts.
+      'Replays are kept for 7 days. ▶ Watch shows where a replay is still kept. Last 90 days, NPC and bot bouts included.',
       'Tournament replays are kept for 7 days after the tournament ends.',
       'Expedition replays are kept for 7 days. A trip still under way can be watched once it is over.',
     ]);
@@ -148,8 +149,10 @@ describe('groups and scenes', () => {
 
   it('opens an Arena bout’s replay, a tournament bout at its round and an expedition’s whole trip', () => {
     expect(historyScene(entry())).toEqual({ kind: 'replay', activityId: ACT });
-    expect(historyScene(tournament())).toEqual({ kind: 'replay', activityId: ACT, stageId: `${ACT}:3` });
-    expect(historyScene(tournament({ entryId: 'tournament:373245:silver:12:3' }))).toEqual({ kind: 'replay', activityId: ACT, stageId: `${ACT}:12` });
+    // Fix round 1: a tournament bout's replay names its league for the gold band (a run's timeline has none).
+    expect(historyScene(tournament())).toEqual({ kind: 'replay', activityId: ACT, stageId: `${ACT}:3`, league: 'silver' });
+    expect(historyScene(tournament({ entryId: 'tournament:373245:silver:12:3' }))).toEqual({ kind: 'replay', activityId: ACT, stageId: `${ACT}:12`, league: 'silver' });
+    expect(historyScene(tournament({ league: null }))).toEqual({ kind: 'replay', activityId: ACT, stageId: `${ACT}:3` });
     expect(historyScene(expedition())).toEqual({ kind: 'expedition', activityId: ACT, play: 'trip' });
   });
 });

@@ -8,7 +8,7 @@
 // distinguish"): a gold double-trimmed frame, a trophy medallion with laurels, the round in gold small caps, the tournament's name, a WON
 // or LOST pill. Rewards show only on the viewer's own card (`own`, from its own rewards); the foot says whose rewards show. Every word
 // is `history-text`'s, rendered as text.
-import { Fragment, useId, useMemo, type Ref } from 'react';
+import { Fragment, useEffect, useId, useMemo, useRef, type Ref } from 'react';
 import type { HistoryEntry, HistoryKind } from '@contracts/reads';
 import { useClockMode } from '../../lib/clock-setting';
 import type { SceneView } from '../shell/scene-url';
@@ -45,8 +45,9 @@ function Action({ text, onWatch }: { text: HistoryRowText; onWatch(): void }) {
 
 function Row({ entry, text, onWatch }: { entry: HistoryEntry; text: HistoryRowText; onWatch(): void }) {
   const gone = text.kept ? undefined : '';
+  // A row can take the focus from a Show more that goes away (fix round 1); it is not a tab stop.
   if (entry.kind === 'tournament') {
-    return <li className={`${styles.trow} ${text.kept ? '' : styles.gone}`} data-history-row="tournament" data-gone={gone}>
+    return <li className={`${styles.trow} ${text.kept ? '' : styles.gone}`} data-history-row="tournament" data-gone={gone} tabIndex={-1}>
       <span className={styles.medal} data-medal="" aria-hidden="true">🏆</span>
       <span className={styles.who}>
         <span className={styles.round} data-round="">{text.round}</span>
@@ -58,7 +59,7 @@ function Row({ entry, text, onWatch }: { entry: HistoryEntry; text: HistoryRowTe
       <Action text={text} onWatch={onWatch} />
     </li>;
   }
-  return <li className={`${styles.row} ${text.kept ? '' : styles.gone}`} data-history-row={entry.kind} data-gone={gone}>
+  return <li className={`${styles.row} ${text.kept ? '' : styles.gone}`} data-history-row={entry.kind} data-gone={gone} tabIndex={-1}>
     <span className={`${styles.badge} ${text.badge.won ? styles.won : styles.lost}`}>
       <span aria-hidden="true">{text.badge.text}</span><span className={styles.sr}>{text.badge.name}</span>
     </span>
@@ -82,7 +83,7 @@ export function GladiatorHistory({ store, kind, onKind, name, own, nowMs, onBack
   nowMs: number | null;
   onBack(): void;
   /** ▶ Watch: the scene to open (`historyScene`). */
-  onWatch(view: SceneView): void;
+  onWatch(view: Exclude<SceneView, { kind: 'bout' }>): void;
   backRef?: Ref<HTMLButtonElement>;
   /** Tests only: the time zone of the days and times (the viewer's own otherwise). */
   timeZone?: string;
@@ -92,7 +93,25 @@ export function GladiatorHistory({ store, kind, onKind, name, own, nowMs, onBack
   const { list, counts, rewards } = useHistory(store, kind);
   const last = useMemo(() => runLastRows(list.rows), [list.rows]);
   const empty = emptyHistory(kind, name);
-  const retry = () => store.load(kind);
+  const chipRefs = useRef(new Map<HistoryKind, HTMLButtonElement>());
+  const listRef = useRef<HTMLDivElement>(null);
+  // Fix round 1: Try again goes away as it reads, so the focus moves to the chip shown first; a Show more that lands the last page goes away
+  // too, so the focus moves to the first new row (or the list, when nothing new came).
+  const retry = () => { chipRefs.current.get(kind)?.focus({ preventScroll: true }); store.load(kind); };
+  const moreFrom = useRef<number | null>(null);
+  const showMore = () => {
+    if (list.loadingMore) return;
+    moreFrom.current = list.rows.length;
+    void store.more(kind);
+  };
+  useEffect(() => {
+    const from = moreFrom.current;
+    if (from === null || list.loadingMore) return;
+    moreFrom.current = null;
+    if (list.nextCursor) return;
+    const rows = listRef.current?.querySelectorAll<HTMLElement>('[data-history-row]');
+    (rows && rows.length > from ? rows[from] : listRef.current)?.focus({ preventScroll: false });
+  }, [list.loadingMore, list.nextCursor, list.rows.length]);
   return (
     <section className={styles.history} aria-labelledby={`${ids}-title`} data-history={kind}>
       <div className={styles.head}>
@@ -105,7 +124,8 @@ export function GladiatorHistory({ store, kind, onKind, name, own, nowMs, onBack
       <div className={styles.chips} role="group" aria-label="Show history">
         {HISTORY_KINDS.map(option => {
           const chip = chipText(option), count = chipCount(option, counts);
-          return <button key={option} type="button" className={styles.chip} aria-pressed={option === kind} onClick={() => onKind(option)}>
+          return <button key={option} ref={element => { if (element) chipRefs.current.set(option, element); else chipRefs.current.delete(option); }} type="button"
+            className={styles.chip} aria-pressed={option === kind} onClick={() => onKind(option)}>
             {chip.icon && <span aria-hidden="true">{chip.icon} </span>}{chip.label}{count && <> <b>{count}</b></>}
           </button>;
         })}
@@ -119,7 +139,7 @@ export function GladiatorHistory({ store, kind, onKind, name, own, nowMs, onBack
             ? <div className={styles.empty} data-history-empty=""><b>{empty.title}</b><p>{empty.line}</p></div>
             : <p className={styles.state} role="status">Loading the history…</p>
         : <>
-          <div className={styles.list} data-history-list="">
+          <div ref={listRef} className={styles.list} data-history-list="" tabIndex={-1}>
             {historyDays(list.rows, nowMs, timeZone).map((group, n) => (
               <section key={group.label} className={styles.group} aria-labelledby={`${ids}-day-${n}`}>
                 <p id={`${ids}-day-${n}`} className={styles.day} data-history-day="">{group.label}</p>
@@ -130,7 +150,8 @@ export function GladiatorHistory({ store, kind, onKind, name, own, nowMs, onBack
               </section>
             ))}
           </div>
-          {list.nextCursor ? <button type="button" className={styles.more} onClick={() => void store.more(kind)} disabled={list.loadingMore}>Show more</button>
+          {/* aria-disabled while it reads, so a keyboard press keeps the focus on it (a disabled button would drop it). */}
+          {list.nextCursor ? <button type="button" className={styles.more} onClick={showMore} aria-disabled={list.loadingMore || undefined}>Show more</button>
             : list.pages > 1 ? <p className={styles.everything}>{EVERYTHING}</p> : null}
           {list.moreFailed && <p className={styles.moreFailed} role="alert">More could not be loaded. Please try again.</p>}
         </>}

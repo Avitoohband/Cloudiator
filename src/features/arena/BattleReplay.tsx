@@ -182,7 +182,7 @@ function useReplayTime(clock: DisplayClock | null | undefined, view: ReplayView,
  * nowhere; `league` is a tournament bracket's (its eyebrow names it, and a bracket's bouts show no rewards).
  */
 export function BattleReplay({ view, bridge, headingLevel = 1, clock, viewerId, looks, titles, onRetry, chapters = null, nav = null, back = null, takeFocus = false, league = null, endActions = 'navigation',
-  practice = null }: {
+  practice = null, bandLeague = null }: {
   view: ReplayView; bridge?: SceneBridge; headingLevel?: HeadingLevel; clock?: DisplayClock | null; viewerId?: string | null;
   /**
    * Where the fighters' looks come from: the looks the caller already holds (its world actors) and a reader for the rest. The
@@ -203,6 +203,11 @@ export function BattleReplay({ view, bridge, headingLevel = 1, clock, viewerId, 
   endActions?: 'again' | 'navigation';
   /** A practice fight's words and actions (Patch 1.9 Task 18); null for every fight the server ran. */
   practice?: ReplayPractice | null;
+  /**
+   * Patch 1.9 Task 27 fix round 1: a tournament run's league, for its gold band's words only ("TOURNAMENT · BRONZE · FINAL"): a run's timeline
+   * names none (History knows it). Unlike `league` (a bracket's), it changes no chips, rewards or chapters.
+   */
+  bandLeague?: LeagueId | null;
 }) {
   const now = useReplayTime(clock, view);
   if (view.kind === 'summary') return <SavedOutcome summary={view.summary} level={headingLevel} />;
@@ -220,7 +225,7 @@ export function BattleReplay({ view, bridge, headingLevel = 1, clock, viewerId, 
   // The whole view's fighters (every encounter of an expedition), whichever battles are shown yet: read once for the replay.
   return <ReplayBattles battle={battles[selected]} summary={summary} keptUntil={keptUntil} bridge={bridge} level={headingLevel} viewerId={viewerId}
     looks={looks} titles={titles} lookIds={lookIdsFor(...view.battles.map(b => b.log))} chapters={chapters} nav={nav ?? (chapters ? chaptersNav(chapters) : null)}
-    back={back} takeFocus={takeFocus} league={league} last={selected === battles.length - 1} endActions={endActions} practice={practice} />;
+    back={back} takeFocus={takeFocus} league={league} last={selected === battles.length - 1} endActions={endActions} practice={practice} bandLeague={bandLeague} />;
 }
 
 /** A chapters-only nav: ⏮ and ⏭ step through the chapters, and the last one has no next. */
@@ -247,7 +252,8 @@ const opponentIn = (log: BattleLog, side: string | null) => (log.participants.fi
  * server time, so nothing is filtered by the device's own clock). An activity with several bouts shows them as chapters, and
  * ⏮ ⏭ step through them (Arena replays Task 5); a step never adds a history entry.
  */
-export function ActivityReplay({ reads, activityId, stageId = null, clock, headingLevel = 1, viewerId, known, titles, takeFocus = false, back = null, queue = null, onChapter, counterHost = null, endActions = 'navigation' }: {
+export function ActivityReplay({ reads, activityId, stageId = null, clock, headingLevel = 1, viewerId, known, titles, takeFocus = false, back = null, queue = null, onChapter, counterHost = null, endActions = 'navigation',
+  bandLeague = null }: {
   /** `looks` (when the gateway has it) reads the fighters' looks the caller does not already hold. */
   reads: (Pick<GameGateway, 'timeline'> & Partial<Pick<GameGateway, 'looks'>>) | null;
   activityId: string;
@@ -269,6 +275,8 @@ export function ActivityReplay({ reads, activityId, stageId = null, clock, headi
   /** The compact scene's solid Back row; receives the queue counter as text, with no duplicate state. */
   counterHost?: HTMLElement | null;
   endActions?: 'again' | 'navigation';
+  /** A tournament run's league for its gold band (`BattleReplay`). */
+  bandLeague?: LeagueId | null;
 }) {
   const [loaded, setLoaded] = useState<{ reads: object; attempt: number; view: ReplayView } | null>(null);
   /** Each Try again reads the replay once more (Task 23.4). */
@@ -289,14 +297,14 @@ export function ActivityReplay({ reads, activityId, stageId = null, clock, headi
   const fromRead = worn && worn.reads === reads && worn.activityId === activityId ? worn.lookup : null;
   const shownTitles: TitleLookup | undefined = titles && fromRead ? id => titles(id) ?? fromRead(id) : titles ?? fromRead ?? undefined;
   return view && clock ? <ActivityChapters view={view} headingLevel={headingLevel} titles={shownTitles} clock={clock} viewerId={viewerId} looks={{ known, read: readLooks }}
-    onRetry={() => setAttempt(n => n + 1)} takeFocus={takeFocus} back={back} queue={queue} activityId={activityId} stageId={stageId} onChapter={onChapter} counterHost={counterHost} endActions={endActions} />
+    onRetry={() => setAttempt(n => n + 1)} takeFocus={takeFocus} back={back} queue={queue} activityId={activityId} stageId={stageId} onChapter={onChapter} counterHost={counterHost} endActions={endActions} bandLeague={bandLeague} />
     : <p role="status">Loading the replay…</p>;
 }
 
 /** A loaded activity's replay with its bouts as chapters (those ended by the display time), the chosen one shown. */
 function ActivityChapters({ view, clock, queue, activityId, stageId, onChapter, counterHost, ...rest }: {
   view: ReplayView; clock: DisplayClock; headingLevel: HeadingLevel; viewerId?: string | null; looks: LookSource; titles?: TitleLookup; onRetry(): void;
-  takeFocus: boolean; back: ReplayBack | null;
+  takeFocus: boolean; back: ReplayBack | null; bandLeague: LeagueId | null;
   queue: ReplayQueue | null; activityId: string; stageId: string | null; onChapter?: (stageId: string) => void;
   counterHost: HTMLElement | null;
   endActions: 'again' | 'navigation';
@@ -369,7 +377,7 @@ function ActivityChapters({ view, clock, queue, activityId, stageId, onChapter, 
 function ReplayBattles({ battle, looks, lookIds, ...rest }: {
   battle: ReplayBattle; summary: ActivitySummary | null; keptUntil: number | null; bridge?: SceneBridge; level: HeadingLevel; viewerId?: string | null;
   looks?: LookSource; titles?: TitleLookup; lookIds: readonly string[]; chapters: ReplayChapters | null; nav: ReplayNav | null; back: ReplayBack | null; takeFocus: boolean;
-  league: LeagueId | null; last: boolean; endActions: 'again' | 'navigation'; practice: ReplayPractice | null;
+  league: LeagueId | null; last: boolean; endActions: 'again' | 'navigation'; practice: ReplayPractice | null; bandLeague: LeagueId | null;
 }) {
   // One look read for the whole replay: choosing another chapter of the same view reuses it and never waits again.
   const settledLooks = useSettledLooks(lookIds, looks);
@@ -403,7 +411,7 @@ function useSettledLooks(ids: readonly string[], source: LookSource | undefined)
 const operates = (target: HTMLElement) => target.closest('button, a, summary, input, select, textarea, [contenteditable="true"]') !== null;
 
 function BattlePlayer({ battle, summary, keptUntil, bridge: external, level, viewerId, titles, looks: settledLooks, chapters, nav, back, takeFocus, league, last, endActions,
-  practice }: {
+  practice, bandLeague }: {
   battle: ReplayBattle; summary: ActivitySummary | null;
   /** When the replay stops being kept, while it still is at the display time (else null: no note). */
   keptUntil: number | null;
@@ -417,6 +425,8 @@ function BattlePlayer({ battle, summary, keptUntil, bridge: external, level, vie
   last: boolean;
   endActions: 'again' | 'navigation';
   practice: ReplayPractice | null;
+  /** A tournament run's league for the band's words only (Task 27 fix round 1). */
+  bandLeague: LeagueId | null;
 }) {
   const { log, stage } = battle;
   // Rewards to come are promised only to a fighter in the bout (or when the viewer is not known).
@@ -587,6 +597,8 @@ function BattlePlayer({ battle, summary, keptUntil, bridge: external, level, vie
   // practice fights keep the plain header.
   const band = tournament && !practice;
   const pips = band && chapters ? roundPips(chapters.labels, chapters.current) : [];
+  // The band names the league: a bracket's, or (Task 27 fix round 1) the run's from History; the bracket logic above keeps `league` alone.
+  const bandWords = band ? boutEyebrow(stage, { npc, league: league ?? bandLeague, compact, unranked }, clockMode) : eyebrow;
   // A bracket's bouts show no rewards (spec 2); a run's show on its last chapter. A practice fight has none to show.
   const chips = practice ? [PRACTICE_CHIP] : league !== null ? []
     : rewardChips(summary, { fighter, npc, unranked, kind: stage.kind === 'encounter' ? 'expedition' : tournament ? 'tournament' : 'arena', last });
@@ -610,7 +622,7 @@ function BattlePlayer({ battle, summary, keptUntil, bridge: external, level, vie
       <header className={styles.header}>
         {band ? <div className={styles.band} data-tournament-band="">
           <div className={styles.bandText}>
-            <p className={`eyebrow ${styles.bandEyebrow}`}><span aria-hidden="true">🏆 </span>{eyebrow}</p>
+            <p className={`eyebrow ${styles.bandEyebrow}`}><span aria-hidden="true">🏆 </span>{bandWords}</p>
             <Heading level={level} id={`${resultId}-title`}>{a.name}{a.botTeam && <BotTag />} vs {b.name}{b.botTeam && <BotTag />}</Heading>
           </div>
           {!compact && pips.length > 0 && <RoundPips pips={pips} />}

@@ -95,3 +95,45 @@ test('the editor is remembered per browser for its own account only, and forgott
   expect(rememberedEditor('avi')).toBe(false);
   expect(() => rememberEditor('avi', true)).not.toThrow();
 });
+
+// Final review (client minor, fix round 1): a tab that becomes visible again reads the count at once, through the same one-read-at-a-time
+// guard (a read still out reads once more after it); the 2-minute floor still holds for the timer.
+test('reads again when the page becomes visible again, one read at a time', async () => {
+  const { read, answer } = reads();
+  let onVisible: (() => void) | null = null;
+  const unwatch = vi.fn();
+  const poll = pollNewFeedback(read, vi.fn(), { visible: () => true, watchVisible: listener => { onVisible = listener; return unwatch; } });
+  expect(read).toHaveBeenCalledTimes(1);
+  onVisible!();
+  expect(read).toHaveBeenCalledTimes(1);
+  await answer(1);
+  expect(read).toHaveBeenCalledTimes(2);
+  await answer(2);
+  onVisible!();
+  expect(read).toHaveBeenCalledTimes(3);
+  await answer(3);
+  poll.stop();
+  expect(unwatch).toHaveBeenCalledTimes(1);
+  onVisible!();
+  expect(read).toHaveBeenCalledTimes(3);
+});
+
+test('by default it listens for the document becoming visible, and stops listening on stop', async () => {
+  const { read, answer } = reads();
+  const listeners = new Set<() => void>();
+  let state = 'hidden';
+  vi.stubGlobal('document', { get visibilityState() { return state; }, addEventListener: (type: string, fn: () => void) => { if (type === 'visibilitychange') listeners.add(fn); },
+    removeEventListener: (type: string, fn: () => void) => { if (type === 'visibilitychange') listeners.delete(fn); } });
+  const poll = pollNewFeedback(read, vi.fn());
+  await answer(1);
+  expect(listeners.size).toBe(1);
+  // Hidden: nothing; visible again: one read.
+  for (const fn of listeners) fn();
+  expect(read).toHaveBeenCalledTimes(1);
+  state = 'visible';
+  for (const fn of listeners) fn();
+  expect(read).toHaveBeenCalledTimes(2);
+  await answer(2);
+  poll.stop();
+  expect(listeners.size).toBe(0);
+});

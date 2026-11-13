@@ -100,7 +100,9 @@ import { PerfOverlay, perfPhaseOf } from './PerfOverlay';
 import { menusFor, originMenu, type MenuId } from './menus';
 import { COMPACT_QUERY, railReducer, railVisible, type RailEvent, type RailState } from './rail-reveal';
 import { SceneOverlay } from './SceneOverlay';
-import { boutFilterOf, boutsFrom, sceneForResult, sceneFromOf, sceneKeyOf, type SceneAddress, type SceneFrom, type SceneView } from './scene-url';
+import {
+  boutFilterOf, boutsFrom, historyOriginOf, sceneForResult, sceneFromOf, sceneKeyOf, type HistoryOrigin, type SceneAddress, type SceneFrom, type SceneView,
+} from './scene-url';
 import { AwayButton } from './AwayButton';
 import { useAwayTrip } from './useAwayTrip';
 import { useCampClicks } from './useCampClicks';
@@ -334,7 +336,10 @@ export function CampShell({ fixture, previewAs, previewResting = false, previewB
     focusCamp();
   }, [send]);
 
-  const { card, cardRef, openRow, closeCard, shop } = useCampClicks({ bridge, open, viewer, world, show, focusCamp });
+  const { card, cardRef, openRow, openHistory, closeCard, shop } = useCampClicks({ bridge, open, viewer, world, show, focusCamp });
+  // Patch 1.9 Task 27 fix round 1: the names of the gladiators whose History opened a scene this session, for the scene's back button.
+  const historyNames = useRef(new Map<string, string>());
+  const historyName = useCallback((gladiatorId: string) => historyNames.current.get(gladiatorId) ?? null, []);
   // Task 21 fix round 1: a card that no side of the open panel holds replaces it (ProfileLayer's `onCover`): the panel is hidden
   // and inert while the card is open, and back the moment the card closes.
   const [cardCovers, setCardCovers] = useState(false);
@@ -402,13 +407,22 @@ export function CampShell({ fixture, previewAs, previewResting = false, previewB
   // from, which stays open beneath it; after a reload or a link it is not, and the shell opens it (`show` does nothing when it is).
   const sceneOpen = scene !== null;
   const sceneFrom = scene ? sceneFromOf(scene) ?? null : null;
+  const sceneCard = scene ? historyOriginOf(scene) : null;
+  const sceneCardKey = sceneCard ? `${sceneCard.gladiatorId}|${sceneCard.kind}` : null;
   const cameFrom = useRef<SceneFrom | null>(null);
-  // Results opens on the tab and chip the scene came from (Task 4): Everyone for its rows, My bouts with the chip for a bout's.
+  const cameFromCard = useRef<HistoryOrigin | null>(null);
+  // Results opens on the tab and chip the scene came from (Task 4): Everyone for its rows, My bouts with the chip for a bout's. Task 27 fix
+  // round 1: a scene a History row opened reopens that gladiator's card on its History, at the chip it came from.
   useEffect(() => {
-    if (sceneOpen) { cameFrom.current = sceneFrom; return; }
-    const from = cameFrom.current;
+    if (sceneOpen) { cameFrom.current = sceneFrom; cameFromCard.current = sceneCard; return; }
+    const from = cameFrom.current, historyCard = cameFromCard.current;
     cameFrom.current = null;
+    cameFromCard.current = null;
     if (!from) return;
+    if (from === 'history' && historyCard) {
+      openHistory(historyCard.gladiatorId, historyCard.kind, historyNames.current.get(historyCard.gladiatorId));
+      return;
+    }
     if (from === 'notifications') setMessagesRequest({ tab: 'notifications', n: ++messageRequests.current, account: requestAccount, owner: choiceKey });
     const filter = boutFilterOf(from);
     if (filter) chooseResults({ view: 'mine', filter });
@@ -416,7 +430,8 @@ export function CampShell({ fixture, previewAs, previewResting = false, previewB
     else if (from === 'rewards') chooseResults({ view: 'rewards' });
     const menu = originMenu(from);
     if (menu) show(menu);
-  }, [sceneOpen, sceneFrom, show, chooseResults, choiceKey, requestAccount]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sceneOpen, sceneFrom, sceneCardKey, show, chooseResults, choiceKey, requestAccount, openHistory]);
   // The away button (Patch A item 3): the player's own trip, from the owner state, the world, the owner's results and its timeline. It opens
   // the scene `awayScene` names; when the scene closes, the focus goes back to the button (the scene's own opener is gone with it).
   const away = useAwayTrip({ reads, owner: game.viewer === 'player' ? owner : null, world, nowMs, clock });
@@ -672,7 +687,8 @@ export function CampShell({ fixture, previewAs, previewResting = false, previewB
         following={following} menuPlace={prefs.place} onClose={() => closeCard(true)} onCover={setCardCovers} onOpenMenu={id => { closeCard(false); show(id); }}
         onFollow={id => { bridge.emit('follow-character', { gladiatorId: following === id ? null : id }); closeCard(false); handBack(); }}
         onWatch={(activityId, gladiatorId) => { closeCard(false); bridge.emit('open-arena', { activityId, gladiatorId }); }}
-        onSpar={viewer === 'player' && owner ? practice.spar : undefined} compare={compare} onWatchHistory={openScene} />}
+        onSpar={viewer === 'player' && owner ? practice.spar : undefined} compare={compare}
+        onWatchHistory={(view, name) => { if (view.kind !== 'bout' && view.card) historyNames.current.set(view.card.gladiatorId, name); openScene(view); }} />}
       <main id="main" className={styles.camp} data-camp-view="" tabIndex={-1}
         onPointerDown={event => { press.current = { x: event.clientX, y: event.clientY }; }}
         onPointerUp={event => {
@@ -686,7 +702,7 @@ export function CampShell({ fixture, previewAs, previewResting = false, previewB
           onStatus={game.setSceneStatus} paused={scene !== null || practising} labels={labels} talkInsets={talkInsets} />
       </main>
       {scene && <SceneOverlay view={scene} gateway={reads} state={game} fixture={fixture} bouts={bouts} tournamentSamples={samples.tournaments} onReplace={replaceScene}
-        onClose={() => bridge.emit('return-camp', {})} onWatch={openScene} />}
+        onClose={() => bridge.emit('return-camp', {})} onWatch={openScene} historyName={historyName} />}
       {joining.creating && (
         <CreateCharacter key={account ?? 'none'} gateway={gateway} onCreated={joining.created} onDismiss={joining.dismiss} onFocusLost={focusOffer} />
       )}

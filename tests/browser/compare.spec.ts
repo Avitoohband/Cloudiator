@@ -85,13 +85,19 @@ test.describe('Compare stats with mine (fixture)', () => {
   test('on: Lucilla\'s card shows COMPARE · YOU AND LUCILLA, the table in the card\'s own words, and Gear and Record give way', async ({ page }, info) => {
     await openCamp(page);
     const lucilla = await openCard(page, 'Lucilla');
+    // Final review (client minor, fix round 1): one live region is in the card before the toggle, empty, so its sentence is announced.
+    const status = lucilla.locator('[data-compare-status]');
+    await expect(status).toHaveCount(1);
+    await expect(status).toHaveAttribute('role', 'status');
+    await expect(status).toHaveText('');
     await compareButton(lucilla).click();
     await expect(compareButton(lucilla)).toHaveAttribute('aria-pressed', 'true');
     const compare = block(lucilla);
     await expect(compare).toBeVisible();
     await expect(compare.locator('.eyebrow').first()).toHaveText('COMPARE · YOU AND LUCILLA');
     await expect(compare.getByRole('button', { name: 'Back to their card', exact: true })).toBeVisible();
-    await expect(compare).toContainText('Showing a comparison of your gladiator with Lucilla.');
+    await expect(status).toHaveText('Showing a comparison of your gladiator with Lucilla.');
+    await expect(lucilla.getByRole('status').filter({ hasText: 'Showing a comparison' })).toHaveCount(1);
     for (const gone of ['Gear', 'Record', 'Stats']) await expect(lucilla.getByRole('region', { name: gone, exact: true })).toHaveCount(0);
     // The head and the actions stay.
     await expect(lucilla.getByRole('heading', { name: 'Lucilla', exact: true })).toBeVisible();
@@ -182,8 +188,11 @@ test.describe('Compare stats with mine (fixture)', () => {
     // The next card opens off too, and the button turns it on and off again from the keyboard.
     await compareButton(again).press('Enter');
     await expect(block(again)).toBeVisible();
+    await expect(again.locator('[data-compare-status]')).toHaveText('Showing a comparison of your gladiator with Lucilla.');
     await compareButton(again).press('Space');
     await expect(block(again)).toHaveCount(0);
+    // Off: the live region stays, emptied (fix round 1).
+    await expect(again.locator('[data-compare-status]')).toHaveText('');
   });
 
   test('a card whose build is not available keeps its words and the button is disabled', async ({ page }) => {

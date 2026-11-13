@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
-import { backLabel, boutFilterOf, boutsFrom, campHref, namedScene, sameScene, sameSceneSource, sceneForResult, sceneFromOf, sceneHref, sceneKeyOf, sceneOf, type SceneFrom } from '@/features/shell/scene-url';
+import { backLabel, boutFilterOf, boutsFrom, campHref, historyBackLabel, historyOriginOf, namedScene, sameScene, sameSceneSource, sceneForResult, sceneFromOf, sceneHref, sceneKeyOf, sceneOf, type SceneFrom } from '@/features/shell/scene-url';
 import { originMenu } from '@/features/shell/menus';
 import { BattleReplay } from '@/features/arena/BattleReplay';
 import { ExpeditionUnavailable } from '@/features/character/ExpeditionView';
@@ -278,3 +278,60 @@ describe('the scene names its origin', () => {
     expect(sameScene(shown(`view=bout&tournament=${T}&bout=bad`), { kind: 'bout', tournamentId: T, boutId: B })).toBe(false);
   });
 });
+
+// Patch 1.9 Task 27, fix round 1: a replay or trip opened from a gladiator's History names that card as its origin (`from=history`, the gladiator in
+// `who`, the chip in `chip`), so Back reopens the card on its History at that chip; a tournament bout's replay names its league (`league`) for the
+// gold band. Only well-formed values are read: a history origin without a gladiator id or a known chip, and an unknown league, are dropped.
+describe('a scene opened from a gladiator’s History', () => {
+  const A = '00000000-0000-4000-8000-000000000001', G = '1ac1fd28-1bc1-4ebb-9cc2-004e1dc201e1';
+  const card = { gladiatorId: G, kind: 'tournament' as const };
+
+  it('reads and writes the card origin and the league, and reads back what it writes', () => {
+    const replay = { kind: 'replay' as const, activityId: A, stageId: `${A}:3`, league: 'silver' as const, from: 'history' as const, card };
+    const href = sceneHref('http://x/game/?mode=fixture', replay);
+    expect(href).toBe(`/game/?mode=fixture&view=replay&activity=${A}&stage=${encodeURIComponent(`${A}:3`)}&league=silver&from=history&who=${G}&chip=tournament`);
+    expect(sceneOf(new URL(`http://x${href}`).searchParams)).toEqual(replay);
+    const trip = { kind: 'expedition' as const, activityId: A, play: 'trip' as const, from: 'history' as const, card: { gladiatorId: G, kind: 'expedition' as const } };
+    expect(sceneOf(new URL(`http://x${sceneHref('http://x/game/', trip)}`).searchParams)).toEqual(trip);
+    expect(sceneFromOf(replay)).toBe('history');
+    expect(historyOriginOf(replay)).toEqual(card);
+    expect(historyOriginOf({ kind: 'replay', activityId: A, from: 'arena' })).toBeNull();
+    // Leaving the scene takes every part of it out of the address.
+    expect(campHref(`http://x${href}`)).toBe('/game/?mode=fixture');
+  });
+
+  it('drops a history origin without a gladiator id or a known chip, and an unknown league or one on another scene', () => {
+    for (const bad of [`who=${G}`, 'chip=arena', `who=bad&chip=arena`, `who=${G}&chip=dungeon`, `who=${G},x&chip=arena`, `who=${G}&chip=Arena`]) {
+      expect(sceneOf(params(`view=replay&activity=${A}&from=history&${bad}`)), bad).toEqual({ kind: 'replay', activityId: A });
+    }
+    // The gladiator id is read as the server writes it (lowercase).
+    expect(sceneOf(params(`view=replay&activity=${A}&from=history&who=${G.toUpperCase()}&chip=arena`))).toEqual({ kind: 'replay', activityId: A, from: 'history',
+      card: { gladiatorId: G, kind: 'arena' } });
+    for (const league of ['', 'Bronze', 'diamond', 'bronze,silver', '__proto__']) {
+      expect(sceneOf(params(`view=replay&activity=${A}&league=${encodeURIComponent(league)}`)), league).toEqual({ kind: 'replay', activityId: A });
+    }
+    expect(sceneOf(params(`view=replay&activity=${A}&league=champion`))).toEqual({ kind: 'replay', activityId: A, league: 'champion' });
+    expect(sceneOf(params(`view=expedition&activity=${A}&league=gold`))).toEqual({ kind: 'expedition', activityId: A });
+    // Who and chip mean nothing without from=history; another origin keeps its own meaning.
+    expect(sceneOf(params(`view=replay&activity=${A}&from=arena&who=${G}&chip=arena`))).toEqual({ kind: 'replay', activityId: A, from: 'arena' });
+  });
+
+  it('is the same scene from History as from anywhere else, and keys it without its origin or league', () => {
+    const fromHistory = sceneOf(params(`view=replay&activity=${A}&league=bronze&from=history&who=${G}&chip=tournament`))!;
+    expect(sameScene(fromHistory, { kind: 'replay', activityId: A })).toBe(true);
+    expect(sceneKeyOf(fromHistory)).toBe(sceneKeyOf({ kind: 'replay', activityId: A }));
+    // A pending step's source includes its card: another gladiator's or another chip's History is another source.
+    expect(sameSceneSource(fromHistory, { kind: 'replay', activityId: A, from: 'history', card: { gladiatorId: G, kind: 'tournament' } })).toBe(true);
+    expect(sameSceneSource(fromHistory, { kind: 'replay', activityId: A, from: 'history', card: { gladiatorId: G, kind: 'arena' } })).toBe(false);
+  });
+
+  it('names the History it goes back to, and opens no menu for it', () => {
+    expect(historyBackLabel('Lucilla', false)).toBe("Lucilla's history");
+    expect(historyBackLabel('Aster', true)).toBe('My history');
+    expect(historyBackLabel(null, false)).toBe('History');
+    expect(backLabel('history')).toBe('History');
+    expect(originMenu('history')).toBeNull();
+    expect(boutFilterOf('history')).toBeNull();
+  });
+});
+

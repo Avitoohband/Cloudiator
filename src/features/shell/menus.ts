@@ -36,5 +36,7 @@ export function originMenu(from: SceneFrom): MenuId | null {
     case 'tournaments': return 'tournaments';
     case 'gladiators': return 'gladiators';
     case 'notifications': return null;
+    // Patch 1.9 Task 27 fix round 1: a History row's scene goes back to the gladiator's card, not a menu.
+    case 'history': return null;
   }
 }

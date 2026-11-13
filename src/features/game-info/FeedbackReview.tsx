@@ -14,7 +14,9 @@
 // new one. Sending one item never closes or clears the box open on another.
 // Task 27 (from the M37 review): when Claude replaced the suggestion an edit was made from, the owner's open box and edited draft stay under
 // the alert; the box then goes with the suggestion now shown, so sending the edit again (having read the new one) is not refused again.
-// An item answered meanwhile closes its box, as before.
+// Only an item known to be answered closes its box. When the reloaded list cannot say why (the item left the list shown, or the reload
+// failed), the box and draft stay and the alert says so in neutral words (fix round 1); an alert for an item no longer listed shows above
+// the list.
 import { useCallback, useEffect, useId, useRef, useState } from 'react';
 import type { OwnerFeedbackItem } from '@contracts/reads';
 import { useClockMode } from '../../lib/clock-setting';
@@ -28,6 +30,8 @@ const STATUS_CLASS = { new: feedbackStyles.statusNew, read: feedbackStyles.statu
 /** The answer box's limit (the mockup's; the server takes up to 2,000, the limit of an edited suggestion). */
 const ANSWER_MAXIMUM = 1000;
 const SUGGESTION_MAXIMUM = 2000;
+/** A refused send whose reason the reloaded list cannot show (fix round 1). */
+const CHANGED = 'This feedback changed. It may have been answered, or Claude replaced the suggestion. Reload and check before sending.';
 const statusText = (item: OwnerFeedbackItem) => item.status === 'answered' && item.answeredVia === 'claude-approved' ? 'Answered (approved suggestion)' : ownerStatus(item.status);
 
 export function FeedbackReview({ onCount }: {
@@ -93,13 +97,15 @@ export function FeedbackReview({ onCount }: {
     const closeOwnBox = () => { if (answeringNow.current === item.id) { openBox(null); setDraft(''); } };
     if (!result.ok) {
       if (result.code === 'conflict') {
-        // Answered meanwhile, or (an approval) Claude replaced the suggestion: the reloaded list shows which.
+        // Answered meanwhile, or (an approval) Claude replaced the suggestion: the reloaded list shows which, when it still lists the item.
         const shown = (await load(filter))?.find(other => other.id === item.id);
-        const replaced = at !== null && shown !== undefined && shown.status !== 'answered' && shown.suggestion !== null;
+        const answered = shown?.status === 'answered';
+        const replaced = at !== null && shown !== undefined && !answered && shown.suggestion !== null;
         // A replaced suggestion keeps this item's open box and its draft (nothing typed is lost); its next send names the new suggestion.
-        if (replaced && !approve && answeringNow.current === item.id) setSuggestionAt(shown.suggestedAtMs);
-        else closeOwnBox();
-        setProblem({ id: item.id, text: replaced ? 'Claude changed this suggestion after you opened it. Read the new one, then send again.' : 'This feedback was already answered.' });
+        if (answered) closeOwnBox();
+        else if (replaced && !approve && answeringNow.current === item.id) setSuggestionAt(shown.suggestedAtMs);
+        setProblem({ id: item.id, text: answered ? 'This feedback was already answered.'
+          : replaced ? 'Claude changed this suggestion after you opened it. Read the new one, then send again.' : CHANGED });
         return;
       }
       setProblem({ id: item.id, text: approve ? 'Could not send the answer. Try again.' : 'Could not send the answer. Your text is still here. Try again.' });
@@ -123,6 +129,7 @@ export function FeedbackReview({ onCount }: {
       <button type="button" onClick={() => void load(filter)}>Try again</button>
     </div> : <p role="status" className={styles.feedbackState}>Loading feedback…</p>) : <>
       {failed && <p role="alert" className={styles.feedbackState}>Feedback could not be loaded again. <button type="button" onClick={() => void load(filter)}>Try again</button></p>}
+      {problem && !items.some(item => item.id === problem.id) && <p role="alert" className={styles.feedbackProblem} data-feedback-problem="">{problem.text}</p>}
       {items.length === 0 ? <p className={styles.feedbackState}>Nothing here. New feedback from players shows up in this list.</p>
         : <ul className={styles.feedbackList} aria-label="Feedback">
           {items.map(item => {

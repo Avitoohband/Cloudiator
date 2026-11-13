@@ -25,7 +25,9 @@ import { titleLookupOf } from '../titles/title-text';
 import { markWatched } from '../bouts/watched';
 import { useBoutList, type BoutsStore } from '../bouts/bouts-store';
 import type { ReplayQueue } from '../bouts/bout-queue';
-import { backLabel, boutFilterOf, namedScene, sameSceneSource, sceneFromOf, sceneKeyOf, sceneOf, type SceneAddress, type SceneView } from './scene-url';
+import {
+  backLabel, boutFilterOf, historyBackLabel, historyOriginOf, namedScene, sameSceneSource, sceneFromOf, sceneKeyOf, sceneOf, type SceneAddress, type SceneView,
+} from './scene-url';
 import { BracketReplay } from '../tournaments/BracketReplay';
 import type { TournamentSample } from '../tournaments/TournamentPanel';
 import styles from './shell.module.css';
@@ -37,7 +39,7 @@ const DungeonView = dynamic(() => import('../dungeon/DungeonView').then(module =
 /** The camp view, which takes the keyboard when the scene had no opener to give it back to. */
 const focusCamp = () => document.querySelector<HTMLElement>('[data-camp-view] [role="application"]')?.focus({ preventScroll: true });
 
-export function SceneOverlay({ view, gateway, state, fixture = false, onClose, onWatch, bouts, onReplace, tournamentSamples = [] }: {
+export function SceneOverlay({ view, gateway, state, fixture = false, onClose, onWatch, bouts, onReplace, tournamentSamples = [], historyName }: {
   view: SceneAddress;
   /** The camp's reads: the live gateway, or the fixture preview's once it has loaded (null until then). */
   gateway: GameGateway | null;
@@ -50,6 +52,8 @@ export function SceneOverlay({ view, gateway, state, fixture = false, onClose, o
   onWatch?(view: SceneView): void;
   bouts: BoutsStore | null;
   onReplace(view: SceneView): void;
+  /** The name of a gladiator whose History opened a scene this session (Task 27 fix round 1), for the back button; null when not known. */
+  historyName?(gladiatorId: string): string | null;
 }) {
   const dialog = useRef<HTMLDialogElement>(null);
   const back = useRef<HTMLButtonElement>(null);
@@ -113,9 +117,24 @@ export function SceneOverlay({ view, gateway, state, fixture = false, onClose, o
   // The display clock has a server time once the shared sync has read the world (or it never will).
   const clock = state.world || state.syncError ? state.clock : null;
   const from = sceneFromOf(view);
-  const label = backLabel(from);
+  // Task 27 fix round 1: a scene a History row opened goes back to that gladiator's card ("← Lucilla's history", "← My history"). The name is the
+  // one the card showed, else the camp's, else the public profile's (a reload of a gladiator not in the camp).
+  const card = historyOriginOf(view);
+  const cardId = card?.gladiatorId ?? null;
+  const ownCard = cardId !== null && state.owner?.gladiatorId === cardId;
+  const knownName = cardId === null ? null : historyName?.(cardId) ?? state.world?.actors.find(a => a.gladiatorId === cardId)?.name ?? null;
+  const [readName, setReadName] = useState<{ id: string; name: string } | null>(null);
+  useEffect(() => {
+    if (cardId === null || ownCard || knownName !== null || !gateway) return;
+    let alive = true;
+    gateway.profile(cardId).then(profile => { if (alive) setReadName({ id: cardId, name: profile.actor.name }); }, () => undefined);
+    return () => { alive = false; };
+  }, [cardId, ownCard, knownName, gateway]);
+  const label = card ? historyBackLabel(knownName ?? (readName?.id === cardId ? readName.name : null), ownCard) : backLabel(from);
   // A scene it opens from this one (an encounter's replay, the whole trip) goes back to the same place.
-  const origin = from ? { from } : {};
+  const origin = from ? { from, ...(card ? { card } : {}) } : {};
+  /** A tournament run's league (History), kept by its chapters. */
+  const league = named?.kind === 'replay' && named.league ? { league: named.league } : {};
   const filter = boutFilterOf(from) ?? 'all';
   const owner = player ? state.owner : null;
   const currentActivityId = owner?.currentActivity && ['arena', 'tournament'].includes(owner.currentActivity.kind) ? owner.currentActivity.id : null;
@@ -124,16 +143,17 @@ export function SceneOverlay({ view, gateway, state, fixture = false, onClose, o
   const queue = useMemo<ReplayQueue | null>(() => bouts && owner && replayId ? {
     filter, get list() { return bouts.list(filter); }, ownerName: owner.name, currentActivityId,
     isCurrent: () => sameSceneSource(sceneOf(new URL(window.location.href).searchParams), {
-      kind: 'replay', activityId: replayId, ...(replayStage ? { stageId: replayStage } : {}), ...(from ? { from } : {}),
+      kind: 'replay', activityId: replayId, ...(replayStage ? { stageId: replayStage } : {}), ...origin,
     }),
     open: activityId => {
       // Native history changes the address before React commits new props/refs. A page from that older source must not replace it.
-      const source: SceneView = { kind: 'replay', activityId: replayId, ...(replayStage ? { stageId: replayStage } : {}), ...(from ? { from } : {}) };
+      const source: SceneView = { kind: 'replay', activityId: replayId, ...(replayStage ? { stageId: replayStage } : {}), ...origin };
       if (!sameSceneSource(sceneOf(new URL(window.location.href).searchParams), source)) return;
-      onReplace({ kind: 'replay', activityId, ...(from ? { from } : {}) });
+      onReplace({ kind: 'replay', activityId, ...origin });
     },
     more: () => bouts.more(filter),
-  } : null, [bouts, owner?.gladiatorId, owner?.name, replayId, replayStage, filter, currentActivityId, from, onReplace]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  } : null, [bouts, owner?.gladiatorId, owner?.name, replayId, replayStage, filter, currentActivityId, from, cardId, card?.kind, onReplace]);
   const viewKey = `${sceneKey}|${state.session.userId ?? 'visitor'}`;
   // The view mounts once the viewer is known: the session, and for an account its owner read (Task 23.5, C19). Mounted
   // earlier, a signed-in player's view would read as a visitor's and remount as the player's a moment later, reading its
@@ -173,8 +193,8 @@ export function SceneOverlay({ view, gateway, state, fixture = false, onClose, o
                 onChapter={stageId => {
                   // The activity stays mounted; hand the outgoing chapter's focus to Back before its player remounts.
                   back.current?.focus({ preventScroll: true });
-                  onReplace({ kind: 'replay', activityId: named.activityId, stageId, ...origin });
-                }}
+                  onReplace({ kind: 'replay', activityId: named.activityId, stageId, ...league, ...origin });
+                }} bandLeague={named.league ?? null}
                 viewerId={player ? state.owner?.gladiatorId ?? null : null} known={known} titles={titles} takeFocus back={{ label, go: onClose }} />
             : named.kind === 'dungeon' ? loading ? <p role="status">Loading the dungeon…</p>
               : <DungeonView key={viewKey} reads={reads} activityId={named.activityId} fixture={fixture} play={named.play ?? null}

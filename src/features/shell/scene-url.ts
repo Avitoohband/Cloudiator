@@ -5,7 +5,9 @@
 // closes it. A `from=<origin>` parameter names the menu the scene was opened from, so Back says where it goes and, after a
 // reload, opens that menu again (Arena replays Task 3). The /replay/ and /expedition/ pages stay as deep links. Nothing here
 // touches the history; `useSceneHistory` does.
+import type { LeagueId } from '@contracts/commands';
 import type { PublicActivitySummary } from '@contracts/events';
+import type { HistoryKind } from '@contracts/reads';
 import type { BoutFilter } from '../../lib/api/reads';
 import { TOURNAMENT_BOUT_ID, TOURNAMENT_ID } from '../../lib/tournament-id';
 import { isActivityId } from '../character/expedition-query';
@@ -15,11 +17,20 @@ import { isActivityId } from '../character/expedition-query';
  * `bouts-won` / `bouts-lost` for the chip it was under), of Everyone's results, the Arena card, a notification, a tournament
  * bracket or the Gladiators list. No origin: the camp itself (a camp button, a shared link, a clicked gladiator).
  */
-export type SceneFrom = 'bouts' | 'bouts-won' | 'bouts-lost' | 'results' | 'rewards' | 'arena' | 'notifications' | 'tournaments' | 'gladiators';
+export type SceneFrom = 'bouts' | 'bouts-won' | 'bouts-lost' | 'results' | 'rewards' | 'arena' | 'notifications' | 'tournaments' | 'gladiators' | 'history';
+/**
+ * Patch 1.9 Task 27 fix round 1: the gladiator card's History a scene was opened from (`from=history&who=<gladiator>&chip=<kind>`), so Back
+ * (the button, Escape and the browser's) reopens that card on its History at that chip.
+ */
+export type HistoryOrigin = { gladiatorId: string; kind: HistoryKind };
+/**
+ * A scene over the camp. A replay may name its tournament's `league` (`&league=`; Task 27 fix round 1: a tournament run opened from History,
+ * whose timeline names none), for the gold band's words only. `card` goes with `from: 'history'` only.
+ */
 export type SceneView =
-  | { kind: 'replay'; activityId: string; stageId?: string; from?: SceneFrom }
-  | { kind: 'expedition'; activityId: string; play?: 'trip'; from?: SceneFrom }
-  | { kind: 'dungeon'; activityId: string; play?: 'trip'; from?: SceneFrom }
+  | { kind: 'replay'; activityId: string; stageId?: string; league?: LeagueId; from?: SceneFrom; card?: HistoryOrigin }
+  | { kind: 'expedition'; activityId: string; play?: 'trip'; from?: SceneFrom; card?: HistoryOrigin }
+  | { kind: 'dungeon'; activityId: string; play?: 'trip'; from?: SceneFrom; card?: HistoryOrigin }
   | { kind: 'bout'; tournamentId: string; boutId: string; from?: SceneFrom };
 /**
  * A scene the address names. As on the expedition page (`expeditionQuery`), its activity id must be UUID-shaped, and a
@@ -28,8 +39,11 @@ export type SceneView =
  */
 export type SceneAddress = SceneView | { kind: SceneView['kind']; activityId: null };
 
+/** The origins a `from` names by itself; `history` also needs its gladiator and chip (`historyOf`). */
 const ORIGINS: readonly SceneFrom[] = ['bouts', 'bouts-won', 'bouts-lost', 'results', 'rewards', 'arena', 'notifications', 'tournaments', 'gladiators'];
-const SCENE_PARAMS = ['view', 'activity', 'stage', 'play', 'tournament', 'bout', 'from'] as const;
+const SCENE_PARAMS = ['view', 'activity', 'stage', 'play', 'tournament', 'bout', 'from', 'league', 'who', 'chip'] as const;
+const LEAGUE_IDS: readonly string[] = ['bronze', 'silver', 'gold', 'champion'] satisfies LeagueId[];
+const HISTORY_KINDS: readonly string[] = ['arena', 'tournament', 'expedition'] satisfies HistoryKind[];
 
 /** The address names no scene's parts: a malformed activity or bout. */
 const unnamed = (view: SceneAddress): view is { kind: SceneView['kind']; activityId: null } => 'activityId' in view && view.activityId === null;
@@ -43,6 +57,29 @@ const originOf = (search: Pick<URLSearchParams, 'get'>): { from?: SceneFrom } =>
   const known = ORIGINS.find(origin => origin === from);
   return known ? { from: known } : {};
 };
+/**
+ * An activity scene's origin: one of `originOf`'s, or a gladiator card's History (`from=history` with a gladiator id in `who` and a chip in
+ * `chip`; without both well formed it names no origin).
+ */
+const activityOriginOf = (search: Pick<URLSearchParams, 'get'>): { from?: SceneFrom; card?: HistoryOrigin } => {
+  if (search.get('from') !== 'history') return originOf(search);
+  const who = search.get('who'), chip = search.get('chip');
+  return who && isActivityId(who) && chip && HISTORY_KINDS.includes(chip) ? { from: 'history', card: { gladiatorId: who.toLowerCase(), kind: chip as HistoryKind } } : {};
+};
+/** A replay's tournament league, when the address names a known one. */
+const leagueOf = (search: Pick<URLSearchParams, 'get'>): { league?: LeagueId } => {
+  const league = search.get('league');
+  return league !== null && LEAGUE_IDS.includes(league) ? { league: league as LeagueId } : {};
+};
+
+/** The gladiator card's History a scene was opened from, or null. */
+export const historyOriginOf = (view: SceneAddress): HistoryOrigin | null =>
+  'from' in view && view.from === 'history' && 'card' in view && view.card ? view.card : null;
+/** The name on the back button of a scene opened from History: "Lucilla's history", "My history", or "History" before the name is known. */
+export const historyBackLabel = (name: string | null, own: boolean): string => (own ? 'My history' : name ? `${name}'s history` : 'History');
+/** `view` (a replay or a trip opened from a History row) with the card it came from as its origin. */
+export const withHistoryOrigin = (view: Exclude<SceneView, { kind: 'bout' }>, card: HistoryOrigin): Exclude<SceneView, { kind: 'bout' }> =>
+  ({ ...view, from: 'history', card });
 
 /** The origin a scene was opened from, if any (a scene whose address names nothing has none). */
 export const sceneFromOf = (view: SceneAddress): SceneFrom | undefined => ('from' in view ? view.from : undefined);
@@ -62,9 +99,11 @@ export function sceneOf(search: Pick<URLSearchParams, 'get'>): SceneAddress | nu
   if (!activityId || (view !== 'replay' && view !== 'expedition' && view !== 'dungeon')) return null;
   if (!isActivityId(activityId)) return { kind: view, activityId: null };
   // Only `play=trip` names the whole-trip replay; any other value is ignored, so a mangled link still opens the live view.
-  if (view !== 'replay') return search.get('play') === 'trip' ? { kind: view, activityId, play: 'trip', ...originOf(search) } : { kind: view, activityId, ...originOf(search) };
+  if (view !== 'replay') {
+    return search.get('play') === 'trip' ? { kind: view, activityId, play: 'trip', ...activityOriginOf(search) } : { kind: view, activityId, ...activityOriginOf(search) };
+  }
   const stageId = search.get('stage');
-  return stageId ? { kind: 'replay', activityId, stageId, ...originOf(search) } : { kind: 'replay', activityId, ...originOf(search) };
+  return stageId ? { kind: 'replay', activityId, stageId, ...leagueOf(search), ...activityOriginOf(search) } : { kind: 'replay', activityId, ...leagueOf(search), ...activityOriginOf(search) };
 }
 
 /** What tells two scenes of one kind and activity apart: a replay's stage, an expedition's whole-trip `play` (undefined for none). */
@@ -91,7 +130,9 @@ export function sameScene(shown: SceneAddress | null, view: SceneView): boolean 
 
 /** A pending step still belongs to this exact source, including its origin/filter, before replacing the live address. */
 export function sameSceneSource(shown: SceneAddress | null, source: SceneView): boolean {
-  return shown !== null && sameScene(shown, source) && sceneFromOf(shown) === sceneFromOf(source);
+  if (shown === null || !sameScene(shown, source) || sceneFromOf(shown) !== sceneFromOf(source)) return false;
+  const a = historyOriginOf(shown), b = historyOriginOf(source);
+  return a === b || (a !== null && b !== null && a.gladiatorId === b.gladiatorId && a.kind === b.kind);
 }
 
 /** `href` (an absolute address) with its scene replaced by `view`: the same route and options, as a path and search. */
@@ -105,9 +146,16 @@ export function sceneHref(href: string, view: SceneView): string {
   } else {
     url.searchParams.set('activity', view.activityId);
     if (view.kind === 'replay' && view.stageId) url.searchParams.set('stage', view.stageId);
+    if (view.kind === 'replay' && view.league) url.searchParams.set('league', view.league);
     if (view.kind !== 'replay' && view.play === 'trip') url.searchParams.set('play', 'trip');
   }
-  if (view.from) url.searchParams.set('from', view.from);
+  const card = historyOriginOf(view);
+  // A History origin is written with its card, or not at all.
+  if (view.from && (view.from !== 'history' || card)) url.searchParams.set('from', view.from);
+  if (card) {
+    url.searchParams.set('who', card.gladiatorId);
+    url.searchParams.set('chip', card.kind);
+  }
   return `${url.pathname}${url.search}${url.hash}`;
 }
 
@@ -119,7 +167,7 @@ export function campHref(href: string): string {
 }
 
 /** The name on a scene's back button: the menu it goes back to, or the camp. */
-export function backLabel(from: SceneFrom | undefined): 'My bouts' | 'Results' | 'Your rewards' | 'Arena' | 'Notifications' | 'Tournaments' | 'Gladiators' | 'Camp' {
+export function backLabel(from: SceneFrom | undefined): 'My bouts' | 'Results' | 'Your rewards' | 'Arena' | 'Notifications' | 'Tournaments' | 'Gladiators' | 'History' | 'Camp' {
   switch (from) {
     case 'bouts': case 'bouts-won': case 'bouts-lost': return 'My bouts';
     case 'results': return 'Results';
@@ -128,6 +176,8 @@ export function backLabel(from: SceneFrom | undefined): 'My bouts' | 'Results' |
     case 'notifications': return 'Notifications';
     case 'tournaments': return 'Tournaments';
     case 'gladiators': return 'Gladiators';
+    // The overlay names whose History when it knows (`historyBackLabel`).
+    case 'history': return 'History';
     default: return 'Camp';
   }
 }

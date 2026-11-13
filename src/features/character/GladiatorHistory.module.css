@@ -316,8 +316,21 @@
   font-size: 13.5px;
 }
 
-.more:disabled {
+.more[aria-disabled='true'] {
   opacity: 0.6;
+}
+
+.row:focus-visible,
+.trow:focus-visible,
+.list:focus-visible {
+  outline: 2px solid var(--accent, #e6b450);
+  outline-offset: 2px;
+}
+
+.row:focus,
+.trow:focus,
+.list:focus {
+  outline-color: var(--accent, #e6b450);
 }
 
 .everything,

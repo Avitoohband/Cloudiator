@@ -38,7 +38,8 @@ export function chipCount(kind: HistoryKind, counts: HistoryCounts | null): stri
 }
 
 const RETENTION: Record<HistoryKind, string> = {
-  arena: 'Replays are kept for 7 days. ▶ Watch shows where a replay is still kept.',
+  // The controller's ruling (fix round 1): the Arena list (and its chip) counts NPC and bot bouts too, over the 90 days a result is kept.
+  arena: 'Replays are kept for 7 days. ▶ Watch shows where a replay is still kept. Last 90 days, NPC and bot bouts included.',
   tournament: 'Tournament replays are kept for 7 days after the tournament ends.',
   expedition: 'Expedition replays are kept for 7 days. A trip still under way can be watched once it is over.',
 };
@@ -170,10 +171,12 @@ export function runLastRows(entries: readonly HistoryEntry[]): Set<string> {
 
 /**
  * What ▶ Watch opens, as the camp's scenes do (`sceneForResult`): an Arena bout's replay; a tournament bout's run at that round (the run's
- * stage `<activity>:<round>`, the round from the bout id); an expedition's whole trip.
+ * stage `<activity>:<round>`, the round from the bout id) with its league for the gold band (a run's timeline names none; fix round 1);
+ * an expedition's whole trip.
  */
-export function historyScene(entry: HistoryEntry): SceneView {
+export function historyScene(entry: HistoryEntry): Exclude<SceneView, { kind: 'bout' }> {
   if (entry.kind === 'expedition') return { kind: 'expedition', activityId: entry.activityId, play: 'trip' };
   const round = entry.kind === 'tournament' ? /:(\d{1,3}):\d{1,5}$/.exec(entry.entryId)?.[1] : undefined;
-  return round ? { kind: 'replay', activityId: entry.activityId, stageId: `${entry.activityId}:${round}` } : { kind: 'replay', activityId: entry.activityId };
+  if (!round) return { kind: 'replay', activityId: entry.activityId };
+  return { kind: 'replay', activityId: entry.activityId, stageId: `${entry.activityId}:${round}`, ...(entry.league ? { league: entry.league } : {}) };
 }

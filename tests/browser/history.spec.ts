@@ -73,7 +73,8 @@ test.describe('A gladiator’s history on the card (fixture)', () => {
     await expect(chips(card).getByRole('button')).toHaveText([/^Arena\s*15–8$/, /^🏆\s*Tournament fights\s*6$/, /^Expeditions\s*2$/]);
     await expect(chips(card).getByRole('button', { name: 'Tournament fights 6', exact: true })).toHaveAttribute('aria-pressed', 'false');
     await expect(chips(card).getByRole('button', { name: 'Arena 15–8', exact: true })).toHaveAttribute('aria-pressed', 'true');
-    await expect(card).toContainText('Replays are kept for 7 days. ▶ Watch shows where a replay is still kept.');
+    // Fix round 1 (controller ruling): the Arena line says what the chip and list count.
+    await expect(card).toContainText('Replays are kept for 7 days. ▶ Watch shows where a replay is still kept. Last 90 days, NPC and bot bouts included.');
     await expect(card.locator('[data-history-footer]')).toHaveText('Rewards stay private. Anyone can watch a kept replay; it shows the fights, never loot.');
 
     const rows = historyRows(card);
@@ -96,11 +97,14 @@ test.describe('A gladiator’s history on the card (fixture)', () => {
     expect(await noHorizontalScroll(page)).toBe(true);
     await shot(page, info, 'history');
 
-    // Show more: the last three, then "That is everything." and no Show more.
-    await card.getByRole('button', { name: 'Show more', exact: true }).click();
+    // Show more (by keyboard): the last three, then "That is everything." and no Show more. Fix round 1: the button that goes away hands the
+    // focus to the first new row, never to the page.
+    await card.getByRole('button', { name: 'Show more', exact: true }).focus();
+    await page.keyboard.press('Enter');
     await expect(rows).toHaveCount(23);
     await expect(card.getByText('That is everything.', { exact: true })).toBeVisible();
     await expect(card.getByRole('button', { name: 'Show more', exact: true })).toHaveCount(0);
+    await expect(rows.nth(20)).toBeFocused();
 
     // Expeditions: his Ruined Outpost (kept) and an older Woodland Path (gone). The chip choice stays while the card is open.
     await chips(card).getByRole('button', { name: 'Expeditions 2', exact: true }).click();
@@ -121,10 +125,21 @@ test.describe('A gladiator’s history on the card (fixture)', () => {
 
     // ▶ Watch on his kept trip opens the existing expedition scene (the whole trip); the card closes.
     await rows.first().getByRole('button', { name: /^Watch: Ruined Outpost/ }).click();
-    await expect(page.getByRole('dialog', { name: 'Expedition', exact: true })).toBeVisible();
+    const scene = page.getByRole('dialog', { name: 'Expedition', exact: true });
+    await expect(scene).toBeVisible();
     const url = new URL(page.url());
     expect([url.searchParams.get('view'), url.searchParams.get('activity'), url.searchParams.get('play')]).toEqual(['expedition', EXPEDITION_FIXTURES.spectator.activityId, 'trip']);
+    // Fix round 1: the scene names the History it came from (`from=history`, the gladiator and the chip), and Back reopens it at that chip.
+    expect([url.searchParams.get('from'), url.searchParams.get('who'), url.searchParams.get('chip')]).toEqual(['history', ARENA_GLADIATORS.varro.id, 'expedition']);
     await expect(card).toHaveCount(0);
+    const back = scene.getByRole('button', { name: 'Back to Varro\'s history', exact: true });
+    await expect(back).toHaveText('← Varro\'s history');
+    await back.click();
+    await expect(scene).toHaveCount(0);
+    await expect(card.getByRole('heading', { name: 'Varro\'s history', level: 2 })).toBeVisible();
+    await expect(chips(card).getByRole('button', { name: 'Expeditions 2', exact: true })).toHaveAttribute('aria-pressed', 'true');
+    await expect(card.getByRole('button', { name: 'Back to the card', exact: true })).toBeFocused();
+    expect(new URL(page.url()).searchParams.get('view')).toBeNull();
   });
 
   test('▶ Watch on another gladiator’s kept Arena bout opens the existing replay, with no band', async ({ page }) => {
@@ -181,7 +196,9 @@ test.describe('A gladiator’s history on the card (fixture)', () => {
     await page.waitForFunction(() => window.__cloudiatorReplay?.state().chapter === 2);
     const band = replay.locator('[data-tournament-band]');
     await expect(band).toBeVisible();
-    await expect(band).toContainText('TOURNAMENT · FINAL');
+    // Fix round 1: the band names the tournament's league (the row's, carried in the address: a run's timeline has none).
+    await expect(band).toContainText('TOURNAMENT · BRONZE · FINAL');
+    expect([url.searchParams.get('league'), url.searchParams.get('from'), url.searchParams.get('chip')]).toEqual(['bronze', 'history', 'tournament']);
     await expect(band.getByRole('heading', { name: 'Varro vs Corvina' })).toBeVisible();
     const pips = replay.getByRole('list', { name: 'Rounds', exact: true }).getByRole('listitem');
     await expect(pips).toHaveText([/Quarterfinal\s*✓/, /Semifinal\s*✓/, /^Final$/]);
@@ -197,6 +214,31 @@ test.describe('A gladiator’s history on the card (fixture)', () => {
     await page.waitForFunction(() => window.__cloudiatorReplay?.state().chapter === 1);
     await expect(pips).toHaveText([/Quarterfinal\s*✓/, /^Semifinal$/, /^Final$/]);
     await expect(pips.nth(1)).toHaveAttribute('aria-current', 'step');
+    // A chapter keeps the league and the origin; after a reload too.
+    await expect(band).toContainText('TOURNAMENT · BRONZE · SEMIFINAL');
+    await page.reload();
+    await page.waitForFunction(() => window.__cloudiatorReplay?.state().chapter === 1, null, { timeout: 45_000 });
+    await expect(replay.locator('[data-tournament-band]')).toContainText('TOURNAMENT · BRONZE · SEMIFINAL');
+
+    // Fix round 1: Back (the button, Escape and the browser's Back) reopens Corvina's card on her History, at Tournament fights.
+    const reopened = async () => {
+      await expect(replay).toHaveCount(0);
+      await expect(card.getByRole('heading', { name: 'Corvina\'s history', level: 2 })).toBeVisible();
+      await expect(chips(card).getByRole('button', { name: 'Tournament fights 4', exact: true })).toHaveAttribute('aria-pressed', 'true');
+      await expect(rows).toHaveCount(4);
+    };
+    const back = replay.getByRole('button', { name: 'Back to Corvina\'s history', exact: true });
+    await expect(back).toHaveText('← Corvina\'s history');
+    await back.click();
+    await reopened();
+    await rows.first().getByRole('button', { name: /^Watch: Bronze Tournament, Final/ }).click();
+    await expect(replay).toBeVisible();
+    await page.keyboard.press('Escape');
+    await reopened();
+    await rows.nth(1).getByRole('button', { name: /^Watch: Bronze Tournament, Semifinal/ }).click();
+    await expect(replay).toBeVisible();
+    await page.goBack();
+    await reopened();
   });
 
   test('your own card: My history, with your own rewards beside your rows', async ({ page }, info) => {
@@ -215,6 +257,16 @@ test.describe('A gladiator’s history on the card (fixture)', () => {
     await expect(rows.nth(2)).toContainText(/vs Iron Warden\s*NPC/);
     await expect(rows.nth(2)).toContainText(/Arena · \d{1,2}:\d{2}\s?[AP]M · \+3 renown/);
     await shot(page, info, 'own-history');
+    // Fix round 1: a replay from your own History goes back to "My history", at the chip it came from.
+    await rows.first().getByRole('button', { name: /^Watch: vs Varro/ }).click();
+    const replay = page.getByRole('dialog', { name: 'Replay', exact: true });
+    const back = replay.getByRole('button', { name: 'Back to My history', exact: true });
+    await expect(back).toHaveText('← My history');
+    await back.click();
+    await expect(replay).toHaveCount(0);
+    await expect(card.getByRole('heading', { name: 'My history', level: 2 })).toBeVisible();
+    await expect(chips(card).getByRole('button', { name: /^Arena / })).toHaveAttribute('aria-pressed', 'true');
+    await expect(rows.first()).toContainText(/\+10 renown · Rating \+13/);
     await chips(card).getByRole('button', { name: 'Tournament fights 2', exact: true }).click();
     const runs = card.locator('[data-history-row="tournament"]');
     await expect(runs).toHaveCount(2);
@@ -237,6 +289,8 @@ test.describe('A gladiator’s history on the card (fixture)', () => {
     expect(Math.round(box.x + box.width)).toBe(350);
     const body = card.getByTestId('profile-body');
     expect(await body.evaluate(el => el.scrollHeight > el.clientHeight)).toBe(true);
+    // Fix round 1: the sheet's history is opaque, so nothing behind it shows through under the rows.
+    expect(await body.evaluate(el => getComputedStyle(el).backgroundColor)).toBe('rgb(21, 19, 28)');
     for (const button of [card.getByRole('button', { name: 'Back to the card' }), historyRows(card).first().getByRole('button'),
       chips(card).getByRole('button').first(), card.getByRole('button', { name: 'Close profile' })]) {
       expect((await button.boundingBox())!.height).toBeGreaterThanOrEqual(44);
@@ -305,8 +359,14 @@ test.describe('A gladiator’s history from the live views', () => {
     await page.goto('/game/');
     await page.waitForFunction(() => window.__cloudiatorCamp?.state()?.ready === true, null, { timeout: 45_000 });
     const card = await fromList(page, 'Lucilla');
+    // A failed first page says so; Try again reads it again and hands the focus to the chip shown (fix round 1), never to the page.
+    live.fail('gladiator_history_reads');
     await card.getByRole('button', { name: 'History', exact: true }).click();
+    await expect(card.getByRole('alert')).toContainText('This history could not be loaded right now.');
+    live.fail('gladiator_history_reads', false);
+    await card.getByRole('button', { name: 'Try again', exact: true }).click();
     await expect(historyRows(card)).toHaveCount(2);
+    await expect(chips(card).getByRole('button', { name: /^Arena/ })).toBeFocused();
     await expect(historyRows(card).first().getByRole('button', { name: /^Watch: vs Aster/ })).toBeVisible();
     await expect(card.locator('[data-history-footer]')).toHaveText('Rewards stay private. Anyone can watch a kept replay; it shows the fights, never loot.');
     expect(live.requests.filter(r => r.table === 'activities')).toEqual([]);

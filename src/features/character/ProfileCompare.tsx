@@ -41,6 +41,5 @@ export function CompareBlock({ comparison, name, onBack }: { comparison: Compari
         <td className={styles.them}>{row.them}</td>
       </tr>)}</tbody>
     </table>
-    <p className={styles.srOnly} role="status">{`Showing a comparison of your gladiator with ${name}.`}</p>
   </section>;
 }

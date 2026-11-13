@@ -72,6 +72,25 @@ describe('a card’s history store', () => {
     expect(failing.list('arena')).toMatchObject({ status: 'ready' });
     expect(failing.list('arena').rows).toHaveLength(2);
     expect(failing.rewards().size).toBe(0);
+
+    // Fix round 1: a failed rewards read forgets what it asked, so the next load (another chip's page) asks for those rows again.
+    let fails = true;
+    const retried = vi.fn(async (ids: readonly string[]) => {
+      if (fails) throw new Error('down');
+      return new Map(ids.map(id => [id, { renown: 1, money: 0, ratingDelta: null, unranked: false, items: [] } satisfies OwnRewards]));
+    });
+    const again = createHistoryStore({ history: async () => ({ rows: first, nextCursor: null }), historyCounts: async () => COUNTS, ownRewards: retried }, ID, true);
+    again.load('arena');
+    await settle();
+    await settle();
+    expect(again.rewards().size).toBe(0);
+    fails = false;
+    again.load('expedition');
+    await settle();
+    await settle();
+    expect(retried).toHaveBeenCalledTimes(2);
+    expect(retried).toHaveBeenLastCalledWith([first[0].activityId, first[1].activityId]);
+    expect(again.rewards().size).toBe(2);
   });
 
   it('says a failed first page and reads it again on Try again; a failed Show more keeps the rows', async () => {

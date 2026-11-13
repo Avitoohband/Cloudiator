@@ -388,7 +388,7 @@ describe('the Marketplace panel', () => {
 
     it('filters by the Weapons and Armor chips, searches by name and sorts by price and level, and counts in the sort’s words', () => {
       const weapons = MARKET_ROWS.filter(r => CATALOG_V1.items[r.item.catalogId].slot === 'weapon');
-      const armor = MARKET_ROWS.filter(r => CATALOG_V1.items[r.item.catalogId].slot !== 'weapon');
+      const armor = MARKET_ROWS.filter(r => CATALOG_V1.items[r.item.catalogId]?.slot !== 'weapon');
       expect(weapons.length).toBeGreaterThan(0);
       expect(order(offers({ filter: 'Weapons' }))).toEqual(idsOf(weapons));
       expect(order(offers({ filter: 'Armor' }))).toEqual(idsOf(armor));
@@ -418,6 +418,14 @@ describe('the Marketplace panel', () => {
 
     it('says when there are no offers, when they could not be loaded, and that Sort and search apply to the listings loaded so far', () => {
       expect(text(offers({ model: { rows: [], nextCursor: null, status: 'ready' } }))).toContain('No open listings right now.');
+      // Final review (client minor, fix round 1): an empty Weapons or Armor chip says what it lacks, while All has listings.
+      const armorOnly = { rows: MARKET_ROWS.filter(r => CATALOG_V1.items[r.item.catalogId]?.slot !== 'weapon'), nextCursor: null, status: 'ready' as const };
+      const weaponsOnly = { rows: MARKET_ROWS.filter(r => CATALOG_V1.items[r.item.catalogId]?.slot === 'weapon'), nextCursor: null, status: 'ready' as const };
+      expect(armorOnly.rows.length && weaponsOnly.rows.length).toBeGreaterThan(0);
+      expect(text(offers({ model: armorOnly, filter: 'Weapons' }))).toContain('No weapons listed right now.');
+      expect(text(offers({ model: weaponsOnly, filter: 'Armor' }))).toContain('No armor listed right now.');
+      expect(text(offers({ model: armorOnly, filter: 'Weapons' }))).not.toContain('No open listings right now.');
+      expect(text(offers({ model: { rows: [], nextCursor: null, status: 'ready' }, filter: 'Weapons' }))).toContain('No open listings right now.');
       expect(text(offers({ model: { rows: [], nextCursor: null, status: 'failed' } }))).toContain('Listings could not be loaded right now.');
       expect(text(offers({ model: { rows: [], nextCursor: null, status: 'loading' } }))).toContain('Loading listings…');
       expect(offers({ model: { ...model, nextCursor: 'x' } })).toContain('>More<');

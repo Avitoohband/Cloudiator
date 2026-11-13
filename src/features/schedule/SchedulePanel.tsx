@@ -172,7 +172,9 @@ export function SchedulePanel({ owner, gateway, refresh, clock, rules = RULES_V1
       const isRunning = running?.phase === phase;
       const arena = arenaNote(phase, rules), dungeon = dungeonNote(phase, rules);
       const arenaLine = `${panelId}-${phase}-note`, dungeonLine = `${panelId}-${phase}-dungeon`, hintLine = `${panelId}-${phase}-hint`, markLine = `${panelId}-${phase}-mark`;
-      const mark = slotMark(verdicts[phase], draft[phase], rules);
+      const verdictMark = slotMark(verdicts[phase], draft[phase], rules);
+      // Fix round 1: the running card has no quiet "Stamina after" line (beside "had 12, needed 30" it reads as a contradiction); a warning stays.
+      const mark = isRunning && verdictMark?.tone === 'quiet' ? null : verdictMark;
       const marked = refused && changed.includes(phase);
       const options = [
         ...choicesFor(phase, level, rules).map(choice => ({ choice, shut: false })),

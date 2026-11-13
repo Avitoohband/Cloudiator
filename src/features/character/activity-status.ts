@@ -61,6 +61,8 @@ export function activityStatus(owner: Pick<OwnerState, 'currentActivity' | 'proc
   const behind = owner.processedSlotIndex < current;
   if (options.resting && !activity && back === null && !behind) return { status: 'resting', label: ownRestingText(null), endsAtMs: null };
   if (!activity) return { ...PREPARING };
+  // Patch 1.9 Task 29 (A3): the next slot's row while the server still prepares it (`queued`, its slot not processed) is not running yet.
+  if (behind && activity.status === 'queued') return { ...PREPARING };
   const ended = nowMs >= activity.endsAtMs;
   if (behind && ended && activity.status !== 'completed') return { ...PROCESSING };
   if (behind && activity.status === 'completed') return { ...PREPARING };

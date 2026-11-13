@@ -5,6 +5,7 @@ import type { GameMessage, GameNotification, Inbox } from '@contracts/reads';
 import type { NotificationsRead, ShownMessage } from '../../lib/api/reads';
 import type { PatchEntry } from '../../lib/patch';
 import type { FeedbackActions } from './feedback';
+import type { Rules } from '@domain/types';
 export type { ShownMessage } from '../../lib/api/reads';
 
 /** Undefined while identity loads, null for a known visitor or missing gladiator. */
@@ -45,6 +46,8 @@ export type MessagingActions = {
    * fixture preview) shows no feedback entry.
    */
   feedback?: FeedbackActions;
+  /** Patch 1.9 Task 29: the rules in force (the shell's), for the daily Training limit a rested-instead notification names. */
+  rules?: Rules;
 };
 
 /** The badge's text: the number, "9+" above 9, and nothing (null) at 0 or for a count that cannot be true. */
@@ -118,4 +121,14 @@ export function freshNotifications(results: readonly GameNotification[], notices
 export function notificationsMark(newestSettledMs: number | null, notices: readonly Timed[]): number | null {
   const times = [...(newestSettledMs === null ? [] : [newestSettledMs]), ...notices.map(notice => notice.atMs)];
   return times.length ? Math.max(...times) : null;
+}
+
+/**
+ * Patch 1.9 Task 29: the Notifications list's rows, the server's results page and the owner's rests that replaced a planned activity merged
+ * newest first. While the results fill their page (`page`), a rest older than the oldest listed result is left out: the results older than it
+ * are not listed either, so it would sit below a gap.
+ */
+export function notificationRows<R extends { settledAtMs: number }, T extends { settledAtMs: number }>(results: readonly R[], rests: readonly T[], page: number): (R | T)[] {
+  const oldest = results.length >= page ? Math.min(...results.map(result => result.settledAtMs)) : -Infinity;
+  return [...results, ...rests.filter(rest => rest.settledAtMs >= oldest)].sort((a, b) => b.settledAtMs - a.settledAtMs);
 }

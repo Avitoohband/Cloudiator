@@ -1763,6 +1763,21 @@
   .notices:not([data-stacked='true']) .staminaNotice {
     margin-top: 12px;
   }
+
+  /* Fix round 1 (the approved phone mockup): the stamina notices span the width, with the banner's 12 px gutters. */
+  .notices:has(.staminaNotice) {
+    left: 12px;
+    max-width: none;
+  }
+
+  .notices:has(.staminaNotice) .noticeList {
+    width: 100%;
+    max-width: none;
+  }
+
+  .staminaNotice {
+    width: 100%;
+  }
 }
 
 /* While a corner popover is open the stamina notice steps aside as the patch notice does (only visually hidden; its buttons hidden outright). */

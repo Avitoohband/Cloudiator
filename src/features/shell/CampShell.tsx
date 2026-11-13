@@ -67,7 +67,8 @@ import { ProfileLayer, type CompareProp } from '../character/ProfileCard';
 import { ownBuild } from '../character/profile-card';
 import { SchedulePanel } from '../schedule/SchedulePanel';
 import { activityCosts, partVerdicts } from '../schedule/rest-stamina';
-import { nextSlotNotice } from '../schedule/stamina-text';
+import { nextSlotNotice, restingNowPopup } from '../schedule/stamina-text';
+import { useRunningRest } from '../schedule/use-running-rest';
 import { useMinuteNow } from '../schedule/use-minute-now';
 import { InventoryPanel } from '../inventory/InventoryPanel';
 import { MarketPanel } from '../market/MarketPanel';
@@ -88,6 +89,8 @@ import type { DisplayClock } from '../../game/display-clock';
 import { appearancesOf } from '../../game/replay-looks';
 import { useClockMode } from '../../lib/clock-setting';
 import { PATCH, noticeFor } from '../../lib/patch';
+import { RULES_V1 } from '@domain/rules-v1';
+import type { Rules } from '@domain/types';
 import { createSceneBridge, type ArenaFightSummary } from '../../game/bridge';
 import { isClick } from '../../game/camera';
 import { CornerChip } from './CornerChip';
@@ -98,6 +101,7 @@ import { DEFAULT_MENU_PREFS, useLabelPrefs, useMenuPrefs } from './menu-prefs';
 import { MenuSurface } from './MenuSurface';
 import { PatchNotice, reloadPage } from './PatchNotice';
 import { StaminaNotice } from './StaminaNotice';
+import { dismissSlot, readDismissedSlots, type NoticeKind } from './stamina-dismissals';
 import { modalOpen, useModalOpen } from './modal';
 import { PerfOverlay, perfPhaseOf } from './PerfOverlay';
 import { menusFor, originMenu, type MenuId } from './menus';
@@ -124,6 +128,10 @@ const SIGN_IN_MESSAGES: Record<SignInResult, string> = {
 
 type Sample = { activityId: string; label: string };
 type Samples = { replays: readonly Sample[]; expeditions: readonly Sample[]; dungeons: readonly Sample[]; arena: readonly ArenaSample[]; tournaments: readonly TournamentSample[] };
+/** No owner-only reads (a visitor, or before the reads load): the rested-instead pop-up asks nothing. */
+const NO_OWNER_READS: Pick<GameGateway, 'rested'> = {};
+const NO_ACTIVITY = { currentActivity: null };
+const SLOT_MS_SHELL = RULES_V1.clock.slotMs;
 const NO_SAMPLES: Samples = { replays: [], expeditions: [], dungeons: [], arena: [], tournaments: [] };
 
 /**
@@ -199,19 +207,20 @@ function SampleLink({ view, label, onOpen }: { view: Exclude<SceneView, { kind: 
 }
 
 /** Results: the recent results (a player's My bouts first), and in fixture mode the sample replays and expeditions below them, opened as scenes. */
-function ResultsMenu({ fixture, samples, previewFailed, reads, viewerId, clock, onWatch, onOpen, bouts, choice, onChoose, onWatchBout }: {
+function ResultsMenu({ fixture, samples, previewFailed, reads, viewerId, clock, onWatch, onOpen, bouts, choice, onChoose, onWatchBout, rules }: {
   fixture: boolean; samples: Samples; previewFailed: boolean; reads: GameGateway | null; viewerId: string | null; clock: DisplayClock;
   onWatch(activityId: string, kind: PublicActivitySummary['resolvedKind'], origin?: 'rewards'): void;
   onOpen(view: SceneView): void;
   bouts: BoutsStore | null; choice: ResultsChoice; onChoose(next: Partial<Pick<ResultsChoice, 'view' | 'filter'>>): void;
   onWatchBout(bout: MyBout, filter: BoutFilter): void;
+  rules: Rules;
 }) {
   // The sample rows sit in the Results menu, which stays open beneath the scene: Back says Results.
   const sample = (view: Exclude<SceneView, { kind: 'bout' }>): Exclude<SceneView, { kind: 'bout' }> => ({ ...view, from: 'results' });
   return <>
     {reads ? <ResultsPanel reads={reads} viewerId={viewerId} clock={clock} onWatch={onWatch} bouts={bouts} view={choice.view} onView={view => onChoose({ view })}
       filter={choice.filter} onFilter={filter => onChoose({ filter })} onWatchBout={onWatchBout} loadRewards={reads.notifications}
-      loadRested={reads.rested ? ids => reads.rested!(ids) : undefined} />
+      loadRested={reads.rested ? ids => reads.rested!(ids) : undefined} rules={rules} />
       : <p role="status">{previewFailed ? 'The fixture preview could not be loaded.' : 'Loading local preview…'}</p>}
     {fixture && samples.replays.length > 0 && <nav className="sample-replays" aria-label="Sample replays">
       <p className="eyebrow">SAMPLE REPLAYS</p>
@@ -484,6 +493,7 @@ export function CampShell({ fixture, previewAs, previewResting = false, previewB
       const [read, rested] = await Promise.all([reads.notifications(), reads.rested ? reads.rested().catch(() => []) : Promise.resolve([])]);
       return { ...read, rested };
     },
+    rules: game.rules,
     loadPatches: beforeSortKey => reads.patches(beforeSortKey),
     read: async messageId => {
       const result = await reads.command({ kind: 'read-message', operationId: crypto.randomUUID(), messageId });
@@ -495,7 +505,7 @@ export function CampShell({ fixture, previewAs, previewResting = false, previewB
       if (!result.ok) throw new Error(result.code);
       await refreshOwner();
     },
-  } : undefined, [reads, refreshOwner, clock, openScene, feedback]);
+  } : undefined, [reads, refreshOwner, clock, openScene, feedback, game.rules]);
   // Settings → Help's "See my feedback": Settings closes and the messages panel opens on My feedback (a player with a gladiator only).
   const openMyFeedback = useCallback(() => {
     send('escape');
@@ -605,13 +615,34 @@ export function CampShell({ fixture, previewAs, previewResting = false, previewB
   // Patch 1.9 Task 29: "Not enough stamina for your next Expedition (starts in 18 min)…". The player's own saved day, walked from the slot the
   // clock is in (`partVerdicts`, the Schedule's walk); shown when the NEXT slot's activity will not run, once per slot (a dismissal lasts for
   // that slot), never while a scene or a practice fight covers the camp. It clears itself when the slot starts or the plan is fixed.
-  const [staminaDismissed, setStaminaDismissed] = useState<ReadonlySet<number>>(() => new Set());
+  // Patch 1.9 Task 29 addition (Avi, 2026-11-13): the dismissals of both stamina notices are kept per gladiator and slot on this device
+  // (`stamina-dismissals.ts`), so a reload in the same slot does not bring a dismissed one back; `dismissals` re-reads them after each dismissal.
+  const [dismissals, setDismissals] = useState(0);
+  const staminaOwner = viewer === 'player' ? owner?.gladiatorId ?? null : null;
+  const dismissedNext = useMemo(() => (staminaOwner ? readDismissedSlots(staminaOwner, 'next') : new Set<number>()),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [staminaOwner, dismissals]);
+  const dismissedNow = useMemo(() => (staminaOwner ? readDismissedSlots(staminaOwner, 'now') : new Set<number>()),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [staminaOwner, dismissals]);
+  const dismissStamina = useCallback((kind: NoticeKind, slot: number) => {
+    if (!staminaOwner) return;
+    dismissSlot(staminaOwner, kind, slot);
+    setDismissals(n => n + 1);
+  }, [staminaOwner]);
   const ownCosts = useMemo(() => (owner && viewer === 'player' ? activityCosts(owner, game.rules) : null), [owner, viewer, game.rules]);
   const staminaNotice = useMemo(() => {
     if (!owner || viewer !== 'player' || !ownCosts) return null;
     const verdicts = partVerdicts({ nowMs, owner, day: owner.schedule, costs: ownCosts, rules: game.rules, tournamentOptIn: owner.tournamentOptIn });
-    return nextSlotNotice({ verdicts, day: owner.schedule, nowMs, dismissed: staminaDismissed, rules: game.rules });
-  }, [owner, viewer, ownCosts, nowMs, staminaDismissed, game.rules]);
+    return nextSlotNotice({ verdicts, day: owner.schedule, nowMs, dismissed: dismissedNext, rules: game.rules });
+  }, [owner, viewer, ownCosts, nowMs, dismissedNext, game.rules]);
+  // The RUNNING slot rests instead of its plan (the Schedule's running-card condition, `useRunningRest`): a pop-up in the same column, once per
+  // slot. The pre-slot notice belongs to the next slot, this one to the running slot; both stack when both hold.
+  const runningSlot = Math.floor(nowMs / SLOT_MS_SHELL);
+  const runningRest = useRunningRest(viewer === 'player' && reads ? reads : NO_OWNER_READS, viewer === 'player' && owner ? owner : NO_ACTIVITY, runningSlot);
+  const restingPopup = owner && viewer === 'player' ? restingNowPopup({ rested: runningRest, name: owner.name, slot: runningSlot, had: owner.stamina.current,
+    needed: runningRest && ownCosts ? ownCosts[runningRest.planned] ?? null : null, dismissed: dismissedNow }, game.rules) : null;
+  const restingShown = restingPopup && scene === null && !practising ? restingPopup : null;
   const staminaShown = staminaNotice && scene === null && !practising ? staminaNotice : null;
 
   const press = useRef<{ x: number; y: number } | null>(null);
@@ -658,7 +689,7 @@ export function CampShell({ fixture, previewAs, previewResting = false, previewB
         refresh={fixture ? undefined : game.refreshOwner} syncError={game.syncError} viewer={viewer} publishedSlotIndex={game.publishedSlotIndex} rules={game.rules}
         onWatchBout={(tournamentId, boutId) => openScene({ kind: 'bout', tournamentId, boutId, from: 'tournaments' })} />;
       case 'results': return <ResultsMenu fixture={fixture} samples={samples} previewFailed={previewError} reads={reads} viewerId={ownerId} clock={clock}
-        onWatch={watchResult} onOpen={openScene} bouts={bouts} choice={results} onChoose={chooseResults} onWatchBout={watchBout} />;
+        onWatch={watchResult} onOpen={openScene} bouts={bouts} choice={results} onChoose={chooseResults} onWatchBout={watchBout} rules={game.rules} />;
       case 'settings': return <SettingsPanel prefs={savedPrefs} onChange={setPrefs} labels={labels} onLabels={setLabels} compact={compact} feedback={feedback}
         onSeeMine={viewer === 'player' && owner?.inbox ? openMyFeedback : undefined} noGladiator={viewer === 'no-gladiator'} />;
       case 'gladiators': return <RosterPanel world={world} ownerId={ownerId} ownPlace={ownPlace} roster={roster} sceneStatus={game.sceneStatus}
@@ -683,8 +714,10 @@ export function CampShell({ fixture, previewAs, previewResting = false, previewB
         {arrivalSlot}
         <div className={styles.noticeList}>
           <PatchNotice number={patchNotice} compact={compact} onReload={reloadPage} onLater={() => setPatchLater(patchNotice)} />
-          <StaminaNotice text={staminaShown?.text ?? null} onOpen={() => show('schedule')}
-            onDismiss={() => { if (staminaShown) setStaminaDismissed(dismissed => new Set([...dismissed, staminaShown.slot])); }} />
+          <StaminaNotice kind="now" heading={restingShown?.heading ?? 'Stamina'} text={restingShown?.text ?? null} onOpen={() => show('schedule')}
+            onDismiss={() => { if (restingShown) dismissStamina('now', restingShown.slot); }} />
+          <StaminaNotice kind="next" text={staminaShown?.text ?? null} onOpen={() => show('schedule')}
+            onDismiss={() => { if (staminaShown) dismissStamina('next', staminaShown.slot); }} />
           {/* A rejected stored session (`unauthenticated`) is signed out locally, not a lost connection (13.5 review); a
               signed-out visitor has no session to sign out, so for them a refusal is a lost connection (final review Minor 2). */}
           {!fixture && (game.syncError === 'unavailable' || (game.syncError === 'unauthenticated' && game.session.status === 'signed-out'))

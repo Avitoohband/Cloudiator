@@ -21,7 +21,7 @@ import { PATCH } from '../../lib/patch';
 import { NOTIFICATIONS_PAGE } from '../../lib/api/reads';
 import { notificationEntries, notificationsSummary, resultTitleRows, titleNotices, type TitleNotice } from '../titles/title-notices';
 import {
-  freshNotifications, isNewNotification, isUnread, messageDate, messagesStale, notificationsMark, notificationsStale, tagName, badgeText, type MessagingActions,
+  freshNotifications, isNewNotification, isUnread, messageDate, messagesStale, notificationRows, notificationsMark, notificationsStale, tagName, badgeText, type MessagingActions,
   type ShownMessage,
 } from './messages';
 import { PatchHistory } from './PatchHistory';
@@ -34,6 +34,7 @@ import { levelUpLine, notificationLines, watchLabel } from './notifications';
 import { restedNoteLines } from '../schedule/stamina-text';
 import type { RestedActivity } from '../../lib/api/reads';
 import { RULES_V2 } from '@domain/rules-v2';
+import type { Rules } from '@domain/types';
 import { NoticeCard, TitleLines, useNoticeWear, type NoticeTitles } from './TitleNotices';
 import { useLoaded, useLoadedList } from './useLoadedList';
 import styles from './messages.module.css';
@@ -80,6 +81,7 @@ function PatchNumber({ patch, onOpen }: { patch: string; onOpen(): void }) {
 
 const NO_NOTICES: readonly TitleNotice[] = [];
 const NO_RESTS: readonly RestedActivity[] = [];
+const NO_RESTED_ROWS: readonly RestedRow[] = [];
 /** A settled rest that replaced a planned activity, as a row of the Notifications list. */
 type RestedRow = RestedActivity & { settledAtMs: number; rested: true };
 const restedRows = (rests: readonly RestedActivity[]): RestedRow[] =>
@@ -87,7 +89,7 @@ const restedRows = (rests: readonly RestedActivity[]): RestedRow[] =>
 const isRested = (row: GameNotification | RestedRow): row is RestedRow => 'rested' in row;
 
 export function MessagesPanel({ id, inbox, load, loadNotifications, loadPatches, read, seeNotifications, changeLook, onClose, history, initialTab, watch, latestPatch = null,
-  titles, feedback }: MessagingActions & {
+  titles, feedback, rules = RULES_V2 }: MessagingActions & {
   id: string;
   inbox: Inbox;
   /** The owner's titles, the title worn now and the Wear and "Choose a title" actions (patch 1.7); absent shows no title. */
@@ -143,8 +145,9 @@ export function MessagesPanel({ id, inbox, load, loadNotifications, loadPatches,
   // Patch 1.9 Task 29: the owner's rests that replaced a planned activity ("Aster rested instead of …"), read with the results and listed among
   // them by time. The server's badge does not count them (accepted), so they never move the server's mark; their gold dots are this panel's.
   const restedItems = notes.value?.rested ?? NO_RESTS;
-  const noteRows = useMemo(() => (noteItems ? [...noteItems, ...restedRows(restedItems)].sort((a, b) => b.settledAtMs - a.settledAtMs) : null), [noteItems, restedItems]);
-  const entries = useMemo(() => (noteRows ? notificationEntries(noteRows, notices, NOTIFICATIONS_PAGE) : []), [noteRows, notices]);
+  // Fix round 1: while the results fill their page, a rest older than the oldest result is left out, and only the results bound the page.
+  const noteRows = useMemo(() => (noteItems ? notificationRows(noteItems, restedRows(restedItems), NOTIFICATIONS_PAGE) : null), [noteItems, restedItems]);
+  const entries = useMemo(() => (noteRows && noteItems ? notificationEntries(noteRows, notices, NOTIFICATIONS_PAGE, noteItems) : []), [noteRows, noteItems, notices]);
   const listedNotices = useMemo(() => entries.flatMap(entry => (entry.kind === 'notice' ? [entry.notice] : [])), [entries]);
   const wear = useNoticeWear(titles);
 
@@ -298,7 +301,12 @@ export function MessagesPanel({ id, inbox, load, loadNotifications, loadPatches,
   // read, so a mark that stopped at the newest shown row could leave the badge on for good. Patch 1.7: or up to the newest title notice
   // listed, when it is newer (a notice left out is older than every listed result, so the mark covers it). It waits for the results' read.
   const seenUpTo = useRef(0);
-  const mark = notes.value ? notificationsMark(notes.value.newestSettledMs, listedNotices) : null;
+  // Patch 1.9 Task 29 fix round 1: the mark also reaches the newest rested-instead row listed, so its dot does not come back on the next open
+  // (the server takes any time up to its now and never moves the mark back; the badge never counted the rests).
+  const listedRests = noteRows ? noteRows.filter(isRested) : NO_RESTED_ROWS;
+  const newestRest = listedRests.length ? Math.max(...listedRests.map(rest => rest.settledAtMs)) : null;
+  const newestRow = notes.value ? Math.max(notes.value.newestSettledMs ?? -Infinity, newestRest ?? -Infinity) : -Infinity;
+  const mark = notes.value ? notificationsMark(Number.isFinite(newestRow) ? newestRow : null, listedNotices) : null;
   useEffect(() => {
     if (tab !== 'notifications' || mark === null || mark <= inbox.notificationsSeenMs || mark <= seenUpTo.current) return;
     const before = seenUpTo.current;
@@ -317,11 +325,7 @@ export function MessagesPanel({ id, inbox, load, loadNotifications, loadPatches,
     notesRetry.current?.focus();
   }, [notesError]);
   const markNotes = async () => {
-    if (notesMarking) return;
-    if (mark === null) {
-      if (restMark !== null) { setSeenAtOpen(previous => Math.max(previous, restMark)); say('Notifications marked as read.'); }
-      return;
-    }
+    if (notesMarking || mark === null) return;
     setNotesError(false);
     if (mark > inbox.notificationsSeenMs && mark > seenUpTo.current) {
       const before = seenUpTo.current;
@@ -336,7 +340,7 @@ export function MessagesPanel({ id, inbox, load, loadNotifications, loadPatches,
       }
       setNotesMarking(false);
     }
-    setSeenAtOpen(previous => Math.max(previous, mark, restMark ?? 0));
+    setSeenAtOpen(previous => Math.max(previous, mark));
     say('Notifications marked as read.');
     window.setTimeout(() => root.current?.querySelector<HTMLElement>('[role="tab"][aria-selected="true"]')?.focus(), 0);
   };
@@ -360,10 +364,7 @@ export function MessagesPanel({ id, inbox, load, loadNotifications, loadPatches,
 
   const tabId = (t: Tab) => `${ids}-tab-${t}`;
   const messageCount = messages.items?.length ?? 0;
-  const freshRests = restedRows(restedItems).filter(rest => rest.settledAtMs > seenAtOpen);
-  const freshNotes = freshNotifications(noteItems ?? [], listedNotices, seenAtOpen) + freshRests.length;
-  /** The newest rest listed: Mark all as read clears its dot too (this panel's own mark; the server's badge never counted it). */
-  const restMark = freshRests.length ? Math.max(...freshRests.map(rest => rest.settledAtMs)) : null;
+  const freshNotes = freshNotifications(noteItems ?? [], listedNotices, seenAtOpen) + listedRests.filter(rest => rest.settledAtMs > seenAtOpen).length;
   // "Choose a title": the panel closes (the focus back on the Messages button) and the picker opens on My gladiator, with the focus in it.
   const chooseTitle = () => { onClose(); titles?.choose(); };
 
@@ -480,7 +481,7 @@ export function MessagesPanel({ id, inbox, load, loadNotifications, loadPatches,
                       }
                       if (isRested(entry.result)) {
                         const rest = entry.result, fresh = rest.settledAtMs > seenAtOpen;
-                        const { title, lines } = restedNoteLines(rest, rest.name, RULES_V2);
+                        const { title, lines } = restedNoteLines(rest, rest.name, rules);
                         return <li key={rest.activityId} className={styles.card} data-notification data-rested="" data-unread={fresh ? '' : undefined}>
                           <span className={styles.rowTop}>
                             <span className={styles.rowTitle}>

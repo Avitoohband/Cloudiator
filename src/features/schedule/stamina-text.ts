@@ -103,3 +103,29 @@ export function restedNoteLines({ planned, destination, reason }: { planned: Pla
 export function restedResultText(name: string, { planned, reason }: { planned: PlannedKind; reason: RestReason }, rules: Rules): string {
   return `${name} rested instead of ${KIND[planned]}: ${reason === 'stamina' ? 'not enough stamina' : `Training limit, ${limitOf(rules)} a game day`}`;
 }
+
+/**
+ * Patch 1.9 Task 29 addition (Avi, 2026-11-13: "it should also appear as the expedition pop up appear, and the user can dismiss it"): the
+ * pop-up while the RUNNING slot rests instead of its plan. Heading "Stamina" (shown in capitals) or "Training limit"; "Aster is resting instead
+ * of the Woodland Path expedition: not enough stamina (had 12, needed 30)." (the numbers only when both are known), "instead of the Arena",
+ * "instead of Training", or "Aster is resting instead of Training: 2 Trainings a game day."
+ */
+export function restingNowText({ name, planned, destination, reason, had, needed }: {
+  name: string; planned: PlannedKind; destination: string | null; reason: RestReason; had: number | null; needed: number | null;
+}, rules: Rules): { heading: string; text: string } {
+  if (reason === 'limit') return { heading: 'Training limit', text: `${name} is resting instead of Training: ${limitOf(rules)} Trainings a game day.` };
+  const what = planned === 'expedition' || planned === 'dungeon'
+    ? destination ? `the ${destination} ${planned}` : planned === 'expedition' ? 'an expedition' : 'a dungeon'
+    : planned === 'arena' ? 'the Arena' : 'Training';
+  const numbers = had !== null && needed !== null ? ` (had ${had}, needed ${needed})` : '';
+  return { heading: 'Stamina', text: `${name} is resting instead of ${what}: not enough stamina${numbers}.` };
+}
+
+/** The pop-up for the running `slot`, or null when nothing rests instead (`rested` null) or that slot's pop-up was dismissed: once per slot. */
+export function restingNowPopup({ rested, name, slot, had, needed, dismissed }: {
+  rested: { planned: PlannedKind; destination: string | null; reason: RestReason } | null; name: string; slot: number; had: number | null; needed: number | null;
+  dismissed: ReadonlySet<number>;
+}, rules: Rules): { slot: number; heading: string; text: string } | null {
+  if (!rested || dismissed.has(slot)) return null;
+  return { slot, ...restingNowText({ name, planned: rested.planned, destination: rested.destination, reason: rested.reason, had, needed }, rules) };
+}

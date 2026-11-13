@@ -69,8 +69,10 @@ export type NotificationEntry<R> = { kind: 'result'; result: R } | { kind: 'noti
  * before it. While the read filled a page of results (`page`), a notice older than the oldest listed result is left out: the results older
  * than it are not listed either.
  */
-export function notificationEntries<R extends { settledAtMs: number }>(results: readonly R[], notices: readonly TitleNotice[], page: number): NotificationEntry<R>[] {
-  const oldest = results.length >= page ? Math.min(...results.map(result => result.settledAtMs)) : -Infinity;
+export function notificationEntries<R extends { settledAtMs: number }>(results: readonly R[], notices: readonly TitleNotice[], page: number,
+  /** The server's results page alone (Patch 1.9 Task 29: `results` may also hold the owner's rests, which never fill or bound the page). */
+  counted: readonly { settledAtMs: number }[] = results): NotificationEntry<R>[] {
+  const oldest = counted.length >= page ? Math.min(...counted.map(result => result.settledAtMs)) : -Infinity;
   const entries: NotificationEntry<R>[] = [];
   let next = 0;
   for (const notice of notices) {

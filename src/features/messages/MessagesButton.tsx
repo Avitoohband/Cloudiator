@@ -14,7 +14,7 @@ import type { NoticeTitles } from './TitleNotices';
 import styles from './messages.module.css';
 
 export function MessagesButton({ inbox, load, loadNotifications, loadPatches, read, seeNotifications, changeLook, open, panelId, onToggle, onClose, buttonRef, history, initialTab, watch,
-  latestPatch = null, titles, feedback }: MessagingActions & {
+  latestPatch = null, titles, feedback, rules }: MessagingActions & {
   inbox: Inbox;
   /** The owner's titles and the Wear and "Choose a title" actions for the Notifications tab (patch 1.7). */
   titles?: NoticeTitles;
@@ -54,6 +54,6 @@ export function MessagesButton({ inbox, load, loadNotifications, loadPatches, re
     <span role="status" className={styles.sr} data-testid="messages-live">{announcement}</span>
     {open && <MessagesPanel id={panelId} inbox={inbox} load={load} loadNotifications={loadNotifications} loadPatches={loadPatches} read={read}
       seeNotifications={seeNotifications} initialTab={initialTab} watch={watch} changeLook={changeLook} onClose={onClose} history={history} latestPatch={latestPatch}
-      titles={titles} feedback={feedback} />}
+      titles={titles} feedback={feedback} rules={rules} />}
   </>;
 }

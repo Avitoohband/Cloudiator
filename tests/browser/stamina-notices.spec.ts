@@ -4,7 +4,7 @@ import { expect, test, type BrowserContext, type Locator, type Page, type TestIn
 import type { OwnerState, ResultRow } from '../../supabase/functions/_shared/contracts/reads';
 import { ownerFixture } from '../fixtures/domain';
 import { EXPEDITION_FIXTURES } from '../fixtures/expedition-ids';
-import { SLOT_MS, emptyWorld, routeLiveReads, seedSession, type LiveData, type LiveRest } from './live-routes';
+import { SLOT_MS, SUPABASE_URL, emptyWorld, isPresence, routeLiveReads, seedSession, type LiveData, type LiveRest, type LiveTransport } from './live-routes';
 import { everyoneResults, expectOwnerShown, openMenu, quietArrivals } from './shell-helpers';
 import { contrastIssues, noHorizontalScroll } from './a11y-helpers';
 
@@ -31,6 +31,9 @@ function aster(stamina: number, slot = MORNING_SLOT, more?: (state: OwnerState) 
 }
 
 async function live(context: BrowserContext, data: Omit<LiveData, 'world'>) {
+  return routeAndSeed(context, data);
+}
+async function routeAndSeed(context: BrowserContext, data: Omit<LiveData, 'world'>): Promise<LiveTransport> {
   await seedSession(context);
   await quietArrivals(context);
   return routeLiveReads(context, { world: emptyWorld(), ...data });
@@ -45,6 +48,40 @@ async function openCamp(page: Page, at: number) {
 const card = (page: Page, phase: string) => page.locator('.schedule-slot').filter({ has: page.getByRole('heading', { name: phase, exact: true }) });
 const mark = (page: Page, phase: string) => page.getByTestId(`stamina-mark-${phase}`);
 const notice = (page: Page) => page.locator('[data-stamina-notice]');
+const popup = (page: Page) => page.locator('[data-stamina-popup]');
+/** Holds the shared display clock at `at`. */
+const hold = (page: Page, at: number) => page.evaluate(ms => window.__cloudiatorShell!.clock.freeze(ms), at);
+/** Reloads the camp as Aster, the clock held at `at` again. */
+async function reloadAt(page: Page, at: number) {
+  await page.reload();
+  await expectOwnerShown(page, 'Aster');
+  await page.waitForFunction(() => window.__cloudiatorShell?.clock.synced() === true, null, { timeout: 45_000 });
+  await hold(page, at);
+}
+/** Whether a notice spans the phone's width with the 12 px gutters (the approved phone mockup); on a desktop it keeps its 320 px. */
+const phoneWide = (locator: Locator) => locator.evaluate(el => { const r = el.getBoundingClientRect(); return { width: r.width, room: window.innerWidth - 24 }; });
+/** Aster resting in `slot` instead of the Woodland Path (not enough stamina), with the activity row that says so. */
+function restingInstead(slot: number) {
+  const owner = aster(12, slot, state => { state.currentActivity = { ...state.currentActivity!, kind: 'rest', label: 'Resting (not enough stamina)' }; });
+  const rests: LiveRest[] = [{ activityId: owner.currentActivity!.id, slotIndex: slot, requested: { kind: 'expedition', expeditionId: 'woodland' }, fallback: true, settled: false, name: 'Aster' }];
+  return { owner, rests };
+}
+/** The server's notifications mark: `see-notifications` moves the owner's `notificationsSeenMs` up (never back), as the Edge function does. */
+async function serveSeenMarks(context: BrowserContext, live: LiveTransport, owner: OwnerState) {
+  const marks: number[] = [];
+  await context.route(`${SUPABASE_URL}/functions/v1/game-command`, async route => {
+    const request = route.request();
+    if (request.method() !== 'POST' || isPresence(request)) return route.fallback();
+    const command = request.postDataJSON() as { kind: string; upToMs?: number };
+    if (command.kind !== 'see-notifications') return route.fallback();
+    marks.push(command.upToMs!);
+    owner.inbox = { ...owner.inbox, notificationsSeenMs: Math.max(owner.inbox.notificationsSeenMs, command.upToMs!) };
+    live.setOwner(structuredClone(owner));
+    return route.fulfill({ status: 200, headers: { 'access-control-allow-origin': '*' }, contentType: 'application/json',
+      body: JSON.stringify({ ok: true, value: { seenMs: owner.inbox.notificationsSeenMs } }) });
+  });
+  return marks;
+}
 /** A review screenshot for the task's report, in the SDD folder: `task-29-<name>-<project>.png`. */
 async function shot(page: Page, testInfo: TestInfo, name: string) {
   mkdirSync(SHOTS, { recursive: true });
@@ -58,13 +95,14 @@ test.describe('stamina notices', () => {
 
   test('marks the part that will rest instead, and the stamina after the parts that run', async ({ page, context }, testInfo) => {
     // 12 of 104 with the morning's training running and paid: the afternoon's Woodland Path costs 30 and becomes a Rest; the evening's Rest
-    // refills; the next morning's training leaves 84.
+    // refills.
     await live(context, { owner: aster(12) });
     await openCamp(page, MORNING);
     const schedule = await openMenu(page, 'Schedule');
     await expect(mark(page, 'afternoon')).toHaveText('⚠ Not enough stamina: your gladiator will rest insteadNeeds 30, will have 12. Add a Rest before it or pick a cheaper activity.');
     await expect(mark(page, 'afternoon').locator('small')).toHaveText('Needs 30, will have 12. Add a Rest before it or pick a cheaper activity.');
-    await expect(mark(page, 'morning')).toHaveText('Stamina after: 84');
+    // The morning runs now: its card shows no quiet line (fix round 1); its next occurrence's 84 is not repeated there.
+    await expect(mark(page, 'morning')).toHaveCount(0);
     await expect(mark(page, 'evening')).toHaveCount(0);
     // The mark describes its select, under the hint line.
     await expect(page.getByLabel('afternoon activity')).toHaveAccessibleDescription(/Not enough stamina: your gladiator will rest instead/);
@@ -75,7 +113,6 @@ test.describe('stamina notices', () => {
     // A Rest before it fixes the plan: the draft's afternoon Rest has no mark, and the morning after the evening's Rest still runs.
     await page.getByLabel('afternoon activity').selectOption('rest');
     await expect(mark(page, 'afternoon')).toHaveCount(0);
-    await expect(mark(page, 'morning')).toHaveText('Stamina after: 84');
     // On a 360 px phone the warning wraps inside its card: no sideways scroll.
     await page.getByLabel('afternoon activity').selectOption('expedition:woodland');
     await page.setViewportSize({ width: 360, height: 740 });
@@ -103,6 +140,12 @@ test.describe('stamina notices', () => {
     expect(await fitsWidth(notice(page))).toBe(true);
     expect(await noHorizontalScroll(page)).toBe(true);
     expect(await contrastIssues(notice(page))).toEqual([]);
+    // Fix round 1: on a phone it spans the width (the approved phone mockup).
+    if (testInfo.project.name === 'mobile') {
+      const { width, room } = await phoneWide(notice(page));
+      expect(width).toBeGreaterThanOrEqual(room - 1);
+    }
+    await page.waitForFunction(() => window.__cloudiatorCamp?.state()?.ready === true, null, { timeout: 45_000 });
     await shot(page, testInfo, 'notice');
     // Open schedule opens the Schedule, with the warning on the afternoon.
     await notice(page).getByRole('button', { name: 'Open schedule', exact: true }).click();
@@ -113,6 +156,10 @@ test.describe('stamina notices', () => {
     await expect(notice(page)).toHaveText('');
     await page.evaluate(ms => window.__cloudiatorShell!.clock.freeze(ms), MORNING + 20 * MIN);
     await page.waitForTimeout(500);
+    await expect(notice(page)).toHaveText('');
+    // Task 29 addition: the dismissal survives a reload in the same slot.
+    await reloadAt(page, MORNING + 21 * MIN);
+    await page.waitForTimeout(800);
     await expect(notice(page)).toHaveText('');
   });
 
@@ -136,6 +183,9 @@ test.describe('stamina notices', () => {
     const running = card(page, 'afternoon');
     await expect(running.locator('.running-badge')).toHaveText('Running now');
     await expect(running.getByTestId('running-truth')).toHaveText('Restinginstead of Expedition: not enough staminaPlanned: Expedition · Woodland Path (had 12, needed 30)');
+    // Fix round 1: the running card has no quiet "Stamina after" line.
+    await expect(mark(page, 'afternoon')).toHaveCount(0);
+    await expect(mark(page, 'morning')).toHaveText(/^Stamina after: \d+$/);
     await expect(page.locator('.schedule-running')).toHaveText(/^Afternoon is resting now instead of an Expedition \(not enough stamina\)\. It ends .+\. A change to the afternoon starts with the next afternoon, .+\.$/);
     await expect(schedule).toHaveCSS('opacity', '1'); // a phone's sheet rises in: its contrast is read once it has
     expect(await contrastIssues(running)).toEqual([]);
@@ -158,6 +208,85 @@ test.describe('stamina notices', () => {
     const gladiator = await openMenu(page, 'My gladiator');
     await expect(gladiator).toBeVisible();
     await expect(gladiator.getByText('Resting (not enough stamina)')).toHaveCount(0);
+    // Fix round 1: the queued slot reads as being prepared, not "In progress".
+    await expect(gladiator.getByRole('status').filter({ hasText: 'Preparing your next activity' })).toBeVisible();
+    await expect(gladiator.getByRole('status').filter({ hasText: /^In progress/ })).toHaveCount(0);
+  });
+
+  test('pops up while the running slot rests instead, once per slot, also after a reload', async ({ page, context }, testInfo) => {
+    const first = restingInstead(AFTERNOON_SLOT);
+    const live = await routeAndSeed(context, { owner: first.owner, rests: first.rests });
+    await openCamp(page, AFTERNOON);
+    await expect(popup(page)).toContainText('STAMINA', { ignoreCase: true });
+    await expect(popup(page).locator('p')).toHaveText('Aster is resting instead of the Woodland Path expedition: not enough stamina (had 12, needed 30).');
+    await expect(popup(page)).toHaveAttribute('role', 'status');
+    // The next slot (the evening's Rest) runs: no pre-slot notice beside it.
+    await expect(notice(page)).toHaveText('');
+    expect(await fitsWidth(popup(page))).toBe(true);
+    expect(await noHorizontalScroll(page)).toBe(true);
+    expect(await contrastIssues(popup(page))).toEqual([]);
+    if (testInfo.project.name === 'mobile') {
+      const { width, room } = await phoneWide(popup(page));
+      expect(width).toBeGreaterThanOrEqual(room - 1);
+    }
+    await page.waitForFunction(() => window.__cloudiatorCamp?.state()?.ready === true, null, { timeout: 45_000 });
+    await shot(page, testInfo, 'popup');
+    // Open schedule opens the Schedule, where the running card says the same.
+    await popup(page).getByRole('button', { name: 'Open schedule', exact: true }).click();
+    await openMenu(page, 'Schedule');
+    await expect(card(page, 'afternoon').getByTestId('running-truth')).toContainText('instead of Expedition: not enough stamina');
+    // × dismisses it, and it stays dismissed after a reload within the slot.
+    await popup(page).getByRole('button', { name: 'Dismiss', exact: true }).click();
+    await expect(popup(page)).toHaveText('');
+    await reloadAt(page, AFTERNOON + 10 * MIN);
+    await page.waitForTimeout(800);
+    await expect(popup(page)).toHaveText('');
+    // The next afternoon rests instead again: that slot gets its own pop-up.
+    const later = restingInstead(AFTERNOON_SLOT + 3);
+    live.setOwner(later.owner);
+    live.setRests(later.rests);
+    await reloadAt(page, (AFTERNOON_SLOT + 3) * SLOT_MS + 25 * MIN);
+    await expect(popup(page).locator('p')).toHaveText('Aster is resting instead of the Woodland Path expedition: not enough stamina (had 12, needed 30).');
+  });
+
+  test('says the Training limit in the pop-up', async ({ page, context }) => {
+    // The evening's third Training of the game day became a Rest. (A running Rest refills before the next part, so the pre-slot notice cannot
+    // hold for the next part at the same time in practice; the two would stack in the column if it did.)
+    const owner = aster(100, MORNING_SLOT + 2, state => {
+      state.schedule = { morning: { kind: 'training' }, afternoon: { kind: 'training' }, evening: { kind: 'training' } };
+      state.currentActivity = { ...state.currentActivity!, kind: 'rest', label: 'Resting' };
+    });
+    await routeAndSeed(context, { owner, rulesVersion: 'v2',
+      rests: [{ activityId: owner.currentActivity!.id, slotIndex: MORNING_SLOT + 2, requested: { kind: 'training' }, fallback: false, settled: false, name: 'Aster' }] });
+    await openCamp(page, (MORNING_SLOT + 2) * SLOT_MS + 25 * MIN);
+    await expect(popup(page)).toContainText('TRAINING LIMIT', { ignoreCase: true });
+    await expect(popup(page).locator('p')).toHaveText('Aster is resting instead of Training: 2 Trainings a game day.');
+  });
+
+  test('marks a rest newer than every result as seen, so its dot does not come back', async ({ page, context }) => {
+    const now = Date.now(), last = Math.floor(now / SLOT_MS) - 1;
+    const owner = aster(104, Math.floor(now / SLOT_MS));
+    const rest: LiveRest = { activityId: randomUUID(), slotIndex: last, requested: { kind: 'expedition', expeditionId: 'outpost' }, fallback: true, settled: true, name: 'Aster' };
+    const live = await routeAndSeed(context, { owner, rests: [rest] });
+    const marks = await serveSeenMarks(context, live, owner);
+    await page.goto('/game/');
+    await expectOwnerShown(page, 'Aster');
+    const panel = page.getByRole('region', { name: 'Messages', exact: true });
+    await page.getByTestId('corner-chip').getByRole('button', { name: /^Messages/ }).click();
+    await panel.getByRole('tab', { name: /^Notifications/ }).click();
+    await expect(panel.locator('[data-rested]')).toHaveCount(1);
+    await panel.locator('[data-mark-notes]').click();
+    await expect(panel.locator('[data-rested][data-unread]')).toHaveCount(0);
+    // The server's mark reached the rest's settled time.
+    await expect.poll(() => marks.at(-1)).toBe((last + 1) * SLOT_MS);
+    // Reopened after a reload: no dot, and Mark all has nothing to do.
+    await page.reload();
+    await expectOwnerShown(page, 'Aster');
+    await page.getByTestId('corner-chip').getByRole('button', { name: /^Messages/ }).click();
+    await panel.getByRole('tab', { name: /^Notifications/ }).click();
+    await expect(panel.locator('[data-rested]')).toHaveCount(1);
+    await expect(panel.locator('[data-rested][data-unread]')).toHaveCount(0);
+    await expect(panel.locator('[data-mark-notes]')).toBeDisabled();
   });
 
   test("lists the rest in Notifications and on the owner's own Results line; others still read finished resting", async ({ page, context }, testInfo) => {
@@ -171,7 +300,9 @@ test.describe('stamina notices', () => {
       summary: { activityId, resolvedKind: 'rest', result: 'completed', success: true, settledAtMs: (slot + 1) * SLOT_MS, replayExpiry: { state: 'expired' } } });
     const recent = [restRow(restA, ownerFixture.gladiatorId, 'Aster', last), restRow(restB, ownerFixture.gladiatorId, 'Aster', last - 1),
       restRow(other, randomUUID(), 'Cassia', last - 1)];
-    await live(context, { owner: aster(104, Math.floor(now / SLOT_MS)), rests, recent, rulesVersion: 'v2' });
+    const notesOwner = aster(104, Math.floor(now / SLOT_MS));
+    const transport = await routeAndSeed(context, { owner: notesOwner, rests, recent, rulesVersion: 'v2' });
+    await serveSeenMarks(context, transport, notesOwner);
     await page.goto('/game/');
     await expectOwnerShown(page, 'Aster');
 

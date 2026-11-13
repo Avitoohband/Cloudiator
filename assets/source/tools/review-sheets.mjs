@@ -171,6 +171,9 @@ const panels = [
   // Arena: a sword strike lands on the spearman, with the hit burst on the defender.
   closeupPanel('arena', pose(kit('sword-shield'), tints('sword-shield'), 'attack', 2), pose(kit('spear-heavy-helmet'), tints('spear-heavy-helmet'), 'hit', 0),
     [[effectFrame('hit', 2), R - 4, body, true]]),
+  // Tournament (Task 28, variant C "League Stands"): a sword strike against a spearman's guard, the guard arc on the defender.
+  closeupPanel('tournament', pose(kit('sword-shield'), tints('sword-shield'), 'attack', 2), pose(kit('spear-heavy-helmet'), tints('spear-heavy-helmet'), 'defend', 1),
+    [[effectFrame('defend', 1), R - 4, body, true]]),
   // Woodland: the gladiator evades a wolf's lunge (the evade puff sits at the feet).
   closeupPanel('woodland', pose(kit('axe-light-hood'), tints('axe-light-hood'), 'evade', 1), creaturePose('dire-wolf', 'attack', 2),
     [[effectFrame('evade', 1), L, cu.groundY - 16, false]]),

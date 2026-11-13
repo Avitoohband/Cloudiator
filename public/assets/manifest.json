@@ -196,10 +196,10 @@
    "kind": "icons"
   },
   "closeups": {
-   "image": "battle/closeups.41cd16a63b.png",
+   "image": "battle/closeups.40286aa291.png",
    "data": "battle/closeups.json",
    "width": 320,
-   "height": 512,
+   "height": 640,
    "kind": "backdrop"
   }
  },
@@ -3234,9 +3234,10 @@
    "arena": "arena",
    "woodland": "woodland",
    "outpost": "outpost",
-   "mountain": "mountain"
+   "mountain": "mountain",
+   "tournament": "tournament"
   },
-  "notes": "Fighters stand on floor row groundY at fighterX (left faces se, right faces sw). Draw the backdrop, fighters and effects at the same integer scale so art pixels share one grid."
+  "notes": "Fighters stand on floor row groundY at fighterX (left faces se, right faces sw). Draw the backdrop, fighters and effects at the same integer scale so art pixels share one grid. Backdrops: an encounter uses the expedition of its creature, a tournament bout uses tournament, and every other bout uses arena; all share the floor row and the stand positions."
  },
  "icons": {
   "money": "money",
@@ -3431,9 +3432,9 @@
    "license": "Project-original artwork generated from repository source (assets/source); owned by the Cloudiator project. No third-party assets."
   },
   {
-   "file": "battle/closeups.41cd16a63b.png",
-   "sha256": "41cd16a63b8fec474259034664db69582da7e29f6294b500f526eed7f88e146a",
-   "bytes": 20075,
+   "file": "battle/closeups.40286aa291.png",
+   "sha256": "40286aa291866656106e374b6bbf8550dbd2d2eff43849aff8b6d97c1ba81a89",
+   "bytes": 29033,
    "source": "generated",
    "generator": "assets/source/generators/closeups.mjs",
    "inputs": [
@@ -3450,8 +3451,8 @@
   },
   {
    "file": "battle/closeups.json",
-   "sha256": "fbbcbbca3c6f654d5736d00b8b96b4ee98e7dd955f022608c842b0590b294367",
-   "bytes": 1049,
+   "sha256": "d96e56548d06136b28cfbde75402d920d794ae7429e5e145ea9ba2c83be04d77",
+   "bytes": 1274,
    "source": "generated",
    "generator": "assets/source/generators/closeups.mjs",
    "inputs": [

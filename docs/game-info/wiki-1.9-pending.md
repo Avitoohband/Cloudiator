@@ -70,6 +70,10 @@ Found a bug, or have an idea? Open Messages and press Send feedback, or open Set
 
 Sold gear to a merchant by mistake? In Shops, press Buy back to see your last 10 gear sales of this game day, newest first. Each card shows when you sold it, for how much, and how long you have left. Buy it back for exactly the gold you got: the same item comes back with its level, rarity and stats. You can buy back until the next game day starts (every 4 hours). You need the gold and a free bag slot. Salvage cannot be bought back.
 
+## Tournament arena (tournaments topic)
+
+Tournament bouts play in their own arena. The stands are split into Bronze, Silver, Gold and Champion sections, each crowd and banner in its league's colours, and the ring on the sand is painted in all four. Arena bouts keep the usual Arena.
+
 ## Also
 
 - Renown now uses a gold laurel icon, in the corner chip too. Update any Wiki text or picture that shows the old icon.

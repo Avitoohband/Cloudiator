@@ -474,7 +474,7 @@ describe('camp and expedition maps', () => {
 
 describe('close-up battle backdrops', () => {
   const closeups = manifest.closeups;
-  const ids = ['arena', 'woodland', 'outpost', 'mountain'] as const;
+  const ids = ['arena', 'tournament', 'woodland', 'outpost', 'mountain'] as const;
   const names = new Map(Object.entries(manifest.palette).map(([name, hex]) => [hex.toLowerCase(), name]));
   /** Palette name of every pixel of a backdrop, row by row. */
   function backdrop(id: (typeof ids)[number]) {
@@ -486,7 +486,7 @@ describe('close-up battle backdrops', () => {
     return { px, at };
   }
 
-  it('ships an arena close-up and one per expedition, sized and anchored for the integer 3x stage', () => {
+  it('ships an arena close-up, a tournament close-up and one per expedition, sized and anchored for the integer 3x stage', () => {
     expect(Object.keys(closeups.backdrops).sort()).toEqual([...ids].sort());
     expect(closeups.scale).toBe(3);
     for (const id of ids) {
@@ -523,6 +523,53 @@ describe('close-up battle backdrops', () => {
     const wall = new Set<string>();
     for (let x = 0; x < width; x += 1) for (let y = base(x) - 24; y <= base(x); y += 1) wall.add(at(x, y) ?? '');
     for (const banner of ['crimson2', 'teal2', 'gold2']) expect(wall, banner).toContain(banner);
+  });
+
+  // Task 28: Avi chose variant C, "League Stands", on 2026-11-13 (.superpowers/design/2026-11-13-tournament-scene/).
+  it('draws the tournament close-up on the arena\'s wall arc and floor line, with stands in the four league colours and a league ring', () => {
+    const arena = backdrop('arena').at;
+    const { at } = backdrop('tournament');
+    const { width, groundY, height, fighterX } = closeups;
+    type At = typeof at;
+    // The wall's base is the outline under its stone plinth, with the sand right under it. In every column the floor starts on
+    // the same row as the Arena's (where an Arena banner hangs over the base, the banner ends there instead).
+    const base = (pixel: At, x: number) => { for (let y = groundY - 1; y > 0; y -= 1) if (pixel(x, y) === 'outline') return y; return -1; };
+    for (let x = 0; x < width; x += 1) {
+      const b = base(at, x);
+      expect([at(x, b - 1), at(x, b + 1)], `tournament wall base at column ${x}`).toEqual([expect.stringMatching(/^stone/), expect.stringMatching(/^sand/)]);
+      expect([arena(x, b), arena(x, b + 1)], `arena floor line at column ${x}`).toEqual([expect.not.stringMatching(/^sand/), expect.stringMatching(/^sand/)]);
+    }
+    expect(base(at, 8) - base(at, width / 2)).toBeGreaterThanOrEqual(4);
+    // A sand floor, calm under the fighters' feet and shadows (26 x 6 art px).
+    let sand = 0;
+    for (let y = groundY - 12; y < height; y += 1) for (let x = 0; x < width; x += 1) if (/^(sand|canvas)/.test(at(x, y) ?? '')) sand += 1;
+    expect(sand / ((height - groundY + 12) * width)).toBeGreaterThan(0.75);
+    for (const fx of fighterX) for (let y = groundY - 3; y <= groundY + 3; y += 1) for (let x = fx - 13; x <= fx + 13; x += 1) {
+      expect(at(x, y), `floor under the fighter at ${x},${y}`).toMatch(/^(sand|canvas)/);
+    }
+    // The stands read as four colour blocks, left to right Bronze, Silver, (the box), Gold, Champion: each section's crowd mostly
+    // wears its league's colour.
+    const LEAGUE = { bronze: ['leather1', 'leather2'], silver: ['steel2', 'steel3'], gold: ['gold2', 'gold3'], champion: ['violet1', 'violet2'] } as const;
+    const sections = [['bronze', 0, 61], ['silver', 64, 121], ['gold', 199, 257], ['champion', 260, 319]] as const;
+    const wallTop = (x: number) => base(at, x) - 22;
+    for (const [league, from, to] of sections) {
+      const counts = Object.fromEntries(Object.keys(LEAGUE).map(id => [id, 0])) as Record<keyof typeof LEAGUE, number>;
+      for (let x = from; x <= to; x += 1) for (let y = 9; y < wallTop(x); y += 1) {
+        const colour = at(x, y) ?? '';
+        for (const [id, cloth] of Object.entries(LEAGUE)) if ((cloth as readonly string[]).includes(colour)) counts[id as keyof typeof LEAGUE] += 1;
+      }
+      for (const other of Object.keys(LEAGUE).filter(id => id !== league)) {
+        expect(counts[league], `${league} section: ${JSON.stringify(counts)}`).toBeGreaterThan(3 * counts[other as keyof typeof LEAGUE]);
+      }
+    }
+    // The ring painted in the four league colours with a gold line, and the league seal in front of the fighters, Bronze to Champion.
+    const floorColours = new Set<string>();
+    for (let y = groundY - 14; y < height; y += 1) for (let x = 0; x < width; x += 1) floorColours.add(at(x, y) ?? '');
+    for (const paint of ['leather2', 'steel3', 'gold3', 'violet2', 'gold2']) expect(floorColours, paint).toContain(paint);
+    const seal = [...Array(width).keys()].map(x => at(x, groundY + 11)).filter(c => ['leather2', 'steel2', 'gold2', 'violet2'].includes(c ?? ''));
+    expect([...new Set(seal)]).toEqual(expect.arrayContaining(['leather2', 'steel2', 'violet2']));
+    expect(seal.indexOf('leather2')).toBeLessThan(seal.indexOf('steel2'));
+    expect(seal.indexOf('steel2')).toBeLessThan(seal.indexOf('violet2'));
   });
 
   it('keeps every close-up distinct', () => {

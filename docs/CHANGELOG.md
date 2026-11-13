@@ -36,7 +36,7 @@ Project folders under `D:\Avi\Projects\Animation\Cloudiator\`.
 - Shops are an icon grid with the same detail card as your inventory. Search and sort both.
 - A new Settings menu (⚙) pins the menu to the left, bottom or right on desktop, and sets when names and titles show over the camp: Off, When zoomed in, or Always. It is remembered in this browser.
 - Wear or replace gear straight from the Worn equipment slots in My gladiator.
-- A new gold laurel marks renown, including in the corner chip.
+- A new gold laurel marks renown, including in the corner chip. Tournament fights have their own arena: league banners and a crowd in league colours.
 - Identical items show as one stack with a count. Sell lets you choose how many.
 - Mark messages and notifications as read, one by one or all at once.
 - An XP bar shows your progress and whether your next expedition can level you up.

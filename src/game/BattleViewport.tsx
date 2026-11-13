@@ -33,7 +33,7 @@ export function BattleViewportWaiting({ label }: { label: string }) {
   );
 }
 
-export function BattleViewport({ log, looks, position, reducedMotion, bridge, label }: {
+export function BattleViewport({ log, looks, position, reducedMotion, bridge, label, tournament = false }: {
   log: BattleLog;
   /**
    * The fighters' looks, settled before this mounts (`loadLooks`: at most 1.5 s, the legacy look for an unknown one). The scene
@@ -46,6 +46,8 @@ export function BattleViewport({ log, looks, position, reducedMotion, bridge, la
   bridge: SceneBridge;
   /** Accessible description of the fight. */
   label: string;
+  /** A tournament bout: the scene stages it in the tournament arena (Task 28). Arena bouts and encounters leave it off. */
+  tournament?: boolean;
 }) {
   const host = useRef<HTMLDivElement>(null);
   const handle = useRef<BattleSceneHandle | null>(null);
@@ -92,6 +94,7 @@ export function BattleViewport({ log, looks, position, reducedMotion, bridge, la
         looks: looksRef.current,
         position: () => positionRef.current(),
         reducedMotion: reduced.current,
+        tournament,
         onReady: () => { if (!cancelled) setStatus({ kind: 'ready' }); },
         onError: (reason, message) => fail(reason, reason === 'assets'
           ? `The replay art could not load (${message}). The result and the combat log below still work.`
@@ -123,7 +126,7 @@ export function BattleViewport({ log, looks, position, reducedMotion, bridge, la
       game = null;
       if (window.__cloudiatorBattle) delete window.__cloudiatorBattle;
     };
-  }, [bridge, log]);
+  }, [bridge, log, tournament]);
 
   const unavailable = status.kind === 'unavailable';
   return (

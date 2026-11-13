@@ -25,6 +25,8 @@ export type BattleSceneDeps = {
   /** Replay position in log milliseconds (the replay controller's clock). */
   position: () => number;
   reducedMotion?: boolean;
+  /** A tournament bout: staged in the tournament arena instead of the Arena (Task 28). */
+  tournament?: boolean;
   onReady: () => void;
   onError: (reason: 'assets' | 'error', message: string) => void;
 };
@@ -64,7 +66,7 @@ const errorText = (error: unknown) => (error instanceof Error ? error.message : 
 export function createBattleScene(P: Phaser, deps: BattleSceneDeps): { scene: PhaserNS.Scene; handle: BattleSceneHandle } {
   const { manifest, log } = deps;
   const plan = planStage(log, manifest, deps.looks);
-  const theme = backdropFor(log, manifest);
+  const theme = backdropFor(log, manifest, { tournament: deps.tournament });
   const closeups = manifest.closeups;
   let ready = false;
   let disposed = false;

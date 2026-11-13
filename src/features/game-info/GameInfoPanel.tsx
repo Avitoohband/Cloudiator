@@ -6,6 +6,7 @@ import { GameInfoEditor } from './GameInfoEditor';
 import { FeedbackReview } from './FeedbackReview';
 import { listFeedback } from './feedback-review';
 import { editGameInfo, guideThumbnail, loadDraftGameInfo, loadPublishedGameInfo, type GameInfoEntry, type GameInfoPages, type GameInfoSnapshot, type GameInfoTab } from './game-info-client';
+import type { EditorProbe } from './new-feedback';
 import { futureUpdates, wikiTopics } from './public-content';
 import styles from './game-info.module.css';
 
@@ -37,7 +38,7 @@ function GuideCard({ title, video, length }: { title: string; video: string; len
 const futureIds = ['parties', 'friends', 'items', 'seasonal'];
 const futureFallback = futureUpdates.map(({ title, text }, index) => ({ id: futureIds[index], title, body: text, patch: undefined }));
 
-export function GameInfoPanel({ id, onClose, update, fixture, editorAccount, onDirty, allowDiscard }: {
+export function GameInfoPanel({ id, onClose, update, fixture, editorAccount, onDirty, allowDiscard, onEditorProbe }: {
   id: string;
   onClose(): void;
   update?: { number: string; reload(): void };
@@ -45,6 +46,8 @@ export function GameInfoPanel({ id, onClose, update, fixture, editorAccount, onD
   editorAccount: string | null;
   onDirty(dirty: boolean): void;
   allowDiscard(): boolean;
+  /** What the editor probe found (final fix wave): the corner chip then counts New feedback for an editor (`useNewFeedback`). */
+  onEditorProbe?(result: EditorProbe): void;
 }) {
   const [active, setActive] = useState(0);
   const [topic, setTopic] = useState('combat');
@@ -59,6 +62,8 @@ export function GameInfoPanel({ id, onClose, update, fixture, editorAccount, onD
   const [feedbackNew, setFeedbackNew] = useState(0);
   const shownTabs: readonly ShownTab[] = canEdit ? [...tabs, FEEDBACK_TAB] : tabs;
   const pending = useRef(0);
+  const probeReport = useRef(onEditorProbe);
+  probeReport.current = onEditorProbe;
   const wiki = pages.wiki?.document.entries ?? wikiFallback;
   const future = pages.future?.document.entries ?? futureFallback;
   const article = wiki.find(item => item.id === topic) ?? wiki[0];
@@ -105,6 +110,7 @@ export function GameInfoPanel({ id, onClose, update, fixture, editorAccount, onD
     if (editorAccount) void editGameInfo({ tab: 'wiki', action: 'read' }).then(result => {
       if (!alive) return;
       setCanEdit(result.ok);
+      probeReport.current?.(result.ok ? 'editor' : result.code === 'forbidden' ? 'forbidden' : 'unknown');
       // The Feedback tab's count of New items, before the tab is opened (it reads its own list then).
       if (result.ok) void listFeedback('new').then(list => { if (alive && list.ok) setFeedbackNew(list.newCount); });
     });

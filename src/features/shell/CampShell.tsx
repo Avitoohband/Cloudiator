@@ -617,7 +617,7 @@ export function CampShell({ fixture, previewAs, previewResting = false, previewB
       case 'results': return <ResultsMenu fixture={fixture} samples={samples} previewFailed={previewError} reads={reads} viewerId={ownerId} clock={clock}
         onWatch={watchResult} onOpen={openScene} bouts={bouts} choice={results} onChoose={chooseResults} onWatchBout={watchBout} />;
       case 'settings': return <SettingsPanel prefs={savedPrefs} onChange={setPrefs} labels={labels} onLabels={setLabels} compact={compact} feedback={feedback}
-        onSeeMine={viewer === 'player' && owner?.inbox ? openMyFeedback : undefined} />;
+        onSeeMine={viewer === 'player' && owner?.inbox ? openMyFeedback : undefined} noGladiator={viewer === 'no-gladiator'} />;
       case 'gladiators': return <RosterPanel world={world} ownerId={ownerId} ownPlace={ownPlace} roster={roster} sceneStatus={game.sceneStatus}
         following={following} bridge={bridge} onDone={handBack}
         onProfile={gladiatorId => openRow(gladiatorId)} />;

@@ -308,6 +308,27 @@
   white-space: nowrap;
 }
 
+/* Final fix wave (notes.md Q5): an editor's count of New feedback, a red badge on the button's top right as on the messages button. */
+.infoToggle { position: relative; }
+.infoCount {
+  position: absolute;
+  right: -6px;
+  top: -7px;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 4px;
+  box-sizing: border-box;
+  border: 2px solid #15131c;
+  border-radius: 999px;
+  background: #c62f24;
+  color: #fff;
+  font-size: 10.5px;
+  font-weight: 800;
+  line-height: 14px;
+  text-align: center;
+  pointer-events: none;
+}
+
 .infoToggle:hover, .infoToggle[aria-expanded='true'] { background: var(--glass-2); }
 .infoToggle:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 

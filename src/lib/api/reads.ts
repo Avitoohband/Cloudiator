@@ -29,11 +29,13 @@ export async function readOwner(client: SupabaseClient): Promise<OwnerState> {
   return withBuyBack(withTitles(row.state));
 }
 /**
- * Patch 1.9 (M34): the owner's `buyBack` read defensively, as the titles are: missing (an older server) or malformed is `[]`, and a sale
- * with a malformed id, item, price or time is dropped (Buy back never sends what it cannot show).
+ * Patch 1.9 (M34): the owner's `buyBack` read defensively, as the titles are: a malformed list is `[]`, and a sale with a malformed id, item,
+ * price or time is dropped (Buy back never sends what it cannot show). A read without the key (an older server, before M34) keeps it absent
+ * (final fix wave): the client then hides Buy back (`buyBackSales` is undefined), since that server neither lists sales nor takes `buy-back`.
  */
 function withBuyBack(state: OwnerState): OwnerState {
   const raw = (state as unknown as { buyBack?: unknown }).buyBack;
+  if (raw === undefined) return state;
   const buyBack = Array.isArray(raw) ? raw.filter((entry): entry is BuyBackEntry => record(entry) && count(entry.saleId) && entry.saleId > 0 && record(entry.item)
     && typeof entry.item.id === 'string' && typeof entry.item.catalogId === 'string' && record(entry.item.stats) && count(entry.price) && count(entry.soldAtMs)
     && count(entry.expiresAtMs)) : [];

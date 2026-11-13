@@ -76,7 +76,7 @@
     {
       "id": "cosmetics",
       "title": "Cosmetic companions and gear looks",
-      "body": "Real-money purchases arrive with card and Google Pay checkout. The first items are a Supporter Banner and a pet follower. Weapon and armor dyes and skins come later. These are appearance items with no combat or progression bonuses.",
+      "body": "Real-money purchases arrive with card and Google Pay checkout. The first items are a Supporter Banner and a pet follower. Weapon and armor dyes and skins come with 2.0 too. These are appearance items with no combat or progression bonuses.",
       "patch": "2.0"
     },
     {
@@ -124,7 +124,7 @@
     {
       "id": "stat-help",
       "title": "Help on stats and attributes",
-      "body": "Hover, focus, or tap any attribute or stat in My gladiator to see what it means. Critical hits show their extra damage, and armour shows how much it blocks in the Arena too.",
+      "body": "Hover, focus, or tap any attribute or stat in My gladiator to see what it means. Critical hits show their extra damage, and renown armor and weapons show what they add in the Arena.",
       "patch": "1.9"
     },
     {
@@ -142,7 +142,7 @@
     {
       "id": "sleeping",
       "title": "Sleeping on beds",
-      "body": "Resting gladiators lie straight on their beds without their armour, with an eye cover and a floating ZzZ.",
+      "body": "Resting gladiators lie straight on their beds without their armor, with an eye cover and a floating ZzZ.",
       "patch": "1.9"
     },
     {
@@ -160,7 +160,7 @@
     {
       "id": "buy-back",
       "title": "Buy back sold items",
-      "body": "Changed your mind? Buy back your last 10 sold items until the next game day, for the price you sold them at.",
+      "body": "Changed your mind? Buy back your last 10 gear sales until the next game day, for the price you sold them at.",
       "patch": "1.9"
     },
     {
@@ -196,7 +196,7 @@
     {
       "id": "dungeon-gear",
       "title": "Gear you cannot buy",
-      "body": "Gear above level 10 is never sold in shops. Level 12 weapons and armour, including new kinds with their own looks, drop only from dungeon bosses. Higher levels follow with 2.1.",
+      "body": "Gear above level 10 is never sold in shops. Level 12 weapons and armor, including new kinds with their own looks, drop only from dungeon bosses. Higher levels follow with 2.1.",
       "patch": "2.0"
     },
     {
@@ -208,7 +208,7 @@
     {
       "id": "more-content",
       "title": "Higher levels and more content",
-      "body": "New expeditions at levels 15, 20, 25, and 30, dungeons at levels 17, 22, and 27, drop-only gear for levels 15 to 30 with more new weapons and armour, and much more.",
+      "body": "New expeditions at levels 15, 20, 25, and 30, dungeons at levels 17, 22, and 27, drop-only gear for levels 15 to 30 with more new weapons and armor, and much more.",
       "patch": "2.1"
     },
     {

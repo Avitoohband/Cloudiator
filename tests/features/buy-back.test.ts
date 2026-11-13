@@ -3,7 +3,7 @@ import type { BuyBackEntry, OwnerState } from '@contracts/reads';
 import { CATALOG_V1 } from '@domain/catalog-v1';
 import { itemFixture, ownerFixture } from '../fixtures/domain';
 import {
-  BUY_BACK_SORTS, afterSaleLine, availableLine, buyBackBlock, buyBackCellLabel, buyBackCount, buyBackView, soldWhen,
+  BUY_BACK_SORTS, afterSaleLine, availableLine, buyBackBlock, buyBackCellLabel, buyBackCount, buyBackSales, buyBackView, plainSaleLine, soldWhen,
 } from '../../src/features/shops/buy-back';
 import { queryItems } from '../../src/features/inventory/item-query';
 
@@ -51,4 +51,16 @@ test('search and sort read a sale by its item and price; Newest keeps the server
   expect(queryItems(list, buyBackView, '', 'newest').map(e => e.saleId)).toEqual([5, 4, 3]);
   expect(queryItems(list, buyBackView, '', 'price').map(e => e.saleId)).toEqual([3, 4, 5]);
   expect(queryItems(list, buyBackView, 'helm', 'newest').map(e => e.saleId)).toEqual([4]);
+});
+
+// Final fix wave: an older server's owner read has no `buyBack` (before M34). The client keeps it undefined and hides Buy back: no chip, no
+// after-sale buy-back line, and a sale says only what it sold for (the pre-1.9 line). A present list, even empty, is the feature.
+test('Buy back is offered only when the owner read carries the list; without it a sale says only what it sold for', () => {
+  const { buyBack: _absent, ...older } = structuredClone(ownerFixture);
+  expect(buyBackSales(older)).toBeUndefined();
+  expect(buyBackSales({ ...older, buyBack: [] })).toEqual([]);
+  const sword = entry(1, 'sword:5:rare', 39, 0);
+  expect(buyBackSales({ ...older, buyBack: [sword] })).toEqual([sword]);
+  expect(plainSaleLine(39, 1, 'Sword')).toBe('Sold Sword for 39 gold.');
+  expect(plainSaleLine(30, 3, 'Light boots')).toBe('Sold 3 × Light boots for 30 gold.');
 });

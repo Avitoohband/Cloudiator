@@ -13,7 +13,7 @@ import { useClockMode } from '../../lib/clock-setting';
 import { slotTimeText } from '../schedule/slot-time';
 import { useMinuteNow } from '../schedule/use-minute-now';
 import { ShopPanel } from '../shops/ShopPanel';
-import { afterSaleLine } from '../shops/buy-back';
+import { afterSaleLine, buyBackSales, plainSaleLine } from '../shops/buy-back';
 import { useOutcomeFocus } from '../shell/focus-lost';
 import { ItemIcon, ItemStats } from './ItemPresentation';
 import { ItemSearch, MatchCount, NoMatch } from './ItemSearch';
@@ -235,8 +235,10 @@ export function InventoryPanel({ owner, gateway, refresh, clock, preview = false
   const place = where === 'trade' || where === 'sale' || where === 'buyback' || selected?.items.some(item => item.id === where) ? where : 'gear';
   /** "Open Buy back" after a sale: the Shops below open on Buy back, with the focus on its chip. */
   const openBuyBack = () => { setBuyBackRequest(n => n + 1); };
+  /** Final fix wave: an owner read without the Buy back list (an older server) offers no buy back, so a sale offers no "Open Buy back". */
+  const offersBuyBack = buyBackSales(owner) !== undefined;
   const outcomes = <>
-    {message && (sold ? <div className={styles.soldNote}>
+    {message && (sold && offersBuyBack ? <div className={styles.soldNote}>
       <p ref={outcome} role="status" tabIndex={-1} {...target}>{message}</p>
       <button type="button" className={styles.linkButton} onClick={openBuyBack}>Open Buy back</button>
     </div> : <p ref={outcome} role="status" tabIndex={-1} {...target}>{message}</p>)}
@@ -267,9 +269,11 @@ export function InventoryPanel({ owner, gateway, refresh, clock, preview = false
     if (list.length === 0 || sending.current || sellLock.current) return;
     if (preview) { setMessage('Actions are unavailable in this preview.'); return; }
     const reset = () => setQuantities(values => { const { [tile.key]: _gone, ...rest } = values; return rest; });
+    // Patch 1.9: the line says where to buy it back (it replaces "Sold Sword for 39 gold."), with "Open Buy back"; a server without Buy back
+    // keeps the old line (final fix wave).
+    const saleLine = (gold: number, count: number) => (buyBackSales(ownerNow.current) !== undefined ? afterSaleLine(gold, count, name) : plainSaleLine(gold, count, name));
     if (list.length === 1) {
-      // Patch 1.9: the line says where to buy it back (it replaces "Sold Sword for 39 gold."), with "Open Buy back".
-      const result = await send({ kind: 'sell-item', itemId: list[0].id, quantity: 1 }, afterSaleLine(value, 1), 'sale');
+      const result = await send({ kind: 'sell-item', itemId: list[0].id, quantity: 1 }, saleLine(value, 1), 'sale');
       if (result?.ok && mounted.current) reset();
       return;
     }
@@ -289,10 +293,10 @@ export function InventoryPanel({ owner, gateway, refresh, clock, preview = false
         if (done < list.length) { await bagUpdated(before); if (!mounted.current) return; }
       }
       const gold = done * value;
-      const sold = done ? `Sold ${done} of ${list.length} ${name} for ${gold} gold. ` : '';
-      if (unknown) setError(`${sold}The result of sale ${done + 1} is unknown; check your gold. Review the updated items and sell the rest again.`);
-      else if (refusal) setError(`${sold || 'Nothing was sold. '}Sale ${done + 1} was refused: ${refusal}. Review the updated items and sell the rest again.`);
-      else { setMessage(afterSaleLine(gold, list.length, name)); setSold(true); }
+      const soldPart = done ? `Sold ${done} of ${list.length} ${name} for ${gold} gold. ` : '';
+      if (unknown) setError(`${soldPart}The result of sale ${done + 1} is unknown; check your gold. Review the updated items and sell the rest again.`);
+      else if (refusal) setError(`${soldPart || 'Nothing was sold. '}Sale ${done + 1} was refused: ${refusal}. Review the updated items and sell the rest again.`);
+      else { setMessage(saleLine(gold, list.length)); setSold(true); }
       reset();
     } finally { sellLock.current = false; end(); if (mounted.current) setSelling(null); }
   }

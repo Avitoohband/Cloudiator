@@ -21,9 +21,10 @@ import { PATCH, isBehind } from '../../lib/patch';
 import { xpView } from '../character/xp-progress';
 import type { Viewer } from '../character/useGameState';
 import { GameInfoPanel } from '../game-info/GameInfoPanel';
+import { useNewFeedback } from '../game-info/new-feedback';
 import { CurrencyIcon } from '../shops/ShopArt';
 import { MessagesButton } from '../messages/MessagesButton';
-import type { MessagingActions } from '../messages/messages';
+import { badgeText, type MessagingActions } from '../messages/messages';
 import type { NoticeTitles } from '../messages/TitleNotices';
 import { ClockSwitch } from './ClockSwitch';
 import { reloadPage } from './PatchNotice';
@@ -118,6 +119,14 @@ export function CornerChip({ viewer, session, owner, fixture, previewAs, clock, 
   const clockMode = useClockMode();
   const signedIn = !fixture && session.status === 'signed-in';
   const account = viewer === 'player' || signedIn;
+  const editorAccount = signedIn ? session.userId : null;
+  // Final fix wave (notes.md Q5): an editor's count of New feedback on Game Info, read again whenever Game Info closes.
+  const newFeedback = useNewFeedback(editorAccount);
+  const infoWasOpen = useRef(false);
+  useEffect(() => {
+    if (infoWasOpen.current && popover !== 'game-info') newFeedback.refresh();
+    infoWasOpen.current = popover === 'game-info';
+  }, [popover, newFeedback.refresh]);
   // One ticker for the name's countdown and the bar's (the owner's only).
   const seconds = useSlotCountdown(clock, account && owner !== null);
 
@@ -164,13 +173,16 @@ export function CornerChip({ viewer, session, owner, fixture, previewAs, clock, 
     setPopover('messages');
   }, [messagesRequest, account, showMessages, infoDirty]);
 
+  const infoBadge = badgeText(newFeedback.count);
   const infoToggle = <button ref={infoButton} type="button" className={styles.infoToggle}
     aria-expanded={popover === 'game-info'} aria-controls={popover === 'game-info' ? infoId : undefined} aria-haspopup="dialog"
+    aria-label={infoBadge ? `Game Info, ${newFeedback.count} new feedback` : undefined}
     tabIndex={open ? -1 : undefined}
-    onClick={() => { if (popover === 'game-info') closeInfo(); else setPopover('game-info'); }}>Game Info</button>;
-  const editorAccount = signedIn ? session.userId : null;
+    onClick={() => { if (popover === 'game-info') closeInfo(); else setPopover('game-info'); }}>
+    Game Info{infoBadge && <span className={styles.infoCount} data-testid="info-feedback-badge" aria-hidden="true">{infoBadge}</span>}
+  </button>;
   const infoPanel = popover === 'game-info' && <GameInfoPanel key={editorAccount ?? 'reader'} id={infoId} onClose={closeInfo} fixture={fixture} editorAccount={editorAccount}
-    onDirty={setInfoDirty} allowDiscard={allowDiscard}
+    onDirty={setInfoDirty} allowDiscard={allowDiscard} onEditorProbe={newFeedback.probed}
     update={latestPatch && isBehind(latestPatch) ? { number: latestPatch, reload: reloadPage } : undefined} />;
 
   if (!account) {

@@ -281,6 +281,11 @@
   display: none;
 }
 
+/* A menu of pages ends at its bar: less empty space under the last row (fix round 1, I6). */
+.surface[data-paged] .body {
+  padding-bottom: 8px;
+}
+
 /* Existing panels laid out for a wide page, kept to one column in a 380 px panel. */
 .body :global(.schedule-grid) {
   grid-template-columns: 1fr;

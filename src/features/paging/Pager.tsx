@@ -5,7 +5,7 @@
 // grids) a Show choice: "Fit (7)", 10, 25, 50. Nothing when the list has at most `fit` rows and nothing more to read; otherwise it
 // stays, even when the Show choice makes one page. A polite status says the page after a turn. Put it in a `PanelFooter`.
 import { useEffect, useRef, useState } from 'react';
-import { pagerLabel, showChoices } from './paging';
+import { MAX_DOTS, pagerLabel, showChoices } from './paging';
 import { PageDots } from './PageDots';
 import { usePageKeys } from './usePageKeys';
 import type { PagedList } from './usePagedList';
@@ -26,8 +26,10 @@ export function Pager<T>({ list, show = false }: { list: PagedList<T>; show?: bo
   usePageKeys(nav, { PageDown: next, PageUp: back }, visible);
   if (!visible) return null;
   const { main, sub } = pagerLabel(list.page, list.pages);
+  // More than 8 circles (24 px each) do not fit between the buttons on a desktop panel: they take their own row.
+  const wideDots = Math.min(list.knownPages, MAX_DOTS.desktop) + (list.pages === null ? 1 : 0) > 8;
   return (
-    <nav ref={nav} className={styles.pager} aria-label="Pages" data-pager="">
+    <nav ref={nav} className={styles.pager} aria-label="Pages" data-pager="" data-dots={wideDots ? 'wide' : undefined}>
       <button type="button" className={styles.back} aria-label="Previous page" aria-disabled={!list.canBack} onClick={back}>‹ Back</button>
       <div className={styles.where}>
         <span className={styles.label}>

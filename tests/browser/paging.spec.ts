@@ -26,6 +26,8 @@ async function gladiators(page: Page) {
   await menu.evaluate(el => Promise.all(el.getAnimations({ subtree: true }).map(a => a.finished)));
   return menu;
 }
+/** Fix round 1 (I6): a full page of the list fits the panel: the menu's body does not scroll. */
+const fits = (menu: Locator) => menu.getByTestId('menu-body').evaluate(el => el.scrollHeight <= el.clientHeight + 1);
 /** The centre of an element, in page pixels. */
 const centre = async (locator: Locator) => {
   const box = (await locator.boundingBox())!;
@@ -47,6 +49,7 @@ test.describe('menus with Back and Next: the Gladiators list', () => {
     await back.dispatchEvent('click');
     await expect(label(menu)).toHaveText('Page 1 of 8');
     const first = await rows(menu).first().textContent();
+    expect(await fits(menu), 'page 1 fits without a scroll').toBe(true);
 
     await next.click();
     await expect(label(menu)).toHaveText('Page 2 of 8');
@@ -54,6 +57,11 @@ test.describe('menus with Back and Next: the Gladiators list', () => {
     await expect(rows(menu).first()).toBeFocused();
     expect(await rows(menu).first().textContent()).not.toBe(first);
     await expect(back).toHaveAttribute('aria-disabled', 'false');
+    expect(await fits(menu), 'page 2 fits without a scroll').toBe(true);
+    // One line each: the class and place line is cut, not wrapped, and keeps its whole text in its title.
+    const line = rows(menu).first().locator('span[title]').first();
+    expect(await line.evaluate(el => el.getBoundingClientRect().height < 24 && getComputedStyle(el).whiteSpace === 'nowrap')).toBe(true);
+    expect(await line.getAttribute('title')).toBe(await line.textContent());
 
     await bar.getByRole('button', { name: 'Go to page 5', exact: true }).click();
     await expect(label(menu)).toHaveText('Page 5 of 8');
@@ -91,6 +99,12 @@ test.describe('menus with Back and Next: the Gladiators list', () => {
     await page.screenshot({ path: `${SHOTS}/task-30-dots-hint-desktop.png` });
     await page.mouse.move(600, 400);
     await expect(tip).toHaveCount(0);
+    // A click's focus shows no bubble of its own (only hover and keyboard focus do).
+    await bar.getByRole('button', { name: 'Go to page 3', exact: true }).click();
+    await expect(label(menu)).toHaveText('Page 3 of 8');
+    await page.mouse.move(600, 400);
+    await expect(tip).toHaveCount(0);
+    await bar.getByRole('button', { name: 'Go to page 1', exact: true }).click();
     // Keyboard: Tab onto a circle shows its bubble, and the focus stays where it is.
     await bar.getByRole('button', { name: 'Go to page 1', exact: true }).focus();
     await page.keyboard.press('Tab');
@@ -230,6 +244,10 @@ test.describe('menus with Back and Next: the Gladiators list', () => {
     const menu = await gladiators(page);
     const panel = (await menu.boundingBox())!;
     expect(panel.height).toBeGreaterThan(780 * 0.8);
+    expect(await fits(menu), 'a full page fits the tall sheet').toBe(true);
+    await pager(menu).getByRole('button', { name: 'Next page', exact: true }).click();
+    expect(await fits(menu), 'page 2 fits the tall sheet').toBe(true);
+    await pager(menu).getByRole('button', { name: 'Go to page 1', exact: true }).click();
     for (const name of ['Previous page', 'Next page']) {
       expect((await pager(menu).getByRole('button', { name, exact: true }).boundingBox())!.height).toBeGreaterThanOrEqual(43.5);
     }
@@ -251,6 +269,50 @@ test.describe('menus with Back and Next: the Gladiators list', () => {
       expect(box.x + box.width).toBeLessThanOrEqual(320);
     }
     expect(await noHorizontalScroll(page)).toBe(true);
+  });
+
+  test('a held circle on a windowed row selects that circle, and a slide moves on from it', async ({ page }, testInfo) => {
+    // 320 px: the touch layout's 7-circle cap windows the list's 8 pages (1 2 3 4 5 … 8).
+    await page.setViewportSize({ width: 320, height: 700 });
+    await openCamp(page);
+    const menu = await gladiators(page);
+    const bar = pager(menu);
+    await expect(bar.locator('[data-page-dots] [aria-hidden="true"]', { hasText: '…' })).toHaveCount(1);
+    const touch = testInfo.project.name === 'mobile' ? await page.context().newCDPSession(page) : null;
+    const down = async (x: number, y: number) => {
+      if (touch) await touch.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x, y }] });
+      else { await page.mouse.move(x, y); await page.mouse.down(); }
+    };
+    const move = async (x: number, y: number) => {
+      if (touch) await touch.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ x, y }] });
+      else await page.mouse.move(x, y);
+    };
+    const up = async (x: number, y: number) => {
+      if (touch) await touch.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+      else { await page.mouse.move(x, y); await page.mouse.up(); }
+    };
+    // A long, still press on circle 4 selects page 4, not a page far away.
+    const four = await centre(bar.getByRole('button', { name: 'Go to page 4', exact: true }));
+    await down(four.x, four.y);
+    await page.waitForTimeout(600);
+    await up(four.x, four.y);
+    await expect(label(menu)).toHaveText('Page 4 of 8');
+    await page.waitForTimeout(500);
+    await expect(label(menu)).toHaveText('Page 4 of 8');
+    // Hold the current circle, then slide right about two pages' worth of the row: two pages on.
+    const circles = bar.locator('[data-dot]:not([data-dot="more"])');
+    const [firstBox, lastBox] = [(await circles.first().boundingBox())!, (await circles.last().boundingBox())!];
+    const step = (lastBox.x + lastBox.width - firstBox.x) / 7;
+    const at = await centre(bar.getByRole('button', { name: 'Go to page 4', exact: true }));
+    await down(at.x, at.y);
+    await page.waitForTimeout(450);
+    await move(at.x + 1, at.y);
+    await expect(label(menu)).toHaveText('Page 4 of 8');
+    await move(at.x + step * 2, at.y);
+    await expect(label(menu)).toHaveText('Page 6 of 8');
+    await up(at.x + step * 2, at.y);
+    await page.waitForTimeout(500);
+    await expect(label(menu)).toHaveText('Page 6 of 8');
   });
 
   test('Find my gladiator still finds the owner in the camp, from any page', async ({ page }) => {

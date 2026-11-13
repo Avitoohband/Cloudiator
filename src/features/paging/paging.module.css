@@ -5,6 +5,7 @@
   position: relative;
   display: grid;
   grid-template-columns: auto minmax(0, 1fr) auto;
+  /* The circles (24 px targets, fix round 1 M4) sit under the label between the buttons; more than 8 take their own row. */
   grid-template-areas: 'back where next' 'back dots next';
   align-items: center;
   column-gap: 8px;
@@ -12,6 +13,10 @@
   border-top: 1px solid var(--glass-line, #ffffff21);
   background: rgba(10, 9, 15, 0.55);
   border-radius: 0 0 13px 13px;
+}
+
+.pager[data-dots='wide'] {
+  grid-template-areas: 'back where next' 'dots dots dots';
 }
 
 .back,
@@ -128,8 +133,8 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 16px;
-  height: 18px;
+  width: 24px;
+  height: 24px;
   padding: 0;
   border: 0;
   background: none;
@@ -142,11 +147,12 @@
   width: 8px;
   height: 8px;
   border-radius: 50%;
-  background: #ffffff45;
+  /* At least 3:1 on the bar (fix round 1, M4). */
+  background: #ffffff85;
 }
 
 .dot:hover i {
-  background: #ffffffa0;
+  background: #ffffffc8;
 }
 
 .dot[aria-current] i {
@@ -234,36 +240,62 @@
   white-space: nowrap;
 }
 
-/* ---- Sections: the strip under the title. */
+/* ---- Sections: the strip under the title is the section navigation (fix round 1, I5). */
 .strip {
-  display: flex;
+  position: relative;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  grid-template-areas: 'name name name' 'prev dots next';
   align-items: center;
-  justify-content: space-between;
-  gap: 8px;
+  column-gap: 8px;
   margin: 0 0 8px;
   padding: 0 0 6px;
   border-bottom: 1px solid var(--glass-line, #ffffff21);
 }
 
-.strip b {
+.stripName {
+  grid-area: name;
   font: 600 15px Georgia, serif;
   color: var(--gold);
 }
 
-.stripDots {
-  display: flex;
-  gap: 5px;
+.strip .dots {
+  margin: 0;
 }
 
-.stripDots i {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: #ffffff33;
+.stripMove {
+  min-height: 32px;
+  max-width: 10rem;
+  padding: 0 10px;
+  overflow: hidden;
+  font: 600 12.5px system-ui, sans-serif;
+  color: var(--ink);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  background: var(--glass-2, #ffffff12);
+  border: 1px solid var(--glass-line, #ffffff21);
+  border-radius: 8px;
+  cursor: pointer;
 }
 
-.stripDots i[data-on] {
-  background: var(--accent, #e6b450);
+.stripMove:first-of-type {
+  grid-area: prev;
+  justify-self: start;
+}
+
+.stripMove:last-of-type {
+  grid-area: next;
+  justify-self: end;
+}
+
+.stripMove[aria-disabled='true'] {
+  opacity: 0.35;
+  cursor: default;
+}
+
+.stripMove:focus-visible {
+  outline: 2px solid var(--gold);
+  outline-offset: 2px;
 }
 
 /* ---- Phone (the shell's touch layout): the circles' own 44 px row, 44 px buttons, the safe area. */
@@ -279,6 +311,10 @@
     margin: 0 0 4px;
   }
 
+  .strip {
+    grid-template-areas: 'name name name' 'dots dots dots' 'prev . next';
+  }
+
   .dot {
     width: 32px;
     height: 44px;
@@ -290,7 +326,8 @@
   }
 
   .back,
-  .next {
+  .next,
+  .stripMove {
     min-height: 44px;
     font-size: 14px;
   }
@@ -300,8 +337,8 @@
   }
 
   .show select {
-    height: 30px;
-    font-size: 13px;
+    height: 44px;
+    font-size: 14px;
   }
 }
 
@@ -310,4 +347,31 @@
   .dot {
     width: 30px;
   }
+}
+
+/* ---- PagingScope (fix round 1, I4): a popover's, card's or dialog's own paging surface; the bar is its bottom edge. */
+.scope {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  max-height: 100%;
+}
+
+.scopeBody {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.scopeFoot {
+  flex: none;
+}
+
+.scopeFoot:empty {
+  display: none;
+}
+
+.scopeFoot .pager {
+  border-radius: 0 0 8px 8px;
 }

@@ -105,6 +105,8 @@ export function RosterPanel({ world, ownerId, ownPlace = null, roster, sceneStat
     // Patch 1.7: the title worn now, by name only (the list carries no prestige, so Champion is just "Champion"); an id this client does not know shows nothing.
     const worn = titleName(actor.title);
     const describedBy = reason ? reasonId : absent ? `${absentId}-${actor.gladiatorId}` : undefined;
+    const place = resting ? classLine(actor) : `${classLine(actor)} · ${placeOf(actor)}`;
+    const absentLine = absent || resting ? (!resting ? 'Not in the camp right now.' : actor.gladiatorId === ownerId ? ownLine : restingText(actor.name)) : null;
     return (
       <li key={actor.gladiatorId} className={styles.row} data-page-row="" tabIndex={-1}>
         <p className={styles.who}>
@@ -113,11 +115,10 @@ export function RosterPanel({ world, ownerId, ownPlace = null, roster, sceneStat
           {actor.botTeam && <BotTag />}
           {isNew && <span className={styles.newPill}>NEW</span>}
           {worn && <>{' '}<em className={styles.wornTitle}>{worn}</em></>}
-          <span>{resting ? classLine(actor) : `${classLine(actor)} · ${placeOf(actor)}`}</span>
-          {duty && <span>{duty}</span>}
-          {(absent || resting) && <span id={`${absentId}-${actor.gladiatorId}`}>
-            {!resting ? 'Not in the camp right now.' : actor.gladiatorId === ownerId ? ownLine : restingText(actor.name)}
-          </span>}
+          {/* Fix round 1 (I6): one line each, cut with an ellipsis so 7 rows fit a page; the whole text stays in the DOM and in `title`. */}
+          <span className={styles.oneLine} title={place}>{place}</span>
+          {duty && <span className={styles.oneLine} title={duty}>{duty}</span>}
+          {absentLine && <span className={styles.oneLine} id={`${absentId}-${actor.gladiatorId}`} title={absentLine}>{absentLine}</span>}
         </p>
         {away ? (activityId ? (
           <span className={styles.actions}>
@@ -137,7 +138,7 @@ export function RosterPanel({ world, ownerId, ownPlace = null, roster, sceneStat
     );
   };
   return (
-    <section aria-label="Gladiators in the world">
+    <section aria-label="Gladiators in the world" className={styles.roster}>
       {reason && <p id={reasonId} className={styles.reason}>{reason}</p>}
       {ownerId && <>
         <div className={styles.findMine} role="group" aria-label="Your gladiator">
@@ -147,8 +148,9 @@ export function RosterPanel({ world, ownerId, ownPlace = null, roster, sceneStat
         </div>
         {ownerAway && <p id={awayId} className={styles.reason}>{ownResting ? ownLine : 'Your gladiator is away from the camp.'}</p>}
       </>}
-      <label className={styles.filter}>Filter by name
-        <input type="search" value={filter} onChange={event => setFilter(event.target.value)} autoComplete="off" spellCheck={false} />
+      {/* Fix round 1 (I6): the label is read, not shown (the mockup's placeholder says it), so 7 rows fit a page. */}
+      <label className={styles.filter}><span className={styles.srOnly}>Filter by name</span>
+        <input type="search" value={filter} placeholder="Filter by name" onChange={event => setFilter(event.target.value)} autoComplete="off" spellCheck={false} />
       </label>
       {world && humans.length > 0 && (
         <p className={styles.count} data-testid="players-count">

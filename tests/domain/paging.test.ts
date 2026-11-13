@@ -1,8 +1,12 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
-  GRID_PAGE, MAX_DOTS, PAGE_SIZES, SHOW_CHOICES, clampPage, dotWindow, pageCount, pageOfIndex, pageRows, pagerLabel, scrubPage, showChoices,
+  GRID_PAGE, MAX_DOTS, PAGE_SIZES, SHOW_CHOICES, clampPage, dotWindow, pageCount, pageOfIndex, pageRows, pagerLabel, showChoices, slidePage,
 } from '../../src/features/paging/paging';
 import { createPageController } from '../../src/features/paging/page-controller';
+import { createElement } from 'react';
+import { renderToStaticMarkup } from 'react-dom/server';
+import { PagingScope, PanelScopeContext, usePanelScope, type PanelScope } from '../../src/features/paging/PanelFooter';
+import { ownsKeys } from '../../src/features/paging/usePageKeys';
 import { PAGE_SIZE_KEY, readPageSize, resetPageSizeMemory, writePageSize } from '../../src/features/paging/page-size-prefs';
 
 // Patch 1.9 Task 30 (Avi, 2026-11-13: "Menus next and backwards instead of scrolling"): long menus show one page with Back and Next.
@@ -79,14 +83,15 @@ describe('the paging arithmetic', () => {
     expect(dotWindow(15, 30, MAX_DOTS.narrow)).toHaveLength(7);
   });
 
-  it('maps a slide along a windowed row to all pages in proportion', () => {
-    expect(scrubPage(0, 30)).toBe(1);
-    expect(scrubPage(1, 30)).toBe(30);
-    expect(scrubPage(0.5, 30)).toBe(16);
-    expect(scrubPage(-0.4, 30)).toBe(1);
-    expect(scrubPage(1.7, 30)).toBe(30);
-    expect(scrubPage(0.25, 13)).toBe(4);
-    expect(scrubPage(0.3, 1)).toBe(1);
+  it('maps a slide on a windowed row from the pressed circle, so a still finger stays on it', () => {
+    // A row 200 px wide across 30 pages: about 6.9 px a page.
+    expect(slidePage(6, 0, 200, 30)).toBe(6);
+    expect(slidePage(6, 3, 200, 30)).toBe(6);
+    expect(slidePage(6, 7, 200, 30)).toBe(7);
+    expect(slidePage(6, -14, 200, 30)).toBe(4);
+    expect(slidePage(6, 200, 200, 30)).toBe(30);
+    expect(slidePage(6, -500, 200, 30)).toBe(1);
+    expect(slidePage(3, 50, 0, 8)).toBe(3);
   });
 
   it('offers Fit first, then the larger choices', () => {
@@ -176,12 +181,103 @@ describe('the page controller (usePagedList)', () => {
     expect(c.view().page).toBe(pageOfIndex(25, 7));
   });
 
+  it('only knows full pages while more can be read, so the partly loaded last page is read first', async () => {
+    const c = createPageController();
+    let finish!: () => void;
+    const load = vi.fn(() => new Promise<void>(resolve => { finish = resolve; }));
+    c.sync(input(50, { hasMore: true }), load);
+    expect(c.view()).toMatchObject({ pages: null, knownPages: 7 });
+    c.go(8);
+    expect(load).toHaveBeenCalledTimes(1);
+    expect(c.view().page).toBe(1);
+    finish();
+    await Promise.resolve();
+    await Promise.resolve();
+    c.sync(input(100, { hasMore: true }), load);
+    expect(c.view().page).toBe(8);
+    // Next from the last full page reads more before it shows the rows after it.
+    const d = createPageController();
+    const more = vi.fn(() => Promise.resolve());
+    d.sync(input(50, { hasMore: true }), more);
+    d.go(7);
+    d.next();
+    expect(more).toHaveBeenCalledTimes(1);
+    await Promise.resolve();
+    await Promise.resolve();
+    d.sync(input(55, { hasMore: false }), more);
+    expect(d.view()).toMatchObject({ page: 8, pages: 8 });
+  });
+
+  it('reads more and stays on page 1 when even page 1 is not full yet', async () => {
+    const c = createPageController();
+    const load = vi.fn(() => Promise.resolve());
+    c.sync(input(3, { hasMore: true }), load);
+    expect(c.view().knownPages).toBe(1);
+    c.next();
+    expect(load).toHaveBeenCalledTimes(1);
+    await Promise.resolve();
+    await Promise.resolve();
+    c.sync(input(20, { hasMore: false }), load);
+    expect(c.view().page).toBe(1);
+  });
+
+  it('keeps the first row on screen when the size prop changes (a grid 24 to 15)', () => {
+    const c = createPageController();
+    c.sync(input(100, { size: 24 }));
+    c.go(3); // rows 48..71
+    c.sync(input(100, { size: 15 }));
+    expect(c.view().page).toBe(pageOfIndex(48, 15));
+  });
+
+  it('is not busy after a reset during a read', () => {
+    const c = createPageController();
+    c.sync(input(7, { hasMore: true }), () => new Promise(() => {}));
+    c.next();
+    expect(c.view().busy).toBe(true);
+    c.sync(input(7, { hasMore: true, resetKey: 'x' }), () => new Promise(() => {}));
+    expect(c.view().busy).toBe(false);
+  });
+
+  it('keeps a jump past the loaded rows until they arrive', () => {
+    const c = createPageController();
+    c.sync(input(50));
+    c.goToIndex(80);
+    expect(c.view()).toMatchObject({ page: 8, target: 12 });
+    c.sync(input(100));
+    expect(c.view().page).toBe(12);
+  });
+
   it('jumps to the page that holds a row', () => {
     const c = createPageController();
     c.sync(input(50));
     c.goToIndex(30);
     expect(c.view().page).toBe(5);
     expect(c.view().jump).toBe(30);
+  });
+});
+
+describe('the paging scope and the keys', () => {
+  it('gives a popover its own scope, never the menu around it', () => {
+    const menu: PanelScope = { slot: {} as HTMLElement, panel: {} as HTMLElement };
+    let seen: PanelScope | null | undefined;
+    const Probe = () => { seen = usePanelScope(); return null; };
+    const html = renderToStaticMarkup(createElement(PanelScopeContext.Provider, { value: menu },
+      createElement(PagingScope, { className: 'pop', children: createElement(Probe) })));
+    expect(seen).not.toBe(menu);
+    expect(seen).toEqual({ slot: null, panel: null });
+    expect(html).toContain('data-paging-scope');
+    expect(html).toContain('data-panel-footer');
+  });
+
+  it('leaves the arrows to controls that use them, and PageDown to text fields only', () => {
+    const at = (selectors: string[]) => ({ closest: (query: string) => (selectors.some(s => query.split(', ').includes(s)) ? {} : null) }) as unknown as Element;
+    for (const owner of ['[role="grid"]', '[role="listbox"]', '[role="tablist"]', '[role="radiogroup"]', '[role="menu"]', '[role="toolbar"]', '[role="slider"]', '[data-arrow-keys]', 'input', 'select', 'textarea']) {
+      expect(ownsKeys(at([owner]), 'ArrowRight'), owner).toBe(true);
+    }
+    expect(ownsKeys(at(['[role="grid"]']), 'PageDown')).toBe(false);
+    expect(ownsKeys(at(['input']), 'PageDown')).toBe(true);
+    expect(ownsKeys(at([]), 'ArrowLeft')).toBe(false);
+    expect(ownsKeys(null, 'PageUp')).toBe(false);
   });
 });
 

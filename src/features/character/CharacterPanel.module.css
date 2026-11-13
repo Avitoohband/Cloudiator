@@ -599,6 +599,18 @@ p.partTitle {
   font-size: 0.74rem;
 }
 
+/* Patch 1.9 Task 30 fix round 1 (I6): a Gladiators row's class, place, duty and absent lines stay on one line each, cut with an
+   ellipsis (the full text is the line's title), so a page of 7 rows fits the panel. */
+.row .who {
+  flex: 1 1 auto;
+}
+
+.who span.oneLine {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
 .who .wornTitle {
   display: inline-block;
   color: var(--gold);
@@ -742,4 +754,38 @@ p.partTitle {
   .practiceButton {
     min-height: 44px;
   }
+}
+
+/* Patch 1.9 Task 30 fix round 1 (I6): the Gladiators list is compact, so a page of 7 rows fits the panel without a scroll (1280 x 720
+   desktop, the 360 x 780 tall sheet). */
+.srOnly {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.roster .findMine,
+.roster .filter,
+.roster .count {
+  margin-bottom: 0.5rem;
+}
+
+.roster .row {
+  padding: 3px 0;
+}
+
+.roster .who {
+  margin: 0;
+  line-height: 1.35;
+}
+
+.roster p.partTitle {
+  margin: 0.45rem 0 0.1rem;
+}
+
+.roster [data-page-list] > p.partTitle:first-child {
+  margin-top: 0;
 }

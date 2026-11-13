@@ -87,8 +87,9 @@ describe('Gladiators', () => {
     const html = panel({ world: { ...WORLD, actors: [...WORLD.actors, otho] } }).replace(/&#x27;/g, "'");
     const row = /<li[^>]*>(?:(?!<\/li>).)*aria-label="Profile: Otho"(?:(?!<\/li>).)*<\/li>/.exec(html)![0];
     expect(row).toContain(line);
-    // It is said once: the class line names no other place, and the row does not add "Not in the camp right now."
-    expect(row.split(line)).toHaveLength(2);
+    // It is said once: the class line names no other place, and the row does not add "Not in the camp right now." (Its one-line
+    // span also carries it as a `title`, Patch 1.9 Task 30 fix round 1: counted as text here.)
+    expect(row.split(`>${line}<`)).toHaveLength(2);
     expect(row).toContain('Guardian · Level 1 · Bronze league<');
     expect(row).not.toContain('Not in the camp right now.');
     // Its Find and Follow stay, disabled, with that sentence as their reason.

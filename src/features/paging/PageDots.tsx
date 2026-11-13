@@ -1,14 +1,15 @@
 'use client';
 
 // Patch 1.9 Task 30 (Avi, 2026-11-13: "the circles down could be clicked to go to a certain page right away"): one circle per page,
-// the current one gold. Hover or keyboard focus shows a bubble with the page ("Page 3 of 8") or the section's name. Touch: a tap
-// jumps and shows the bubble for 1.2 s; press and hold 0.3 s, then slide: the bubble rides above the finger and the page changes
-// as the finger crosses each circle (a mouse can do the same). With more pages than circles the slide maps the finger's place
-// along the whole row to all pages, and the row does not re-centre until the finger lifts. Sliding never reads from the server:
-// only the "+" circle ("Load more") does. Pointer events with pointer capture, on this row only.
+// the current one gold. Hover or keyboard focus (`:focus-visible`, not a click's focus) shows a bubble with the page ("Page 3 of 8")
+// or the section's name. Touch: a tap jumps and shows the bubble for 1.2 s; press and hold 0.3 s, then slide: the bubble rides above
+// the finger and the page changes as the finger crosses each circle (a mouse can do the same). A press of any length selects the
+// circle pressed. With more pages than circles the slide is measured from the pressed circle along the row, which stands for all
+// pages (fix round 1, I3), and the row does not re-centre until the finger lifts. Sliding never reads from the server: only the "+"
+// circle ("Load more") does, and it is never held. Pointer events with pointer capture, on this row only.
 import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type PointerEvent as ReactPointerEvent } from 'react';
 import { COMPACT_QUERY } from '../shell/rail-reveal';
-import { MAX_DOTS, dotWindow, scrubPage } from './paging';
+import { MAX_DOTS, dotWindow, slidePage } from './paging';
 import styles from './paging.module.css';
 
 /** Hold this long before a slide starts. */
@@ -29,7 +30,7 @@ const readMax = () => (window.matchMedia?.(NARROW_QUERY).matches ? MAX_DOTS.narr
 
 /** A bubble: where, and why (a tap's flash and a slide outlast the focus and the pointer leaving). */
 type Tip = { at: number | 'more'; x?: number; scrub?: boolean; flash?: boolean };
-type Press = { pointer: number; x: number; y: number; timer: number; scrub: boolean; frozen: readonly (number | 'gap')[] | null; type: string; on: number | 'more' | null };
+type Press = { pointer: number; x: number; y: number; startX: number; startPage: number; timer: number; scrub: boolean; frozen: readonly (number | 'gap')[] | null; type: string; on: number | 'more' | null };
 
 export function PageDots({ count, current, names, more = false, onGo, onMore }: {
   count: number; current: number;
@@ -52,26 +53,28 @@ export function PageDots({ count, current, names, more = false, onGo, onMore }: 
   useEffect(() => () => { window.clearTimeout(flash.current); if (press.current) window.clearTimeout(press.current.timer); }, []);
 
   const dots = frozen ?? dotWindow(current, count, max);
+  /** A bubble whose circle has left the row (the row re-centred under a hover) is not shown (fix round 1, M5). */
+  const shownTip = tip && (tip.scrub || (tip.at === 'more' ? more && !!onMore : dots.includes(tip.at))) ? tip : null;
   const text = (at: number | 'more') => (at === 'more' ? 'Load more' : names ? names[at - 1] ?? '' : more ? `Page ${at}` : `Page ${at} of ${count}`);
   const label = (at: number) => (names ? `Go to section: ${names[at - 1] ?? at}` : `Go to page ${at}`);
 
   // A bubble that is not following a finger sits above its circle.
   useLayoutEffect(() => {
     const box = row.current, tipBox = bubble.current;
-    if (!tip || tip.x !== undefined || !box || !tipBox) return;
-    const dot = box.querySelector<HTMLElement>(`[data-dot="${tip.at}"]`);
+    if (!shownTip || shownTip.x !== undefined || !box || !tipBox) return;
+    const dot = box.querySelector<HTMLElement>(`[data-dot="${shownTip.at}"]`);
     if (dot) tipBox.style.left = `${dot.offsetLeft + dot.offsetWidth / 2}px`;
   });
 
   const circles = () => [...(row.current?.querySelectorAll<HTMLElement>('[data-dot]:not([data-dot="more"])') ?? [])];
-  const scrubAt = (clientX: number, windowed: readonly (number | 'gap')[]) => {
+  const scrubAt = (clientX: number, windowed: readonly (number | 'gap')[], held: Press) => {
     const box = row.current;
     const list = circles();
     if (!box || list.length === 0) return;
     let page: number;
     if (windowed.includes('gap')) {
       const left = list[0].getBoundingClientRect().left, right = list[list.length - 1].getBoundingClientRect().right;
-      page = scrubPage(right > left ? (clientX - left) / (right - left) : 0, count);
+      page = slidePage(held.startPage, clientX - held.startX, right - left, count);
     } else {
       let best = Infinity;
       page = shown.current;
@@ -101,14 +104,15 @@ export function PageDots({ count, current, names, more = false, onGo, onMore }: 
     const target = (event.target as Element).closest<HTMLElement>('[data-dot]');
     const on = target ? (target.dataset.dot === 'more' ? 'more' : Number(target.dataset.dot)) : null;
     const pointer = event.pointerId, box = event.currentTarget;
-    const held: Press = { pointer, x: event.clientX, y: event.clientY, scrub: false, frozen: null, type: event.pointerType, on,
+    const held: Press = { pointer, x: event.clientX, y: event.clientY, startX: event.clientX, startPage: typeof on === 'number' ? on : shown.current,
+      scrub: false, frozen: null, type: event.pointerType, on,
       timer: window.setTimeout(() => {
-        if (press.current !== held) return;
+        if (press.current !== held || on === 'more') return;
         held.scrub = true;
         held.frozen = dotWindow(shown.current, count, max);
         setFrozen(held.frozen);
         try { box.setPointerCapture(pointer); } catch { /* The pointer is gone already. */ }
-        scrubAt(held.x, held.frozen);
+        scrubAt(held.x, held.frozen, held);
       }, HOLD_MS) };
     press.current = held;
   };
@@ -122,7 +126,7 @@ export function PageDots({ count, current, names, more = false, onGo, onMore }: 
       return;
     }
     held.x = event.clientX;
-    scrubAt(event.clientX, held.frozen ?? dots);
+    scrubAt(event.clientX, held.frozen ?? dots, held);
   };
 
   const onPointerUp = (event: ReactPointerEvent<HTMLDivElement>) => {
@@ -137,6 +141,8 @@ export function PageDots({ count, current, names, more = false, onGo, onMore }: 
     }
   };
 
+  /** Keyboard focus only: a click's or a tap's focus shows no bubble of its own. */
+  const keyboardFocus = (element: Element) => { try { return element.matches(':focus-visible'); } catch { return false; } };
   /** Hides the hover or focus bubble of `at` (never a tap's flash or a slide's). */
   const hide = (at: number | 'more') => setTip(t => (t?.at === at && !t.scrub && !t.flash ? null : t));
 
@@ -155,17 +161,17 @@ export function PageDots({ count, current, names, more = false, onGo, onMore }: 
           onClick={() => go(at)}
           onPointerEnter={event => { if (event.pointerType === 'mouse' && !press.current?.scrub) setTip({ at }); }}
           onPointerLeave={event => { if (event.pointerType === 'mouse' && !press.current?.scrub) hide(at); }}
-          onFocus={() => setTip(t => (t?.flash || t?.scrub ? t : { at }))} onBlur={() => hide(at)}>
+          onFocus={event => { if (keyboardFocus(event.currentTarget)) setTip(t => (t?.flash || t?.scrub ? t : { at })); }} onBlur={() => hide(at)}>
           <i aria-hidden="true" />
         </button>
       ))}
       {more && onMore && <button type="button" className={`${styles.dot} ${styles.plus}`} data-dot="more" aria-label="Load more" onClick={() => go('more')}
         onPointerEnter={event => { if (event.pointerType === 'mouse') setTip({ at: 'more' }); }}
         onPointerLeave={() => hide('more')}
-        onFocus={() => setTip(t => (t?.flash || t?.scrub ? t : { at: 'more' }))} onBlur={() => hide('more')}>+</button>}
-      {tip && <span ref={bubble} role="tooltip" className={styles.bubble} data-scrub={tip.scrub ? '' : undefined}
-        style={tip.x !== undefined ? { left: `${tip.x}px` } : undefined}>{text(tip.at)}</span>}
-      {tip?.scrub && <span className={styles.finger} style={{ left: `${tip.x}px` }} aria-hidden="true" />}
+        onFocus={event => { if (keyboardFocus(event.currentTarget)) setTip(t => (t?.flash || t?.scrub ? t : { at: 'more' })); }} onBlur={() => hide('more')}>+</button>}
+      {shownTip && <span ref={bubble} role="tooltip" className={styles.bubble} data-scrub={shownTip.scrub ? '' : undefined}
+        style={shownTip.x !== undefined ? { left: `${shownTip.x}px` } : undefined}>{text(shownTip.at)}</span>}
+      {shownTip?.scrub && <span className={styles.finger} style={{ left: `${shownTip.x}px` }} aria-hidden="true" />}
     </div>
   );
 }

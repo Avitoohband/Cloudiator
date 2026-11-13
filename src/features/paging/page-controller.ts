@@ -41,7 +41,8 @@ export function createPageController() {
   const listeners = new Set<() => void>();
   const changed = () => { version += 1; listeners.forEach(listener => listener()); };
 
-  const knownPages = () => pageCount(input.total, input.size);
+  // While more rows can be read only full pages are known (fix round 1, I1): the partly loaded last page is read before it shows.
+  const knownPages = () => (input.hasMore ? Math.max(1, Math.floor(input.total / Math.max(1, input.size))) : pageCount(input.total, input.size));
   const shown = () => clampPage(asked, knownPages());
 
   /** Moves to `page` as a turn of the player's. */
@@ -74,7 +75,8 @@ export function createPageController() {
   const go = (page: number) => {
     if (busy) return;
     const known = knownPages();
-    if (page > known && input.hasMore) readThen(page);
+    // Past the full pages: read more, then show the first page with rows not seen yet (page 1 itself while it is not full).
+    if (page > known && input.hasMore) readThen(Math.min(page, Math.floor(input.total / Math.max(1, input.size)) + 1));
     else turnTo(clampPage(page, known));
   };
 
@@ -84,8 +86,13 @@ export function createPageController() {
       if (synced && !Object.is(next.resetKey, input.resetKey)) {
         asked = 1;
         failed = false;
+        busy = false;
         jump = null;
         generation += 1;
+      } else if (synced && next.size !== input.size) {
+        // A new size from the caller (a grid that changes layout): the page that holds the first row on screen (fix round 1, I2).
+        asked = pageOfIndex((shown() - 1) * input.size, next.size);
+        jump = null;
       }
       synced = true;
       input = next;
@@ -102,7 +109,8 @@ export function createPageController() {
     back() { if (shown() > 1) turnTo(shown() - 1); },
     next() { go(shown() + 1); },
     go,
-    goToIndex(index: number) { turnTo(clampPage(pageOfIndex(index, input.size), knownPages()), index); },
+    /** Turns to the page that holds row `index`; asked as is, so a row not loaded yet is shown once it is (fix round 1, M3). */
+    goToIndex(index: number) { turnTo(pageOfIndex(index, input.size), index); },
     /** A new page size: the page is the one that holds `firstIndex` (by default the first row shown now). */
     resize(size: number, firstIndex = (shown() - 1) * input.size) {
       input = { ...input, size };

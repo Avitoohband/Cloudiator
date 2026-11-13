@@ -4,7 +4,7 @@
 // and after a turn moves the focus to the first row of the new page (`listRef`, the page's container; a row is an element with
 // `data-page-row`, else a child of the container). The state lives in `page-controller.ts`; this file adds React and the DOM.
 // Closing the menu unmounts the list and so forgets the page.
-import { useCallback, useEffect, useRef, useState, useSyncExternalStore, type RefObject } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type RefObject } from 'react';
 import { createPageController } from './page-controller';
 import { PAGE_SIZES, pageRows, type ListId } from './paging';
 import { readPageSize, writePageSize } from './page-size-prefs';
@@ -48,7 +48,12 @@ export function usePagedList<T>(all: readonly T[], options: {
 }): PagedList<T> {
   const { list, size: fixed, resetKey, more } = options;
   const fit = fixed ?? PAGE_SIZES[list];
-  const [chosen, setChosen] = useState(() => (fixed === undefined ? readPageSize(list, fit) : fit));
+  // The first render uses Fit, as the prerendered page does; the Show choice saved on this device applies before the first paint
+  // (fix round 1, M2), so a panel mounted from the first render (Arena) hydrates without a mismatch.
+  const [chosen, setChosen] = useState(fit);
+  useLayoutEffect(() => {
+    if (fixed === undefined) setChosen(readPageSize(list, fit));
+  }, [list, fit, fixed]);
   const size = fixed ?? chosen;
   const [controller] = useState(createPageController);
   controller.sync({ total: all.length, size, hasMore: !!more?.hasMore, resetKey: resetKey ?? '' }, more ? () => more.load() : null);

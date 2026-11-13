@@ -66,10 +66,10 @@ export function dotWindow(page: number, pages: number, max: number): readonly (n
 }
 
 /**
- * The page under a finger sliding along a windowed row of circles: its place along the whole row (0 at the left end, 1 at the
- * right end) maps to all pages in proportion, so a still finger never sees the page run away as the window moves.
+ * The page under a finger (or a held mouse) sliding along a windowed row of circles (fix round 1, I3): measured from the circle it
+ * pressed, `dx` pixels along a row `width` pixels wide that stands for all `pages`. A finger that stays still stays on its circle.
  */
-export function scrubPage(fraction: number, pages: number): number {
-  const along = Math.min(1, Math.max(0, fraction));
-  return Math.round(along * (Math.max(1, pages) - 1)) + 1;
+export function slidePage(startPage: number, dx: number, width: number, pages: number): number {
+  if (width <= 0) return clampPage(startPage, pages);
+  return clampPage(startPage + Math.round((dx / width) * (Math.max(1, pages) - 1)), pages);
 }

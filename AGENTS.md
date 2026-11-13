@@ -516,4 +516,4 @@ entries and 14,000 bytes, so merge related entries rather than drop a plan).
 The Wiki gets it when it ships. Avi: "anytime we are adding something for the
 future, it should be in the wiki". The Claude skill `cloudiator-record-plans`
 (`~/.claude/skills/cloudiator-record-plans/SKILL.md`) has the details. Editing
-the drafts is routine; publishing them to production needs Avi's go.
+the drafts is routine; publishing them to production needs Avi's go. (Codex: follow the same three-place rule; the skill file is Claude's.)

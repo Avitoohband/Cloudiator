@@ -70,6 +70,8 @@ export type SendFeedbackValue = { feedbackId: number; leftToday: number };
  * was sold with) and the gold taken, exactly what the sale paid. Refusals: `expired` (an earlier game day, outside the last 10
  * sales of the day, or already bought back), `insufficient-funds`, `inventory-full`, `not-found` (not one of the caller's own
  * gladiator's sales), `processing` (retry), `conflict` (a stale preparation: read the owner state again and send a new operation).
+ * An earlier game day's sale answers `not-found` once a later game day's gear sale has removed it (each gear sale removes the
+ * gladiator's sales of earlier game days).
  */
 export type BuyBackValue = { itemId: string; moneyDebit: number };
 /** Actor identity is supplied by a verified session, never by any command field. */

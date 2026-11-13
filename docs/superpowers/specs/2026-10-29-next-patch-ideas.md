@@ -189,7 +189,7 @@ evenings. Placement and recommendations are in the [roadmap](../../ROADMAP.md).
 63. **Raise critical damage.** "add a way to increas crit dmg ?" (2.0 balance).
 64. **Less luck, more strategy.** "make the battles not RNG only based ... people could interfier with the battle, strategy wise" (later design; the 2.0 potion setting comes first).
 65. **Lower critical chance.** "down the crit rate" (2.0 balance, after the 1.9 simulations).
-66. **Feedback.** "feedback mechanism" (2.0, with ideas 30 and 39).
+66. **Feedback.** "feedback mechanism" (moved into 1.9 by Avi on 2026-11-12 and built there, with ideas 30 and 39; idea 76).
 67. **Spar a chosen player.** "invite specific player for spar battle (stamina free and slot free)?" (1.9 spars a copy of a gladiator; invitations come with Friends).
 68. **Build-test dummy.** "add option to fight with dummy that I choose stats, for checking my build (stamina free)" (1.9 practice fights).
 69. **Bag slots for real money or coupons.** "bad slots for real money coupons", read as bag slots (2.0 payments).

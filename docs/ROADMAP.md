@@ -67,7 +67,7 @@ Avi's decisions of 2026-11-11. The built items need no server change; the Wiki v
 - **Added 2026-11-13 (Avi's words in ideas 82-84; mockup approved by Avi on 2026-11-13):**
   - **Stamina warnings and "rested instead"** (built 2026-11-13, Task 29; client only). The Schedule marks a part that will not run (not enough stamina, or a third Training of a game day) and shows the stamina after the parts that run; a camp notice warns before the next slot; the running card, Notifications and the owner's own Results line say the gladiator rested instead and why (others see only "finished resting"); after a lost expedition fight the expedition view and away button say it rests at the safe return point; the owner's screens wait for the server at a slot boundary.
 - **Added 2026-11-13, evening (Avi's words in idea 85):**
-  - **Menus with Back and Next** (planned for 1.9; mockup being prepared, not built). Long menus turn into pages with Back and Next instead of long scrolling. Avi, asked whether to hold the release for it: "Inside 1.9, hold the gate". The 1.9 gate runs after it is built and reviewed.
+  - **Menus with Back and Next** (being built for 1.9, plan Tasks 30-33; client only). Long menus turn into pages with Back and Next instead of long scrolling. Avi, asked whether to hold the release for it: "Inside 1.9, hold the gate". Mockup approved by Avi on 2026-11-13 (`.superpowers/design/2026-11-13-paged-menus/`) with his choices: rows per page fixed per list, the phone sheet opens tall, named sections only for My gladiator (Overview, Level and stamina, Attributes and stats, Worn equipment, History) and Inventory and shops. His additions the same evening: a Show choice for how many rows a page holds ("like 10 items or 50 items"), circles that jump straight to a page, a hint with the page or section name on hover, and on phones a short name pop on tap and hold-and-slide across the circles. Wiki articles, patch notes and forms keep their scroll. The 1.9 gate runs after it is built and reviewed.
 - **No 1.9.1 (Avi, 2026-11-12).** The review leftovers planned as 1.9.1 (phone tap scrolls the item card into view, the inventory Retry after a refused command, notification focus, card placement on mid-size windows and other small fixes) are built inside 1.9 (Task 21, 2026-11-12), because 1.9 is not released yet. Plan: [1.9 additions](superpowers/plans/2026-11-12-1.9-additions.md), Task 21.
 - Plan: [Wiki list, menu and shop grid](superpowers/plans/2026-11-11-wiki-menu-and-shop-grid.md). Wiki text to change when 1.9 ships: [wiki-1.9-pending](game-info/wiki-1.9-pending.md).
 
@@ -108,6 +108,13 @@ Avi's decisions of 2026-11-11. Needs its own design and mockups.
 - Dungeons at levels 17, 22 and 27, plus The Deep at 15 (see Expeditions, roles, and strategy).
 - Drop-only gear tiers for levels 15 to 30 (Avi, 2026-11-12: never sold in shops), with more new weapons and armour. They drop from The Deep, the new expeditions and the new dungeons.
 - "A lot more content", with the exact list settled in the design.
+
+## Marketing and ads (planned; not tied to a patch yet)
+
+Avi, 2026-11-13: "Add to future plans the marketing thing, how to market the game, like Google Ads, Instagram, maybe through YouTube if it can involve in Steam platform, and how ads can integrate because it's browser, and to make money, like if someone need to watch ad to refill his stamina and things like that at the beginning."
+
+- **Marketing plan (internal).** How to bring players in: Google Ads, Instagram (the reels series already runs there), YouTube (the Indigo Labs channel: patch films, Wiki guides, reels), and whether the game can be listed on Steam (a browser game needs a desktop wrapper and Steam's review; cost and rules to check). *Recommended*: write the plan after 1.9 ships and before the 2.0 open release, with a small test budget per channel, one tracked link per channel and a weekly count of new players; every paid campaign and every store listing needs Avi's go.
+- **Ads inside the game.** Because the game runs in the browser it can show ads to earn money in the early days, for example an optional short ad that refills some stamina. *Recommended*: opt-in rewarded ads only (never forced, never over the camp), a daily limit, no combat power from ads, and the same privacy and consent review as payments; design and balance it with 2.0 (payments and balance), since a stamina refill changes the economy. The ad provider, its rules for browser games and the consent banner are open questions.
 
 ## Later patches and ideas
 

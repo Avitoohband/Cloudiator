@@ -63,7 +63,8 @@ import { shownWornTitle, type WornAnswer } from '../titles/title-wear';
 import { ArrivalBannerView, ArrivalSlot } from '../arrivals/ArrivalBanner';
 import { useArrivals } from '../arrivals/useArrivals';
 import { useBannerPlace } from '../arrivals/useBannerPlace';
-import { ProfileLayer } from '../character/ProfileCard';
+import { ProfileLayer, type CompareProp } from '../character/ProfileCard';
+import { ownBuild } from '../character/profile-card';
 import { SchedulePanel } from '../schedule/SchedulePanel';
 import { useMinuteNow } from '../schedule/use-minute-now';
 import { InventoryPanel } from '../inventory/InventoryPanel';
@@ -379,6 +380,13 @@ export function CampShell({ fixture, previewAs, previewResting = false, previewB
   // Practice fights (Task 18): the owner's; while one is shown the camp is paused beneath it, and its banner and away button wait, as under a scene.
   const practice = usePractice(viewer === 'player' ? owner : null);
   const practising = practice.fight !== null;
+  // Patch 1.9 Task 23c: ⇄ Compare with mine on a profile card. Its on/off lives here, not in the card (a card is re-created for each gladiator), so it
+  // stays on while other cards open; it resets on reload and nothing is saved or sent. Offered to a player with a gladiator only, like ⚔ Spar a copy.
+  const [comparing, setComparing] = useState(false);
+  const compare = useMemo<CompareProp | undefined>(() => (viewer === 'player' && owner ? {
+    mine: { name: owner.name, level: owner.progression.level, classId: owner.currentBuild.classId, build: ownBuild(owner) },
+    on: comparing, onToggle: () => setComparing(on => !on),
+  } : undefined), [viewer, owner, comparing]);
 
   // Scenes over the camp: a history entry each; the bridge opens and closes them.
   const { open: openScene, close: closeScene, replace: replaceScene } = useSceneHistory();
@@ -664,7 +672,7 @@ export function CampShell({ fixture, previewAs, previewResting = false, previewB
         following={following} menuPlace={prefs.place} onClose={() => closeCard(true)} onCover={setCardCovers} onOpenMenu={id => { closeCard(false); show(id); }}
         onFollow={id => { bridge.emit('follow-character', { gladiatorId: following === id ? null : id }); closeCard(false); handBack(); }}
         onWatch={(activityId, gladiatorId) => { closeCard(false); bridge.emit('open-arena', { activityId, gladiatorId }); }}
-        onSpar={viewer === 'player' && owner ? practice.spar : undefined} />}
+        onSpar={viewer === 'player' && owner ? practice.spar : undefined} compare={compare} />}
       <main id="main" className={styles.camp} data-camp-view="" tabIndex={-1}
         onPointerDown={event => { press.current = { x: event.clientX, y: event.clientY }; }}
         onPointerUp={event => {

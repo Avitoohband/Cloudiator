@@ -24,6 +24,10 @@
 // Patch 1.9 Task 19: a player's card (any gladiator's, their own too: a mirror) offers "⚔ Spar a copy" after Follow, which fights a copy of the
 // build the card shows, at once, in the browser (`copySide`; nothing is sent, and the gladiator is not told). It is disabled until the card
 // has a build to copy; a visitor or an account without a gladiator is offered none.
+//
+// Patch 1.9 Task 23c: a player's card on another gladiator offers "⇄ Compare with mine" after Follow (never on the viewer's own card, never to a visitor
+// or an account without a gladiator). While it is on, the Attributes, Stats, Gear and Record sections give way to the comparison (`ProfileCompare`). The
+// on/off state lives in the shell (a card is re-created for each gladiator), so it stays on while other cards open.
 import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import type { PublicActor, WorldSnapshot } from '@contracts/reads';
 import type { GameGateway } from '../../lib/api/gateway';
@@ -42,7 +46,8 @@ import { wornTitleText } from '../titles/title-text';
 import { ActorPortrait } from './ActorPortrait';
 import { useStatHints } from './stat-hints';
 import { ClassChips } from './ClassCard';
-import { attributeHelp, attributeRows, cardStats, gearRows, overloadLine, pointsTotal, recordText, sinceText, statHelp, statRows } from './profile-card';
+import { attributeHelp, attributeRows, cardStats, compareStats, gearRows, overloadLine, pointsTotal, recordText, sinceText, statHelp, statRows, type CompareSide } from './profile-card';
+import { CompareBlock } from './ProfileCompare';
 import { copySide, type PracticeSide } from '../practice/practice';
 import styles from './ProfileCard.module.css';
 
@@ -67,8 +72,11 @@ export type ProfileTarget = {
 
 const RARITY_CLASS = { common: styles.rCommon, uncommon: styles.rUncommon, rare: styles.rRare } as const;
 
+/** Compare with mine (Patch 1.9 Task 23c): the viewer's own side, whether the comparison is on, and its toggle. */
+export type CompareProp = { mine: CompareSide; on: boolean; onToggle(): void };
+
 export function ProfileCard({ actor, profile, profileFailed = false, own, ownPlace = null, record = null, followReason = null, following = false, nowMs, onFollow,
-  onWatch, onOpenMenu, onSpar }: {
+  onWatch, onOpenMenu, onSpar, compare }: {
   actor: PublicActor;
   /** The public profile with its card data, once loaded (null while it loads or when it failed). */
   profile: ProfileRead | null;
@@ -93,9 +101,12 @@ export function ProfileCard({ actor, profile, profileFailed = false, own, ownPla
   onOpenMenu(id: MenuId): void;
   /** ⚔ Spar a copy (Patch 1.9 Task 19): a player's only; without it the card offers none. */
   onSpar?(copy: PracticeSide): void;
+  /** ⇄ Compare with mine: a player's only, and never on their own card (Patch 1.9 Task 23c); without it the card offers none. */
+  compare?: CompareProp;
 }) {
   const reasonId = useId();
   const bodyRef = useRef<HTMLDivElement>(null);
+  const compareRef = useRef<HTMLButtonElement>(null);
   // The help tooltips are shared with My gladiator (`useStatHints`); here the body scrolls on touch, the card itself on desktop.
   const { hintRow, hintLabel } = useStatHints({ buttonClass: styles.hintButton, tipClass: styles.hint, aboveClass: styles.hintAbove,
     scrollport: () => {
@@ -124,8 +135,12 @@ export function ProfileCard({ actor, profile, profileFailed = false, own, ownPla
     if (!onSpar || !build) return null;
     try { return copySide(actor, build); } catch { return null; }
   }, [onSpar, actor, build]);
+  // Compare with mine: both builds are known (this card's, once loaded, and the viewer's) and the rules accept both.
+  const comparison = useMemo(() => (compare && !own && build ? compareStats(compare.mine, { name: actor.name, level: actor.level, classId: actor.classId, build }) : null),
+    [compare, own, actor.name, actor.level, actor.classId, build]);
+  const comparing = !!compare && !own && compare.on && comparison !== null;
   return <>
-    <div ref={bodyRef} className={styles.body} data-testid="profile-body">
+    <div ref={bodyRef} className={`${styles.body} ${comparing ? styles.comparing : ''}`} data-testid="profile-body" data-comparing={comparing ? '' : undefined}>
       <div className={styles.head}>
         <ActorPortrait actor={actor} />
         <div className={styles.who}>
@@ -141,7 +156,8 @@ export function ProfileCard({ actor, profile, profileFailed = false, own, ownPla
           {awards.length > 0 && <ul className={styles.badges} aria-label="Season badges">{awards.map(award => <li key={award.seasonId}>{badgeText(award)}</li>)}</ul>}
         </div>
       </div>
-      <div className={styles.grid}>
+      {comparing && comparison && <CompareBlock comparison={comparison} name={actor.name} onBack={() => { compare.onToggle(); setTimeout(() => compareRef.current?.focus(), 0); }} />}
+      {!comparing && <div className={styles.grid}>
         <section className={styles.section} aria-label="Attributes">
           <p className="eyebrow">{build ? `ATTRIBUTES · ${pointsTotal(build.allocations)} POINTS` : 'ATTRIBUTES'}</p>
           {build ? <ul className={styles.attributes}>
@@ -183,7 +199,7 @@ export function ProfileCard({ actor, profile, profileFailed = false, own, ownPla
           </dl>
           {own && profile && <p className={styles.see}>Other players see this card too.</p>}
         </section>
-      </div>
+      </div>}
       {followReason && <p id={reasonId} className={styles.reason}>{followReason}</p>}
     </div>
     <div className={styles.actions} data-card-actions="">
@@ -193,6 +209,9 @@ export function ProfileCard({ actor, profile, profileFailed = false, own, ownPla
       </>}
       <button type="button" disabled={!!followReason} aria-describedby={followReason ? reasonId : undefined} aria-pressed={following && !followReason}
         onClick={() => onFollow(actor.gladiatorId)}>Follow</button>
+      {compare && !own && <button type="button" data-compare-button="" ref={compareRef} disabled={!comparison} aria-pressed={compare.on} onClick={compare.onToggle}>
+        <span aria-hidden="true">⇄</span> Compare with mine
+      </button>}
       {onSpar && <button type="button" data-spar-button="" disabled={!copy} onClick={() => { if (copy) onSpar(copy); }}>
         <span aria-hidden="true">⚔</span> Spar a copy
       </button>}
@@ -276,7 +295,7 @@ function followReasonOf(actor: PublicActor, roster: Roster | null, sceneStatus: 
 
 /** The profile card over the camp: resolves the actor, loads the public profile and places the card. */
 export function ProfileLayer({ target, world, reads, ownerId, ownPlace = null, roster, sceneStatus, following, nowMs, menuPlace = 'left', onFollow, onWatch, onOpenMenu, onClose,
-  onCover, onSpar }: {
+  onCover, onSpar, compare }: {
   target: ProfileTarget;
   world: WorldSnapshot | null;
   /** Public profile reads (null until the fixture preview's reads load). */
@@ -301,6 +320,8 @@ export function ProfileLayer({ target, world, reads, ownerId, ownPlace = null, r
   onCover?(covers: boolean): void;
   /** ⚔ Spar a copy: a player's (Patch 1.9 Task 19). */
   onSpar?(copy: PracticeSide): void;
+  /** ⇄ Compare with mine: a player's (Patch 1.9 Task 23c); the state is the shell's. */
+  compare?: CompareProp;
 }) {
   const card = useRef<HTMLElement>(null);
   const [loaded, setLoaded] = useState<{ profile: ProfileRead | null; failed: boolean } | null>(null);
@@ -356,7 +377,7 @@ export function ProfileLayer({ target, world, reads, ownerId, ownPlace = null, r
       {actor ? (
         <ProfileCard key={id} actor={actor} profile={loaded?.profile ?? null} profileFailed={loaded?.failed ?? false} own={ownerId === id} ownPlace={ownPlace} record={target.record}
           followReason={followReasonOf(actor, roster, sceneStatus)} following={following === id} nowMs={nowMs} onFollow={onFollow}
-          onWatch={activityId => onWatch(activityId, id)} onOpenMenu={onOpenMenu} onSpar={onSpar} />
+          onWatch={activityId => onWatch(activityId, id)} onOpenMenu={onOpenMenu} onSpar={onSpar} compare={compare} />
       ) : <div className={styles.body} data-testid="profile-body">
         <div className={styles.headPlain}><h2 className={styles.name}>{name}</h2></div>
         {target.record && <dl className={styles.facts}><div><dt>Record</dt><dd>{target.record.wins}–{target.record.losses}</dd></div></dl>}

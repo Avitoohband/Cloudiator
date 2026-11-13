@@ -58,6 +58,10 @@ Practice fights: test your build against a dummy with stats you choose, or spar 
 
 Practice uses Arena rules: renown gear counts 10% more.
 
+## Compare stats (profile card topic)
+
+On another gladiator's card, press ⇄ Compare with mine to set your gladiator's stats beside theirs: Level, Health, Damage, Attack speed, Armor, Critical and Critical damage, then the five attributes. ▲ green on your side means better for you, ▼ red means worse, and the number is your value minus theirs. For Attack speed a shorter time is better. Equal values say same, and Level is only shown for context. Press Back to their card, or ⇄ Compare with mine again, to return to their card. Compare stays on while you open other cards. It is for players with a gladiator, not on your own card. Nothing is sent.
+
 ## Feedback (messages and interface topics)
 
 Found a bug, or have an idea? Open Messages and press Send feedback, or open Settings and use Send in the Help section. Choose what it is about (Bug, Idea, Balance or Other), write at least 10 characters, and press Send. You can send 5 a game day. Include game details adds the patch, the screen you were on, your browser and device, the window size and the time you sent it; press "What is sent?" to see them. The team sees your gladiator's name, and the answer comes to your messages. Please do not include passwords or personal details. My feedback, in Messages, shows what you sent and whether the team has read or answered it. The team's answer arrives in your messages with a green Team reply tag.

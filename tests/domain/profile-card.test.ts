@@ -6,6 +6,7 @@ import type { PublicActor, WorldSnapshot } from '@contracts/reads';
 import { CATALOG_V1 } from '@domain/catalog-v1';
 import type { ProfileRead, PublicBuild, PublicGear } from '@/lib/api/reads';
 import { ProfileCard, ProfileLayer, placeCard } from '@/features/character/ProfileCard';
+import { cardStats, compareMark, compareStats, statRows, type CompareSide } from '@/features/character/profile-card';
 import { BannerCard } from '@/features/shops/ShopCard';
 import { ownerFixture, worldFixture } from '../fixtures/domain';
 
@@ -392,5 +393,103 @@ describe('profile card', () => {
     // The 520 px card has 426 px either side of a centred 380 px panel at 1280: it narrows rather than cover the panel.
     expect(placeCard(null, { width: 520, height: 400 }, view, bottom)).toEqual({ left: 12, top: 156, width: 426 });
     expect(placeCard({ x: 640, y: 700 }, { width: 260, height: 400 }, view, bottom).top).toBeLessThanOrEqual(800 - 74 - 400);
+  });
+});
+
+// Patch 1.9 Task 23c: Compare stats with mine. Both sides run the same `cardStats`/`statRows`; the marks are YOUR value minus theirs.
+describe('compare stats (Task 23c)', () => {
+  const allButtons = (html: string) => [...html.slice(html.indexOf("data-card-actions")).matchAll(/<button [^>]*>([\s\S]*?)<\/button>/g)].map(m => text(m[1]).trim());
+  const MINE_BUILD: PublicBuild = { stance: 'balanced', allocations: { strength: 2, agility: 2, vitality: 2, endurance: 2, precision: 2 }, equipment: { ...NONE } };
+  const mine = (over: Partial<CompareSide> = {}): CompareSide => ({ name: 'Aster', level: 1, classId: 'guardian', build: MINE_BUILD, ...over });
+  const lucilla: CompareSide = { name: 'Lucilla', level: 6, classId: 'guardian', build: LUCILLA_BUILD };
+  const row = (c: NonNullable<ReturnType<typeof compareStats>>, label: string) => c.rows.find(r => r.label === label)!;
+
+  it('marks: better up-arrow, worse down-arrow, same, with the number your value minus theirs and a spoken label', () => {
+    expect(compareMark(123, 100, 'high', 0, '')).toEqual({ tone: 'better', text: '▲ +23', label: 'better by 23' });
+    expect(compareMark(123, 207, 'high', 0, '')).toEqual({ tone: 'worse', text: '▼ −84', label: 'worse by 84' });
+    expect(compareMark(7, 7, 'high', 0, '%')).toEqual({ tone: 'same', text: 'same', label: 'same' });
+  });
+  it('lower is better for Attack speed (a faster gladiator is up with a minus sign) and its difference keeps hundredths', () => {
+    expect(compareMark(0.94, 1.14, 'low', 2, ' s')).toEqual({ tone: 'better', text: '▲ −0.20 s', label: 'better by 0.2 seconds' });
+    expect(compareMark(1.14, 0.94, 'low', 2, ' s')).toEqual({ tone: 'worse', text: '▼ +0.20 s', label: 'worse by 0.2 seconds' });
+  });
+  it('a fractional Armor difference drops trailing zeros: 9 is "9", 1.5 is "1.5"', () => {
+    expect(compareMark(0, 9, 'high', 1, '')?.text).toBe('▼ −9');
+    expect(compareMark(10.5, 9, 'high', 1, '')?.text).toBe('▲ +1.5');
+  });
+  it('a neutral row (Level) shows the difference dimly in brackets and no arrow; equal shows nothing', () => {
+    expect(compareMark(1, 6, null, 0, '')).toEqual({ tone: 'neutral', text: '(−5)', label: null });
+    expect(compareMark(6, 6, null, 0, '')).toBeNull();
+  });
+
+  it('the table: Level, Health, Damage, Attack speed, Armor, Critical, Critical damage, in the card\'s own words, marks on your cell only', () => {
+    const c = compareStats(mine(), lucilla)!;
+    expect(c.rows.filter(r => r.label !== 'Stance').map(r => r.label)).toEqual(['Level', 'Health', 'Damage', 'Attack speed', 'Armor', 'Critical', 'Critical damage']);
+    const mineStats = cardStats('guardian', MINE_BUILD)!, theirs = cardStats('guardian', LUCILLA_BUILD)!;
+    expect(row(c, 'Level')).toMatchObject({ you: '1', them: '6', mark: { tone: 'neutral', text: '(−5)' } });
+    expect(row(c, 'Health')).toMatchObject({ you: String(mineStats.health), them: String(theirs.health), mark: { tone: 'worse' } });
+    expect(row(c, 'Armor').you).toBe('None');
+    expect(row(c, 'Armor').them).toBe(statRows(theirs).find(r => r[0] === 'Armor')![1]);
+    expect(row(c, 'Armor').mark).toMatchObject({ tone: 'worse' });
+    expect(row(c, 'Critical damage').mark).toMatchObject({ tone: 'same', text: 'same' });
+    expect(row(c, 'Attack speed').you).toMatch(/^every [\d.]+ s$/);
+  });
+  it('a Stance row appears only when the stances differ, and the heads say each stance', () => {
+    const c = compareStats(mine(), lucilla)!;
+    expect(row(c, 'Stance')).toMatchObject({ you: 'Balanced', them: 'Defensive', mark: null });
+    expect(c).toMatchObject({ youStance: 'Balanced', themStance: 'Defensive' });
+    expect(compareStats(mine(), mine({ name: 'Twin' }))!.rows.some(r => r.label === 'Stance')).toBe(false);
+  });
+  it('the Arena sub-lines are kept for a side whose figure differs; none otherwise', () => {
+    const renown: PublicGear = { ...gear('sword:5:uncommon'), catalogId: 'sword:5:uncommon:renown' };
+    const withRenown = mine({ build: { ...MINE_BUILD, equipment: { ...NONE, weapon: renown } } });
+    const stats = cardStats('guardian', withRenown.build)!;
+    expect(stats.arenaHit).not.toBe(stats.hit);
+    const c = compareStats(withRenown, lucilla)!;
+    expect(row(c, 'Damage').youArena).toBe(`Arena ${stats.arenaHit}`);
+    expect(row(c, 'Damage').themArena).toBeNull();
+    // The mark uses the expedition figure only.
+    expect(row(c, 'Damage').mark?.text).toContain(`${stats.hit - cardStats('guardian', LUCILLA_BUILD)!.hit < 0 ? '−' : '+'}`);
+    expect(row(compareStats(mine(), lucilla)!, 'Damage').youArena).toBeNull();
+  });
+  it('the attributes: five rows with marks, and the points of each side', () => {
+    const c = compareStats(mine(), lucilla)!;
+    expect(c.attributes.map(a => a.label)).toEqual(['Strength', 'Agility', 'Vitality', 'Endurance', 'Precision']);
+    expect(c.attributes[0]).toMatchObject({ you: 2, them: 5, mark: { tone: 'worse', text: '▼ −3' } });
+    expect(c.attributes[4]).toMatchObject({ you: 2, them: 3 });
+    expect(c.youPoints).toBe(10);
+    expect(c.themPoints).toBe(22);
+  });
+  it('an overloaded side gets one sentence naming it; none when nobody is overloaded', () => {
+    expect(compareStats(mine(), lucilla)!.overloads).toEqual([]);
+    const heavy = mine({ build: { ...MINE_BUILD, allocations: { strength: 0, agility: 0, vitality: 0, endurance: 0, precision: 0 }, equipment: { ...LUCILLA_BUILD.equipment, weapon: gear('axe:5:common'), offHand: gear('round-shield:5:common') } } });
+    const stats = cardStats('guardian', heavy.build)!;
+    expect(stats.load).toBeGreaterThan(stats.capacity);
+    expect(compareStats(heavy, lucilla)!.overloads[0]).toMatch(/^Aster is overloaded: load [\d.]+ of [\d.]+, fighting at \d+%$/);
+  });
+  it('null when the rules refuse either build', () => {
+    expect(compareStats(mine(), { ...lucilla, build: { ...LUCILLA_BUILD, stance: 'nonsense' as never } })).toBeNull();
+  });
+
+  it('the card offers Compare with mine after Follow on another gladiator\'s card only, pressed when on', () => {
+    const base = { actor: LUCILLA, profile: LUCILLA_PROFILE };
+    const compare = { mine: mine(), on: false, onToggle: noop };
+    expect(allButtons(card({ ...base, compare }))).toEqual(['Follow', '⇄ Compare with mine']);
+    expect(card({ ...base, compare })).toMatch(/aria-pressed="false"[^>]*><span aria-hidden="true">⇄<\/span> Compare with mine/);
+    expect(allButtons(card({ ...base }))).toEqual(['Follow']);
+    expect(card({ ...base, own: true, compare })).not.toContain('Compare with mine');
+    const on = card({ ...base, compare: { ...compare, on: true } });
+    expect(on).toMatch(/aria-pressed="true"[^>]*><span aria-hidden="true">⇄<\/span> Compare with mine/);
+    expect(text(on)).toContain('COMPARE · YOU AND LUCILLA');
+    expect(text(on)).toContain('Back to their card');
+    expect(text(on)).toContain('ATTRIBUTES · 10 AND 22 POINTS');
+    expect(text(on)).not.toContain('RECORD');
+    expect(text(on)).not.toContain('GEAR');
+  });
+  it('the button is disabled until the card\'s build is known, and the card keeps its loading words', () => {
+    const html = card({ actor: LUCILLA, profile: null, compare: { mine: mine(), on: true, onToggle: noop } });
+    expect(html).toMatch(/<button[^>]*disabled[^>]*><span[^>]*>⇄<\/span> Compare with mine/);
+    expect(text(html)).toContain('Loading…');
+    expect(text(html)).not.toContain('COMPARE ·');
   });
 });

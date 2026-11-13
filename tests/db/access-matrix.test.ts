@@ -369,12 +369,17 @@ const SERVICE_ROLE = [
   'relation public.game_info_reads: SELECT,UPDATE',
   // Game messages (M25): the backend only reads them (the owner read's inbox, read_message); the operator writes as postgres.
   'relation public.game_messages: SELECT',
+  // Patch 1.9 (M37): every gladiator's history and its counts, invoker views the backend may read like any reader.
+  'relation public.gladiator_history_counts: SELECT',
+  'relation public.gladiator_history_reads: SELECT',
   // Titles (M28): earned titles and the ownership history are only ever inserted (guard_frozen refuses update and delete);
   // the counters are upserted. The release back-fill's record (private.title_backfills) is the owner's only.
   'relation public.gladiator_titles: INSERT,SELECT',
   'relation public.gladiators: DELETE,INSERT,MAINTAIN,SELECT,UPDATE',
   'relation public.item_firsts: INSERT,SELECT',
   'relation public.item_instances: DELETE,INSERT,MAINTAIN,SELECT,UPDATE',
+  // Patch 1.9 (M37): the offers with their sellers' class, league and level, an invoker view over market_offers and world_actors.
+  'relation public.market_offer_reads: SELECT',
   'relation public.market_offers: DELETE,INSERT,SELECT',
   // Game messages (M25): each account's read marks, written by read_message and read by the owner read (owner_state).
   'relation public.message_reads: INSERT,SELECT',
@@ -395,6 +400,9 @@ const SERVICE_ROLE = [
   'relation public.public_profiles: DELETE,INSERT,SELECT,UPDATE',
   'relation public.recent_results: DELETE,INSERT,SELECT,UPDATE',
   'relation public.reservations: DELETE,INSERT,MAINTAIN,SELECT,UPDATE',
+  // Patch 1.9 (M37): a settled Arena bout's or expedition's details, inserted once by the settlement's trigger (guard_frozen refuses an
+  // update; they go with their activity, on delete cascade, as the owner's cleanup deletes it).
+  'relation public.result_details: INSERT,SELECT',
   'relation public.schedule_revisions: DELETE,INSERT,SELECT,UPDATE',
   'relation public.schedules: DELETE,INSERT,MAINTAIN,SELECT,UPDATE',
   'relation public.season_standings: INSERT,SELECT',
@@ -676,6 +684,33 @@ describe('release access matrix', () => {
     expect(await sql`select p.oid::regprocedure::text as fn, p.prosecdef as definer, p.proconfig as config, p.proacl::text as acl from pg_proc p
       where p.proname='review_feedback'`).toEqual([{ fn: 'review_feedback(uuid,boolean,jsonb)', definer: false, config: ['search_path=""'],
       acl: '{postgres=X/postgres,service_role=X/postgres}' }]);
+  });
+
+  it('opens the history and the seller band to every reader, read-only, with the details written only by the settlement trigger (M37)', async () => {
+    const rows = await audit();
+    const M37 = ['public.gladiator_history_counts', 'public.gladiator_history_reads', 'public.market_offer_reads', 'public.result_details'];
+    // Visitors and players SELECT them and nothing else; the backend reads them and inserts details; PUBLIC holds nothing.
+    expect(lines(rows.filter(r => ['relation', 'column'].includes(r.section) && M37.includes(relationOf(r.object))))).toEqual([
+      ...M37.flatMap(o => [`relation ${o} anon SELECT`, `relation ${o} authenticated SELECT`]),
+      ...M37.filter(o => o !== 'public.result_details').map(o => `relation ${o} service_role SELECT`),
+      'relation public.result_details service_role INSERT', 'relation public.result_details service_role SELECT'].sort());
+    // The details' one read policy: due like the public result, for visitors and players.
+    expect(lines(rows.filter(r => r.section === 'policy' && r.object.startsWith('public.result_details.'))).map(l => l.split(' md5:')[0]))
+      .toEqual(['policy public.result_details.player_read anon SELECT permissive', 'policy public.result_details.player_read authenticated SELECT permissive']);
+    // The three views run with the reader's own privileges and row security.
+    expect(await sql`select c.relname, c.reloptions from pg_class c where c.oid in ('public.gladiator_history_counts'::regclass,
+      'public.gladiator_history_reads'::regclass, 'public.market_offer_reads'::regclass) order by 1`).toEqual(['gladiator_history_counts',
+      'gladiator_history_reads', 'market_offer_reads'].map(relname => ({ relname, reloptions: ['security_invoker=true'] })));
+    // The trigger function that writes the details: invoker, empty search path, callable by no API role (service_role included).
+    expect(await sql`select p.prosecdef as definer, p.proconfig as config, has_function_privilege('anon',p.oid,'EXECUTE') as anon,
+      has_function_privilege('authenticated',p.oid,'EXECUTE') as authenticated, has_function_privilege('service_role',p.oid,'EXECUTE') as service
+      from pg_proc p where p.oid='private.result_details_on_activity()'::regprocedure`)
+      .toEqual([{ definer: false, config: ['search_path=""'], anon: false, authenticated: false, service: false }]);
+    expect(await sql`select tgname, tgenabled as enabled, pg_get_triggerdef(t.oid) as definition from pg_trigger t
+      where t.tgrelid in ('public.activities'::regclass, 'public.result_details'::regclass) and tgname in ('result_details_on_activity','guard_frozen') order by 1`).toEqual([
+      { tgname: 'guard_frozen', enabled: 'O', definition: 'CREATE TRIGGER guard_frozen BEFORE UPDATE ON public.result_details FOR EACH ROW EXECUTE FUNCTION private.guard_frozen()' },
+      { tgname: 'result_details_on_activity', enabled: 'O',
+        definition: 'CREATE TRIGGER result_details_on_activity AFTER INSERT OR UPDATE OF status ON public.activities FOR EACH ROW EXECUTE FUNCTION private.result_details_on_activity()' }]);
   });
 
   it('defines no SECURITY DEFINER function and pins search_path on every function', async () => {

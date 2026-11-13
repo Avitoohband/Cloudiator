@@ -447,7 +447,8 @@ async function owner(page: Page, editor: boolean, options: { suggestions?: boole
     }
     if (item.status === 'answered') return answer(409, { ok: false, code: 'conflict' });
     // M36: an answer from Claude's suggestion (as is or edited) is recorded as an approved suggestion, and the suggestion is cleared.
-    if (body.fromSuggestion === true && item.suggestion === null) return answer(409, { ok: false, code: 'conflict' });
+    // M37: only the suggestion the owner saw (its time); one Claude replaced since is a conflict, and nothing is sent.
+    if (body.fromSuggestion === true && (item.suggestion === null || body.suggestedAtMs !== item.suggestedAtMs)) return answer(409, { ok: false, code: 'conflict' });
     item.status = 'answered'; item.answer = String(body.text).trim(); item.answeredAtMs = Date.now();
     item.answeredVia = body.fromSuggestion === true ? 'claude-approved' : 'owner'; item.suggestion = null; item.suggestedAtMs = null;
     return answer(200, { ok: true, id: item.id, status: 'answered', messageId: 77 });
@@ -576,7 +577,9 @@ test('the owner reads New, Answered and All, marks one read and answers one', as
 });
 
 test('Claude’s suggestion: the owner approves it as is or edits it first, and the answer then says it was approved', async ({ page }, info) => {
-  const { panel, actions } = await owner(page, true, { suggestions: true });
+  const { panel, actions, items: owned } = await owner(page, true, { suggestions: true });
+  // M37: each approval names the time of the suggestion the owner saw.
+  const [bugAt, balanceAt] = [owned.find(i => i.id === 4)!.suggestedAtMs, owned.find(i => i.id === 2)!.suggestedAtMs];
   const tab = panel.getByRole('tab', { name: /^Feedback/ });
   await tab.click();
   const items = panel.locator('[data-feedback-item]');
@@ -597,7 +600,7 @@ test('Claude’s suggestion: the owner approves it as is or edits it first, and 
   await bug.getByRole('button', { name: 'Approve and send', exact: true }).click();
   await expect(items).toHaveCount(1);
   await expect(tab).toHaveAccessibleName('Feedback, 1 new');
-  expect(actions).toContainEqual({ tab: 'feedback', action: 'answer', id: 4, text: SUGGESTED[4], fromSuggestion: true });
+  expect(actions).toContainEqual({ tab: 'feedback', action: 'answer', id: 4, text: SUGGESTED[4], fromSuggestion: true, suggestedAtMs: bugAt });
 
   // All: the approved answer says so; an answer the owner wrote says only Answered.
   const show = panel.getByRole('group', { name: 'Show' });
@@ -632,7 +635,7 @@ test('Claude’s suggestion: the owner approves it as is or edits it first, and 
   await balance.getByRole('button', { name: 'Send answer', exact: true }).click();
   await expect(balance).toContainText(/Balance\s*Answered \(approved suggestion\)/);
   await expect(balance.locator('[data-feedback-answer]')).toContainText(`Your answer${edited}`);
-  expect(actions).toContainEqual({ tab: 'feedback', action: 'answer', id: 2, text: edited, fromSuggestion: true });
+  expect(actions).toContainEqual({ tab: 'feedback', action: 'answer', id: 2, text: edited, fromSuggestion: true, suggestedAtMs: balanceAt });
   // Nothing else was sent.
   expect(actions.filter(a => a.action === 'answer')).toHaveLength(2);
   // The longer status pill wraps with its row at 360 px: no horizontal page scroll.
@@ -640,4 +643,58 @@ test('Claude’s suggestion: the owner approves it as is or edits it first, and 
   await expect(approved).toContainText('Answered (approved suggestion)');
   expect(await noHorizontalScroll(page)).toBe(true);
   await shot(page, info, 'owner-feedback-approved-360');
+});
+
+// Task 25 (M37), from the Task 23b review: approving one item never closes or clears the answer the owner has open on another, and an
+// approval of a suggestion Claude has replaced since is a conflict: nothing is sent, and the list shows the new suggestion.
+test('Approve and send keeps another item’s open answer, and a suggestion Claude replaced is refused, not sent', async ({ page }, info) => {
+  const { panel, actions, items: owned } = await owner(page, true, { suggestions: true });
+  await panel.getByRole('tab', { name: /^Feedback/ }).click();
+  const items = panel.locator('[data-feedback-item]');
+  await expect(items).toHaveCount(2);
+  const bug = items.filter({ hasText: 'The Arena result says I lost' }), idea = items.filter({ hasText: 'A way to rename the gladiator' });
+  // The owner starts an answer on the idea in their own words…
+  await idea.getByRole('button', { name: 'Answer', exact: true }).click();
+  const box = idea.getByRole('textbox', { name: 'Answer to gladiator Varro (they get a message)' });
+  const own = 'Renaming is planned for a later patch.';
+  await box.fill(own);
+  // …and meanwhile approves Claude's suggestion on the bug report: sent with that suggestion's time, the idea's box untouched.
+  const bugAt = owned.find(i => i.id === 4)!.suggestedAtMs;
+  await bug.getByRole('button', { name: 'Approve and send', exact: true }).click();
+  await expect(items).toHaveCount(1);
+  expect(actions).toContainEqual({ tab: 'feedback', action: 'answer', id: 4, text: SUGGESTED[4], fromSuggestion: true, suggestedAtMs: bugAt });
+  await expect(box).toBeVisible();
+  await expect(box).toHaveValue(own);
+  await expect(idea).toContainText(`${own.length} / 1,000`);
+  // Its own Send still sends the owner's words, as the owner's (no suggestion time).
+  await idea.getByRole('button', { name: 'Send answer', exact: true }).click();
+  await expect(items).toHaveCount(0);
+  expect(actions).toContainEqual({ tab: 'feedback', action: 'answer', id: 3, text: own });
+
+  // All: the balance item shows Claude's suggestion; the owner opens Edit on it. Then Claude replaces the suggestion (a later time).
+  await panel.getByRole('group', { name: 'Show' }).getByRole('button', { name: 'All', exact: true }).click();
+  const balance = items.filter({ hasText: 'Heavy armor is too heavy' });
+  await expect(balance.locator('[data-feedback-suggestion]')).toContainText(SUGGESTED[2]);
+  const shownAt = owned.find(i => i.id === 2)!.suggestedAtMs;
+  await balance.getByRole('button', { name: 'Edit', exact: true }).click();
+  const editBox = balance.getByRole('textbox', { name: 'Answer to this player (they get a message)' });
+  await editBox.fill(`${SUGGESTED[2]} Edited.`);
+  const replaced = 'Thank you. Heavy armor weight is lowered in the next patch.';
+  Object.assign(owned.find(i => i.id === 2)!, { suggestion: replaced, suggestedAtMs: Date.now() });
+  // Sending the edit of the old suggestion: refused (conflict), nothing sent, and the reloaded item shows the new suggestion.
+  const answersBefore = actions.filter(a => a.action === 'answer').length;
+  await balance.getByRole('button', { name: 'Send answer', exact: true }).click();
+  await expect(balance.getByRole('alert')).toHaveText('Claude changed this suggestion after you opened it. Read the new one, then send again.');
+  expect(actions.filter(a => a.action === 'answer')).toHaveLength(answersBefore + 1);
+  expect(actions.filter(a => a.action === 'answer').at(-1)).toEqual({ tab: 'feedback', action: 'answer', id: 2, text: `${SUGGESTED[2]} Edited.`, fromSuggestion: true, suggestedAtMs: shownAt });
+  await expect(balance.locator('[data-feedback-suggestion]')).toContainText(replaced);
+  await expect(balance).toContainText(/Balance\s*Read/);
+  expect(owned.find(i => i.id === 2)).toMatchObject({ status: 'read', answer: null });
+  expect(await noHorizontalScroll(page)).toBe(true);
+  await shot(page, info, 'owner-feedback-suggestion-replaced');
+  // Approving the suggestion shown now sends it, with its own time.
+  const nowAt = owned.find(i => i.id === 2)!.suggestedAtMs;
+  await balance.getByRole('button', { name: 'Approve and send', exact: true }).click();
+  await expect(balance).toContainText(/Balance\s*Answered \(approved suggestion\)/);
+  expect(actions).toContainEqual({ tab: 'feedback', action: 'answer', id: 2, text: replaced, fromSuggestion: true, suggestedAtMs: nowAt });
 });

@@ -73,7 +73,7 @@ export type LiveData = {
   dungeonFights?: readonly DungeonFightRow[];
   /** Recent public results, newest first. */
   recent?: readonly ResultRow[];
-  /** Open marketplace offers (the public `market_offers` projection), in any order. */
+  /** Open marketplace offers (the public `market_offer_reads` view over the `market_offers` projection, M37), in any order. */
   market?: readonly MarketListing[];
   /** The visible game messages (the public `game_messages` table), in any order; none by default. */
   messages?: readonly GameMessage[];
@@ -468,9 +468,11 @@ function tables({ world, owner, now, reader, data }: LiveState): Record<string, 
     tournament_views: { rows: tournamentViews },
     tournament_bout_results: { rows: due(boutResults) },
     tournament_placements: { rows: placements },
-    // Open offers, readable by visitors too; RLS hides an offer from its expiry time on, swept or not.
-    market_offers: { rows: (data.market ?? []).filter(o => o.expiresAtMs > now).map(o => ({ id: o.listingId, seller_gladiator_id: o.seller.gladiatorId,
-      seller_name: o.seller.name, item: o.item, price: o.price, listed_at_ms: o.listedAtMs, expires_at_ms: o.expiresAtMs })) },
+    // Open offers, readable by visitors too; RLS hides an offer from its expiry time on, swept or not. M37: the view adds each seller's
+    // class, league and level (null when the offer names none).
+    market_offer_reads: { rows: (data.market ?? []).filter(o => o.expiresAtMs > now).map(o => ({ id: o.listingId, seller_gladiator_id: o.seller.gladiatorId,
+      seller_name: o.seller.name, item: o.item, price: o.price, listed_at_ms: o.listedAtMs, expires_at_ms: o.expiresAtMs,
+      seller_class_id: o.sellerClassId ?? null, seller_league: o.sellerLeague ?? null, seller_level: o.sellerLevel ?? null })) },
     // Game messages (M25), readable by visitors too; the table's row security hides a hidden one, so the rows here are the visible ones.
     game_messages: { rows: (data.messages ?? []).map(m => ({ id: m.id, kind: m.kind, title: m.title, preview: m.preview, body: m.body, action: m.action,
       published_at_ms: m.publishedAtMs })) },

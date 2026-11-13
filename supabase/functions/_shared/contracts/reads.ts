@@ -178,6 +178,14 @@ export type MarketListing = {
   /** Database time the listing was created; pages run newest first by it, then by listing id. */
   listedAtMs: number;
   expiresAtMs: number;
+  /**
+   * Patch 1.9 (M37, Task 25): the seller gladiator's class, league and level as of the read, for the Marketplace's seller band
+   * (`public.market_offer_reads` joins them from the seller's public actor projection; no copy is stored). Null when the read
+   * cannot name one (a seller the projection does not know, or a value this client does not know); absent from an older read.
+   */
+  sellerClassId?: ClassId | null;
+  sellerLeague?: LeagueId | null;
+  sellerLevel?: number | null;
 };
 export type MarketPage = CursorPage<MarketListing>;
 export type StandingRow = {
@@ -228,3 +236,43 @@ export type TournamentView = {
 };
 export type ResultRow = { gladiatorId: GladiatorId; name: string; summary: PublicActivitySummary };
 export type ResultsPage = CursorPage<ResultRow>;
+/** Patch 1.9 (M37, Task 25): the three lists of a gladiator's history, each its own chip on the card. */
+export type HistoryKind = 'arena' | 'tournament' | 'expedition';
+/**
+ * One row of a gladiator's public history (`public.gladiator_history_reads`), the same for every reader: a visitor, another player
+ * and the owner. An Arena or expedition row is one settled activity; a tournament row is one fought bout (never a bye) of a settled
+ * tournament run, so a run that reached the final has one row per round. Nothing of an activity shows before it has settled, and no
+ * row ever carries a reward, renown, rating change, gold, item, loot, receipt, schedule or plan: an owner's own rewards come from its
+ * owner reads (My bouts, notifications, the timeline's summary).
+ */
+export type HistoryEntry = {
+  /** The row's key and the cursor's tie-break: the activity id (Arena, expedition) or the tournament bout id. */
+  entryId: string;
+  kind: HistoryKind;
+  /** The replay to open (`timeline(activityId)`, `?view=replay&activity=`); a tournament row names its run's activity. */
+  activityId: ActivityId;
+  /** Arena: the bout's reveal (minute 60); tournament: the bout's reveal; expedition: the slot's start. Pages run newest first by it. */
+  foughtAtMs: number;
+  settledAtMs: number;
+  /** A tournament row's is that bout's; an expedition's is victory exactly when it succeeded. */
+  result: 'victory' | 'defeat';
+  success: boolean;
+  /** As of the read's database time: `expired` once the replay is no longer kept, whatever the stored state still says. */
+  replayExpiry: { state: 'available'; expiresAtMs: number } | { state: 'expired' };
+  /** An Arena bout against a Ludus Nimbus bot. */
+  arenaMode?: 'unranked';
+  /** Arena: the bout's league (null for a bout settled more than seven days before M37); tournament: the tournament's. */
+  league: LeagueId | null;
+  /** Tournament rows only: the tournament (`tournament:<slot>:<league>`), the bout's round and the run's final place. */
+  tournamentId: string | null;
+  round: 'Final' | 'Semifinal' | 'Quarterfinal' | `Round ${number}` | null;
+  place: number | null;
+  /** Expedition rows only: the catalog id of the destination. */
+  expeditionId: string | null;
+  /** The other fighter, only while the replay is kept (an NPC fallback has no gladiator; a bot of an unranked bout is named so). */
+  opponent: { name: string; npc: boolean; botTeam?: 'ludus-nimbus' } | null;
+};
+/** One page of 20 rows of one kind, newest first; `nextCursor` (`foughtAtMs:entryId`) names the last row of a full page. */
+export type HistoryPage = CursorPage<HistoryEntry>;
+/** The chips' counts: every row of each kind the history holds, and how many of them were won. */
+export type HistoryCounts = Record<HistoryKind, { total: number; won: number }>;

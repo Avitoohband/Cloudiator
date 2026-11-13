@@ -71,7 +71,8 @@ describe('Game Info feedback actions', () => {
   const list = { tab: 'feedback', action: 'list', filter: 'new' };
   const markRead = { tab: 'feedback', action: 'mark-read', id: 7 };
   const answer = { tab: 'feedback', action: 'answer', id: 7, text: 'Thank you, found it. It is fixed in the next patch.' };
-  const approve = { ...answer, fromSuggestion: true };
+  // M37: an approval carries the time of the suggestion the editor saw.
+  const approve = { ...answer, fromSuggestion: true, suggestedAtMs: 1_791_590_460_000 };
   const suggest = { tab: 'feedback', action: 'suggest', id: 7, text: 'Thanks, we are on it.' };
 
   it('passes the verified owner and the parsed action to the feedback store, and answers its result', async () => {
@@ -117,7 +118,10 @@ describe('Game Info feedback actions', () => {
       expect((await send(bad, mcpToken)).status, JSON.stringify(bad)).toBe(400);
     }
     for (const bad of [{ ...answer, fromSuggestion: false }, { ...answer, fromSuggestion: 'true' }, { ...answer, fromSuggestion: 1 },
-      { ...answer, fromSuggestion: null }, { ...markRead, fromSuggestion: true }]) {
+      { ...answer, fromSuggestion: null }, { ...markRead, fromSuggestion: true },
+      // M37: an approval without the suggestion's time, the time without fromSuggestion, or a time that is not a whole number.
+      { ...answer, fromSuggestion: true }, { ...answer, suggestedAtMs: 1 }, { ...approve, suggestedAtMs: -1 }, { ...approve, suggestedAtMs: 1.5 },
+      { ...approve, suggestedAtMs: '1791590460000' }, { ...approve, suggestedAtMs: null }, { ...approve, fromSuggestion: false }, { ...markRead, suggestedAtMs: 1 }]) {
       expect((await send(bad, 'owner-session', origin)).status, JSON.stringify(bad)).toBe(400);
     }
     expect(feedback).not.toHaveBeenCalled();

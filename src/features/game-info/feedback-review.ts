@@ -3,7 +3,9 @@
 // sent to the player as a team-reply message). A refusal is its code: `forbidden` (not an editor), `invalid`, `not-found`, `conflict` (already
 // answered) or `unavailable`. The items are read defensively: a malformed one is left out rather than failing the list.
 // M36 (Task 23b): an item may carry Claude's suggested answer (saved through the Game Info MCP), which only the owner sends: as shown or
-// edited, with `fromSuggestion` (then `answeredVia` is 'claude-approved'; the owner's own words are 'owner').
+// edited, with `fromSuggestion` (then `answeredVia` is 'claude-approved'; the owner's own words are 'owner'). M37: with the time of the
+// suggestion the owner saw (`suggestedAtMs`); the server answers `conflict` when Claude has replaced it since. An `answeredVia` this
+// client does not know (a newer server's) reads as none, so the item still shows.
 import type { FeedbackAnsweredVia, FeedbackDetails, FeedbackStatus, OwnerFeedbackItem } from '@contracts/reads';
 import { isFeedbackCategory, validFeedbackDetails } from '@domain/feedback';
 import { getBrowserClient } from '../../lib/api/client';
@@ -40,10 +42,11 @@ export function feedbackItemOf(value: unknown): OwnerFeedbackItem | null {
   if (!record(value) || !whole(value.id, 1) || !isFeedbackCategory(value.category) || typeof value.text !== 'string' || typeof value.status !== 'string'
     || !STATUSES.includes(value.status) || !whole(value.createdAtMs) || (value.gladiatorName !== null && typeof value.gladiatorName !== 'string')
     || (value.answer !== null && typeof value.answer !== 'string') || (value.answeredAtMs !== null && !whole(value.answeredAtMs))) return null;
-  // M36's fields: absent (a server before M36) reads as none; present, they must be well formed, and a suggestion has its time.
-  const answeredVia = value.answeredVia ?? null, suggestion = value.suggestion ?? null, suggestedAtMs = value.suggestedAtMs ?? null;
-  if ((answeredVia !== null && (typeof answeredVia !== 'string' || !ANSWERED_VIA.includes(answeredVia)))
-    || (suggestion !== null && (typeof suggestion !== 'string' || !whole(suggestedAtMs))) || (suggestion === null && suggestedAtMs !== null)) return null;
+  // M36's fields: absent (a server before M36) reads as none; a suggestion must be well formed and have its time. Who answered is shown
+  // only when this client knows the value: any other reads as none (the plain "Answered"), never dropping the item.
+  const answeredVia = typeof value.answeredVia === 'string' && ANSWERED_VIA.includes(value.answeredVia) ? value.answeredVia : null;
+  const suggestion = value.suggestion ?? null, suggestedAtMs = value.suggestedAtMs ?? null;
+  if ((suggestion !== null && (typeof suggestion !== 'string' || !whole(suggestedAtMs))) || (suggestion === null && suggestedAtMs !== null)) return null;
   const details = value.details === null || !validFeedbackDetails(value.details) ? null : value.details as FeedbackDetails;
   return { id: value.id, category: value.category, text: value.text, details, status: value.status as FeedbackStatus, createdAtMs: value.createdAtMs,
     gladiatorName: value.gladiatorName as string | null, answer: value.answer as string | null, answeredAtMs: value.answeredAtMs as number | null,
@@ -66,10 +69,11 @@ export async function markFeedbackRead(id: number): Promise<{ ok: true } | Refus
 }
 
 /**
- * The one answer: the player gets it as a message and the item is Answered (a second answer is `conflict`). `fromSuggestion` when the
- * text is Claude's suggestion, as shown or edited (recorded as an approved suggestion; `conflict` if the item no longer holds one).
+ * The one answer: the player gets it as a message and the item is Answered (a second answer is `conflict`). `suggestion` when the text
+ * is Claude's suggestion, as shown or edited, naming the time of the suggestion the owner saw (recorded as an approved suggestion;
+ * `conflict` if the item no longer holds that suggestion: Claude replaced it, or it was answered).
  */
-export async function answerFeedback(id: number, text: string, fromSuggestion = false): Promise<{ ok: true } | Refusal> {
-  const answer = await invoke({ tab: 'feedback', action: 'answer', id, text, ...(fromSuggestion ? { fromSuggestion: true } : {}) });
+export async function answerFeedback(id: number, text: string, suggestion?: { suggestedAtMs: number }): Promise<{ ok: true } | Refusal> {
+  const answer = await invoke({ tab: 'feedback', action: 'answer', id, text, ...(suggestion ? { fromSuggestion: true, suggestedAtMs: suggestion.suggestedAtMs } : {}) });
   return answer.ok ? { ok: true } : answer;
 }

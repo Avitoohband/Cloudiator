@@ -8,12 +8,15 @@ type RequestBody = { action: 'read'; tab: Tab } | { action: 'publish'; tab: Tab;
 /**
  * Patch 1.9 (M34, M36): the feedback actions. `list` answers {ok, items, newCount} and `mark-read` {ok, id, status}, for a signed-in
  * Game Info editor (public.review_feedback checks the allowlist) and for the MCP credential (Claude). Only the editor sends:
- * `answer` (1 to 2,000 characters once trimmed; `fromSuggestion: true` when it sends Claude's suggestion, as shown or edited)
- * answers {ok, id, status: 'answered', messageId}. Only the MCP credential suggests: `suggest` (1 to 2,000 characters once trimmed)
- * saves a suggested answer the editor may send later, and answers {ok, id, status, suggestedAtMs}; it reaches no player.
+ * `answer` (1 to 2,000 characters once trimmed; `fromSuggestion: true` when it sends Claude's suggestion, as shown or edited, and then
+ * also `suggestedAtMs`, the time of the suggestion the editor saw: M37 answers `conflict` when Claude has replaced it since) answers
+ * {ok, id, status: 'answered', messageId}. Only the MCP credential suggests: `suggest` (1 to 2,000 characters once trimmed) saves a
+ * suggested answer the editor may send later, and answers {ok, id, status, suggestedAtMs}; it reaches no player.
  */
 export type FeedbackRequest = { tab: 'feedback'; action: 'list'; filter: 'new' | 'answered' | 'all' } | { tab: 'feedback'; action: 'mark-read'; id: number }
-  | { tab: 'feedback'; action: 'answer'; id: number; text: string; fromSuggestion?: true } | { tab: 'feedback'; action: 'suggest'; id: number; text: string };
+  | { tab: 'feedback'; action: 'answer'; id: number; text: string }
+  | { tab: 'feedback'; action: 'answer'; id: number; text: string; fromSuggestion: true; suggestedAtMs: number }
+  | { tab: 'feedback'; action: 'suggest'; id: number; text: string };
 
 type Dependencies = {
   allowedOrigins: readonly string[];
@@ -29,13 +32,14 @@ const whole = (value: unknown, minimum = 0): value is number => typeof value ===
 
 /** Exactly one feedback action with exactly its keys, or null. */
 function parseFeedback(input: Record<string, unknown>): FeedbackRequest | null {
-  const { action, filter, id, text } = input;
+  const { action, filter, id, text, suggestedAtMs } = input;
   const size = Object.keys(input).length;
   if (action === 'list' && size === 3 && (filter === 'new' || filter === 'answered' || filter === 'all')) return { tab: 'feedback', action, filter };
   if (action === 'mark-read' && size === 3 && whole(id, 1)) return { tab: 'feedback', action, id };
   if (action === 'answer' && whole(id, 1) && validFeedbackAnswer(text)) {
     if (size === 4) return { tab: 'feedback', action, id, text };
-    if (size === 5 && input.fromSuggestion === true) return { tab: 'feedback', action, id, text, fromSuggestion: true };
+    // M37: an approval names the suggestion it approves by its time.
+    if (size === 6 && input.fromSuggestion === true && whole(suggestedAtMs)) return { tab: 'feedback', action, id, text, fromSuggestion: true, suggestedAtMs };
   }
   if (action === 'suggest' && size === 4 && whole(id, 1) && validFeedbackSuggestion(text)) return { tab: 'feedback', action, id, text };
   return null;

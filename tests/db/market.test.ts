@@ -704,12 +704,12 @@ describe('marketplace listings in the database', () => {
     const dear = { kind: 'create-listing', operationId: randomUUID(), itemId: bow.id, price: 1_000_000_001 };
     expect(directEdge(seller.token, dear)).toMatchObject({ status: 400, body: { ok: false, code: 'invalid' } });
     expect(await receipts(dear.operationId)).toBe(0);
-    // Visitors read the offer, with its listing time.
+    // Visitors read the offer, with its listing time (and, M37, its seller's class, league and level).
     const [{ name }] = await sql`select name from public.gladiators where id=${seller.gid}`;
     const listed = await listingRow(id);
     expect(await readMarket(anonymous, undefined, seller.gid)).toEqual({ nextCursor: null, rows: [{ listingId: id, seller: { gladiatorId: seller.gid, name },
       item: { catalogId: 'heavy-armor:10:rare', catalogVersion: 'v1', tier: 10, rarity: 'rare', stats: armor.stats, quantity: 1 }, price: 200,
-      listedAtMs: listed.listed, expiresAtMs: listed.expires }] });
+      listedAtMs: listed.listed, expiresAtMs: listed.expires, sellerClassId: 'guardian', sellerLeague: 'bronze', sellerLevel: 1 }] });
     // The purchase: exact origins only, and the buyer's historical strength prepared from its owner state and the offer
     // (tier 10 rare heavy armor, 2 x 15.6 = 31.2, replaces light armor's 4 beside the starter sword's 24).
     const command = { kind: 'buy-listing', operationId: randomUUID(), listingId: id.toUpperCase() };
@@ -876,6 +876,60 @@ describe('marketplace listings in the database', () => {
       const old = listingId(await listAt(seller, sword.id, 77, await nowMs() - WEEK - 1_000));
       expect(await offerRow(old)).toMatchObject({ id: old });
       for (const client of [anonymous, reader.client]) expect((await client.from('market_offers').select('id').eq('id', old)).data).toEqual([]);
+      expect(await sweep()).toBe(1);
+    });
+  });
+
+  // Patch 1.9 (M37, supabase/sql/31-history-sellers.sql; market-grid notes "Revision 2026-11-13": the seller band). The listing read
+  // (public.market_offer_reads) names the seller gladiator's class, league and level as of the read, joined from its public actor
+  // projection; no copy is stored. Fees, limits, commands and the offers table are unchanged.
+  it("names each offer's seller class, league and level as of the read, for visitors and players alike (M37)", async () => {
+    const seller = await fighter(), reader = await fighter();
+    const sword = await seller.add('sword:5:uncommon');
+    const id = listingId(await list(seller, sword.id, 88));
+    const [{ name }] = await sql`select name from public.gladiators where id=${seller.gid}`;
+    const offer = async (client: typeof anonymous) => (await readMarket(client, undefined, seller.gid)).rows.find(row => row.listingId === id);
+    for (const client of [anonymous, reader.client, seller.client]) {
+      expect(await offer(client)).toEqual({ listingId: id, seller: { gladiatorId: seller.gid, name }, price: 88, listedAtMs: expect.any(Number),
+        expiresAtMs: expect.any(Number), item: { catalogId: 'sword:5:uncommon', catalogVersion: 'v1', tier: 5, rarity: 'uncommon', stats: sword.stats, quantity: 1 },
+        sellerClassId: 'guardian', sellerLeague: 'bronze', sellerLevel: 1 });
+    }
+    // As of the read: the gladiator levels up, is placed in Silver and takes another class (its projection follows in the same transaction).
+    await sql`update public.gladiators set level=7, league='silver' where id=${seller.gid}`;
+    await sql`update public.builds set current_build=jsonb_set(current_build,'{classId}','"duelist"') where gladiator_id=${seller.gid}`;
+    for (const client of [anonymous, reader.client]) {
+      expect(await offer(client)).toMatchObject({ listingId: id, sellerClassId: 'duelist', sellerLeague: 'silver', sellerLevel: 7 });
+    }
+    // The view's row: the offer's columns and the three seller columns, nothing else; the listing's own row stores no copy.
+    const { data, error } = await anonymous.from('market_offer_reads').select('*').eq('id', id);
+    expect(error).toBeNull();
+    expect(data).toEqual([{ id, seller_gladiator_id: seller.gid, seller_name: name, price: 88, listed_at_ms: expect.any(Number), expires_at_ms: expect.any(Number),
+      item: { catalogId: 'sword:5:uncommon', catalogVersion: 'v1', tier: 5, rarity: 'uncommon', stats: sword.stats, quantity: 1 },
+      seller_class_id: 'duelist', seller_league: 'silver', seller_level: 7 }]);
+    expect(Object.keys((await offerRow(id))!).sort()).toEqual(['expires', 'id', 'item', 'listed', 'name', 'price', 'seller']);
+    // A seller the projection does not know reads null (the view joins it; nothing else is invented).
+    const ROLLBACK = new Error('rollback-only');
+    let unknown: unknown;
+    try {
+      await sql.begin(async tx => {
+        await tx`delete from public.world_actors where gladiator_id=${seller.gid}`;
+        unknown = (await tx`select seller_class_id, seller_league, seller_level from public.market_offer_reads where id=${id}`).map(row => ({ ...row }));
+        throw ROLLBACK;
+      });
+    } catch (caught) { if (caught !== ROLLBACK) throw caught; }
+    expect(unknown).toEqual([{ seller_class_id: null, seller_league: null, seller_level: null }]);
+    // Read-only, and an expired offer stays hidden through the view as through the table.
+    for (const client of [anonymous, reader.client]) {
+      expect((await client.from('market_offer_reads').insert({ id: randomUUID() }).select()).error).not.toBeNull();
+      expect((await client.from('market_offer_reads').update({ price: 1 }).eq('id', id).select()).error).not.toBeNull();
+    }
+    expect(await sql`select relname, reloptions from pg_class where oid='public.market_offer_reads'::regclass`)
+      .toEqual([{ relname: 'market_offer_reads', reloptions: ['security_invoker=true'] }]);
+    expect(await cancel(seller, id)).toMatchObject({ ok: true });
+    expect((await anonymous.from('market_offer_reads').select('id').eq('id', id)).data).toEqual([]);
+    await withClock(async () => {
+      const old = listingId(await listAt(seller, sword.id, 77, await nowMs() - WEEK - 1_000));
+      for (const client of [anonymous, reader.client]) expect((await client.from('market_offer_reads').select('id').eq('id', old)).data).toEqual([]);
       expect(await sweep()).toBe(1);
     });
   });

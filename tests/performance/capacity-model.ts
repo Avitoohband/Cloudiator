@@ -97,6 +97,9 @@ export const TABLE_CLASSES: Readonly<Record<string, { retention: Retention; wind
   'private.tournament_results': { retention: 'detail' }, 'private.tournaments': { retention: 'detail' }, 'public.activity_stages': { retention: 'detail' },
   'private.boundaries': { retention: 'summary' }, 'private.boundary_work': { retention: 'summary' }, 'public.activities': { retention: 'summary' },
   'public.recent_results': { retention: 'summary' }, 'public.reservations': { retention: 'summary' }, 'public.wallet_ledger': { retention: 'summary' },
+  // Patch 1.9 (M37): one row per settled Arena bout or expedition (its league, fought time and destination), kept with its activity
+  // and deleted with it at the 90-day pass (on delete cascade), like its public result.
+  'public.result_details': { retention: 'summary' },
   'public.tournament_bout_results': { retention: 'summary', compactAfterSlots: RETENTION.detailSlots },
   'public.tournament_placements': { retention: 'summary' }, 'public.tournament_views': { retention: 'summary' },
   'private.settled_slots': { retention: 'permanent' },

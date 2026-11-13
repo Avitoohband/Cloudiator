@@ -9,6 +9,7 @@ import { RULES_V1 } from '../../supabase/functions/_shared/domain/rules-v1.ts';
 import { applyXp } from '../../supabase/functions/_shared/domain/inventory.ts';
 import type { ActivitySnapshot, JobLease } from '../../supabase/functions/_shared/domain/types.ts';
 import type { OwnerState } from '../../supabase/functions/_shared/contracts/reads.ts';
+import { readHistory, readHistoryCounts } from '../../src/lib/api/reads.ts';
 
 const SLOT = 4_800_000;
 const commands = createDatabase(admin);
@@ -85,6 +86,16 @@ describe('private expedition integration',()=>{
     expect(completed).toBe(true);expect((await f.state()).wallets.money).toBe(120);
     expect(worker().failed).toBe(0);expect((await f.state()).wallets.money).toBe(120);
     expect(await sql`select * from private.settled_slots where activity_id=${f.aid}`).toHaveLength(1);
+    // Patch 1.9 (M37): the worker's settlement (the Edge runtime, as service_role) records the destination, and anyone reads the trip in
+    // this gladiator's history while its replay is kept, with no reward.
+    const [{settled}]=await sql`select settled_at_ms::float8 as settled from public.activities where id=${f.aid}`;
+    for(const client of [anonymous,f.client]) {
+      expect(await readHistory(client,f.gid,'expedition')).toEqual({nextCursor:null,rows:[{entryId:f.aid,kind:'expedition',activityId:f.aid,foughtAtMs:f.slot*SLOT,
+        settledAtMs:settled,result:'victory',success:true,replayExpiry:{state:'available',expiresAtMs:(f.slot+1)*SLOT+604_800_000},league:null,tournamentId:null,round:null,
+        place:null,expeditionId:'woodland',opponent:null}]});
+      expect(await readHistoryCounts(client,f.gid)).toEqual({arena:{total:0,won:0},tournament:{total:0,won:0},expedition:{total:1,won:1}});
+    }
+    expect(JSON.stringify(await readHistory(anonymous,f.gid,'expedition'))).not.toMatch(/rewards|"money"|"xp"|receiptId|loot/);
   });
   it('withholds money/items/progression at minute 79 and settles at minute 80 using database time',async()=>{
     const f=await fixture(); await plan(f);

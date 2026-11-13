@@ -1,18 +1,18 @@
 import type { ActivityId, ApiErrorCode, CommandResult, GameCommand, GladiatorId, LeagueId, PresenceResult } from '@contracts/commands';
 import type { BattleLog, PartyBattleLog, RevealedTimeline } from '@contracts/events';
 import type { Appearance } from '@domain/appearance';
-import type { MarketPage, OwnFeedback, OwnerState, ResultsPage, SeasonView, StandingRow, StandingsPage, TournamentView, WorldSnapshot } from '@contracts/reads';
+import type { HistoryCounts, HistoryKind, HistoryPage, MarketPage, OwnFeedback, OwnerState, ResultsPage, SeasonView, StandingRow, StandingsPage, TournamentView, WorldSnapshot } from '@contracts/reads';
 import type { PatchEntry } from '../patch';
 import { getBrowserClient } from './client';
 import {
-  GatewayReadError, parseDungeonFightRef, readBouts, readDungeonFight, readLooks, readMarket, readMessages, readNotifications, readOwnFeedback, readOwner, readPatchNumbers, readPatches, readWorld, readRevision, readTimeline, readProfile,
+  GatewayReadError, parseDungeonFightRef, readBouts, readDungeonFight, readHistory, readHistoryCounts, readLooks, readMarket, readMessages, readNotifications, readOwnFeedback, readOwner, readPatchNumbers, readPatches, readWorld, readRevision, readTimeline, readProfile,
   readRecent, readRestAfter, readSeasons, readStandingOf, readStandings, readTournament, readTournamentLog, type BoutFilter, type BoutsPage, type NotificationsRead, type ProfileRead, type RevisionRead, type ShownMessage,
 } from './reads';
 export { GatewayReadError, type NotificationsRead, type ProfileRead, type RevisionRead, type ShownMessage } from './reads';
 
 /**
  * Public projections (world, revision, timeline, profile, market offers, seasons, standings and one gladiator's standing,
- * tournament, tournament log, dungeon fight, recent results) can be read without a session. `owner()`, `notifications()`, `bouts()`, `command()` and
+ * tournament, tournament log, dungeon fight, recent results, a gladiator's history and its counts) can be read without a session. `owner()`, `notifications()`, `bouts()`, `command()` and
  * `sendPresence()` require a signed-in account.
  */
 export interface GameGateway {
@@ -114,6 +114,15 @@ export interface GameGateway {
    * Owner-only: it needs a signed-in account. The fixture preview has none (it shows no feedback entry).
    */
   feedback?(): Promise<OwnFeedback[]>;
+  /**
+   * Patch 1.9 (M37): one page (20) of any gladiator's public history of one kind (`arena`, `tournament` or `expedition`), newest first;
+   * `cursor` is a page's `nextCursor`. Public: a visitor, another player and the owner read the same rows, with no reward of any kind;
+   * only settled activities, an opponent only while the replay is kept. A malformed id, kind or cursor is `unavailable`, without a
+   * request; a row this client cannot show is left out. Optional: a gateway without it has no history to show.
+   */
+  history?(gladiatorId: GladiatorId, kind: HistoryKind, cursor?: string): Promise<HistoryPage>;
+  /** Patch 1.9 (M37): the history's counts per kind (every row the history lists, and how many were won); all 0 without history. */
+  historyCounts?(gladiatorId: GladiatorId): Promise<HistoryCounts>;
 }
 
 type BrowserClient = NonNullable<ReturnType<typeof getBrowserClient>>;
@@ -303,5 +312,7 @@ export function createLiveGateway(): GameGateway {
         () => publicRead(client => readDungeonFight(client, ref.runId, ref.ordinal)));
     },
     market: (cursor, seller) => publicRead(client => readMarket(client, cursor, seller)),
+    history: (gladiatorId, kind, cursor) => publicRead(client => readHistory(client, gladiatorId, kind, cursor)),
+    historyCounts: gladiatorId => publicRead(client => readHistoryCounts(client, gladiatorId)),
   };
 }

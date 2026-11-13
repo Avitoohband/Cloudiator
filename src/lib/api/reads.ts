@@ -1,8 +1,8 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
-import type { ActivityId, Attributes, DungeonId, EquipmentSlot, GladiatorId, LeagueId, Stance } from '@contracts/commands';
+import type { ActivityId, Attributes, ClassId, DungeonId, EquipmentSlot, GladiatorId, LeagueId, Stance } from '@contracts/commands';
 import type { ActivitySummary, BattleLog, CreditedRewards, ItemRarity, PartyBattleLog, PublicActivitySummary, RevealedStage, RevealedTimeline } from '@contracts/events';
 import type {
-  BuyBackEntry, EarnedTitle, GameMessage, GameNotification, ItemInstance, MarketListing, MarketPage, MessageBlock, OwnFeedback, OwnerState, PrestigeAward, PublicActor, PublicProfile, ResultsPage, RevisionState, SeasonView, StandingRow, StandingsPage,
+  BuyBackEntry, EarnedTitle, GameMessage, GameNotification, HistoryCounts, HistoryEntry, HistoryKind, HistoryPage, ItemInstance, MarketListing, MarketPage, MessageBlock, OwnFeedback, OwnerState, PrestigeAward, PublicActor, PublicProfile, ResultsPage, RevisionState, SeasonView, StandingRow, StandingsPage,
   TournamentBout, TournamentEntrant, TournamentPlacement, TournamentView, WorldSnapshot,
 } from '@contracts/reads';
 import { validAppearance, type Appearance } from '@domain/appearance';
@@ -349,15 +349,19 @@ export async function readRestAfter(client: SupabaseClient, gladiatorId: Gladiat
     .gte('reveal_at_ms', next.fromMs).lt('reveal_at_ms', next.toMs).limit(4)) as unknown as { summary: unknown }[];
   return rows.some(row => typeof row.summary === 'object' && row.summary !== null && (row.summary as { resolvedKind?: unknown }).resolvedKind === 'rest');
 }
-type OfferRow = { id: string; seller_gladiator_id: string; seller_name: string; item: MarketListing['item']; price: number; listed_at_ms: number; expires_at_ms: number };
+type OfferRow = { id: string; seller_gladiator_id: string; seller_name: string; item: MarketListing['item']; price: number; listed_at_ms: number; expires_at_ms: number;
+  seller_class_id?: unknown; seller_league?: unknown; seller_level?: unknown };
+const SELLER_CLASSES: readonly unknown[] = ['berserker', 'guardian', 'duelist'];
 /**
- * One page of open fixed-price offers from the public `market_offers` projection, which visitors read as `anon` (its RLS
- * hides an offer from its expiry time on). Newest listing first, then by listing id, at most 50 rows; with `seller`, only that
- * gladiator's offers. A full page names its last row as the next cursor. The item crosses only its six sanitized fields.
+ * One page of open fixed-price offers from the public `market_offer_reads` view (M37) over the `market_offers` projection, which
+ * visitors read as `anon` (its RLS hides an offer from its expiry time on). Newest listing first, then by listing id, at most 50
+ * rows; with `seller`, only that gladiator's offers. A full page names its last row as the next cursor. The item crosses only its
+ * six sanitized fields. Each offer also carries its seller's class, league and level as of the read (the view joins them from the
+ * seller's public actor projection); a value this client does not know reads as null.
  */
 export async function readMarket(client: SupabaseClient, cursor?: string, seller?: GladiatorId): Promise<MarketPage> {
   const options = parseMarketRead(cursor, seller);
-  let query = client.from('market_offers').select('id,seller_gladiator_id,seller_name,item,price,listed_at_ms,expires_at_ms')
+  let query = client.from('market_offer_reads').select('id,seller_gladiator_id,seller_name,item,price,listed_at_ms,expires_at_ms,seller_class_id,seller_league,seller_level')
     .order('listed_at_ms', { ascending: false }).order('id').limit(MARKET_PAGE);
   if (options.seller) query = query.eq('seller_gladiator_id', options.seller);
   if (options.after) query = query.or(`listed_at_ms.lt.${options.after.time},and(listed_at_ms.eq.${options.after.time},id.gt.${options.after.id})`);
@@ -368,7 +372,10 @@ export async function readMarket(client: SupabaseClient, cursor?: string, seller
     rows: rows.map(row => {
       const { catalogId, catalogVersion, tier, rarity, stats, quantity } = row.item;
       return { listingId: row.id, seller: { gladiatorId: row.seller_gladiator_id, name: row.seller_name },
-        item: { catalogId, catalogVersion, tier, rarity, stats, quantity }, price: Number(row.price), listedAtMs: Number(row.listed_at_ms), expiresAtMs: Number(row.expires_at_ms) };
+        item: { catalogId, catalogVersion, tier, rarity, stats, quantity }, price: Number(row.price), listedAtMs: Number(row.listed_at_ms), expiresAtMs: Number(row.expires_at_ms),
+        sellerClassId: SELLER_CLASSES.includes(row.seller_class_id) ? row.seller_class_id as ClassId : null,
+        sellerLeague: LEAGUES.includes(row.seller_league as string) ? row.seller_league as LeagueId : null,
+        sellerLevel: typeof row.seller_level === 'number' && Number.isSafeInteger(row.seller_level) && row.seller_level >= 1 ? row.seller_level : null };
     }),
     nextCursor: last && rows.length === MARKET_PAGE ? `${last.listed_at_ms}:${last.id}` : null,
   };
@@ -1054,4 +1061,100 @@ export async function readDungeonFight(client: SupabaseClient, runId: string, or
   const { log } = checked<{ log: unknown }>(await client.from('dungeon_fights').select('log').eq('run_id', ref.runId).eq('ordinal', ref.ordinal).maybeSingle());
   if (!isPartyLog(log, ref)) throw new GatewayReadError('unavailable');
   return log;
+}
+
+// ------------------------------------------------------------------ A gladiator's history (Patch 1.9, M37)
+
+/** How many rows one page of a gladiator's history holds (the card's "Show more"). */
+export const HISTORY_PAGE = 20;
+const HISTORY_KINDS: readonly unknown[] = ['arena', 'tournament', 'expedition'] satisfies HistoryKind[];
+/** A history row's key: an activity id (Arena, expedition) or a tournament bout id; both use only [0-9a-z:-]. */
+const historyEntryId = (value: unknown): value is string => typeof value === 'string' && (GLADIATOR_ID.test(value) || TOURNAMENT_BOUT_ID.test(value));
+/**
+ * The history read's options, checked before any query is built (the fixture gateway applies the same rules): a gladiator id
+ * (lowercased), one of the three kinds, and the cursor `foughtAtMs:entryId` a full page issued (none when absent, null or empty).
+ * Anything else is `unavailable`.
+ */
+export function parseHistoryRead(gladiatorId: GladiatorId, kind: HistoryKind, cursor?: string | null): { gladiatorId: GladiatorId; kind: HistoryKind; after: { time: number; id: string } | null } {
+  if (typeof gladiatorId !== 'string' || !GLADIATOR_ID.test(gladiatorId) || !HISTORY_KINDS.includes(kind)) throw new GatewayReadError('unavailable');
+  if (cursor === undefined || cursor === null || cursor === '') return { gladiatorId: gladiatorId.toLowerCase(), kind, after: null };
+  const match = typeof cursor === 'string' ? /^(0|[1-9]\d{0,15}):(.+)$/.exec(cursor) : null;
+  if (!match || !Number.isSafeInteger(Number(match[1])) || !historyEntryId(match[2])) throw new GatewayReadError('unavailable');
+  return { gladiatorId: gladiatorId.toLowerCase(), kind, after: { time: Number(match[1]), id: match[2] } };
+}
+const HISTORY_SELECT = 'entry_id,kind,activity_id,fought_at_ms,settled_at_ms,result,success,replay_expires_at_ms,arena_mode,league,tournament_id,round,place,expedition_id,opponent';
+type HistoryRow = Record<string, unknown>;
+const ROUND = /^(Final|Semifinal|Quarterfinal|Round [1-9]\d{0,2})$/;
+/** The opponent as the read names it: null when absent, undefined when not what it should be (a bot team only on an unranked Arena bout). */
+function historyOpponent(value: unknown, unranked: boolean): HistoryEntry['opponent'] | undefined {
+  if (value === null || value === undefined) return null;
+  if (!record(value) || typeof value.name !== 'string' || value.name === '' || typeof value.npc !== 'boolean') return undefined;
+  return { name: value.name, npc: value.npc, ...(unranked && !value.npc && value.botTeam === 'ludus-nimbus' ? { botTeam: 'ludus-nimbus' as const } : {}) };
+}
+/**
+ * One row of `public.gladiator_history_reads` as a history entry, or null for a row this client cannot show faithfully (another kind,
+ * an unknown result, league or mode, a time that is not whole, a key of another shape, a tournament row without its tournament or
+ * round, an expedition without its destination, an opponent without a name). Task 27's fixture rows can be built through this too.
+ */
+export function historyEntryOf(row: HistoryRow, kind: HistoryKind): HistoryEntry | null {
+  const foughtAtMs = wholeOf(row.fought_at_ms), settledAtMs = wholeOf(row.settled_at_ms), expires = row.replay_expires_at_ms ?? null;
+  const expiresAtMs = expires === null ? null : wholeOf(expires), place = (row.place ?? null) === null ? null : wholeOf(row.place);
+  const unranked = kind === 'arena' && row.arena_mode === 'unranked', opponent = historyOpponent(row.opponent, unranked);
+  const league = (row.league ?? null) === null ? null : LEAGUES.includes(row.league as string) ? row.league as LeagueId : undefined;
+  if (row.kind !== kind || !historyEntryId(row.entry_id) || typeof row.activity_id !== 'string' || !GLADIATOR_ID.test(row.activity_id)
+    || foughtAtMs === null || settledAtMs === null || (row.result !== 'victory' && row.result !== 'defeat') || typeof row.success !== 'boolean'
+    || (expires !== null && expiresAtMs === null) || ((row.place ?? null) !== null && (place === null || place < 1)) || opponent === undefined
+    || league === undefined || ((row.arena_mode ?? null) !== null && !unranked)) return null;
+  const tournament = kind === 'tournament';
+  if (tournament !== (typeof row.tournament_id === 'string' && TOURNAMENT_ID.test(row.tournament_id))
+    || tournament !== (typeof row.round === 'string' && ROUND.test(row.round)) || (!tournament && place !== null)
+    || (kind === 'expedition') !== (typeof row.expedition_id === 'string' && row.expedition_id !== '')) return null;
+  return {
+    entryId: row.entry_id, kind, activityId: row.activity_id, foughtAtMs, settledAtMs, result: row.result, success: row.success,
+    replayExpiry: expiresAtMs === null ? { state: 'expired' } : { state: 'available', expiresAtMs }, ...(unranked ? { arenaMode: 'unranked' as const } : {}),
+    league, tournamentId: tournament ? row.tournament_id as string : null, round: tournament ? row.round as HistoryEntry['round'] : null, place,
+    expeditionId: kind === 'expedition' ? row.expedition_id as string : null, opponent,
+  };
+}
+/**
+ * One page (20) of a gladiator's public history of one kind, newest first by `foughtAtMs` and then by `entryId`, from the public
+ * `gladiator_history_reads` view (M37): visitors read it as `anon`, and every reader (the owner too) reads the same rows, with no
+ * reward of any kind. Only settled activities are listed (the view joins each to its public result, under its due rule), and an
+ * opponent is named only while the replay is kept at the database's time. The cursor is the last FETCHED row (`foughtAtMs:entryId`),
+ * so a row this client leaves out never makes the next page repeat; a short page ends the list. A malformed id, kind or cursor is
+ * `unavailable` before any request.
+ */
+export async function readHistory(client: SupabaseClient, gladiatorId: GladiatorId, kind: HistoryKind, cursor?: string): Promise<HistoryPage> {
+  const options = parseHistoryRead(gladiatorId, kind, cursor);
+  let query = client.from('gladiator_history_reads').select(HISTORY_SELECT).eq('gladiator_id', options.gladiatorId).eq('kind', options.kind);
+  // The entry id is quoted: a tournament bout id holds colons, which the Data API's logic trees reserve.
+  if (options.after) query = query.or(`fought_at_ms.lt.${options.after.time},and(fought_at_ms.eq.${options.after.time},entry_id.gt."${options.after.id}")`);
+  const fetched = (checked(await query.order('fought_at_ms', { ascending: false }).order('entry_id').limit(HISTORY_PAGE)) as unknown as HistoryRow[]).slice(0, HISTORY_PAGE);
+  let nextCursor: string | null = null;
+  if (fetched.length === HISTORY_PAGE) {
+    const last = fetched[HISTORY_PAGE - 1], time = wholeOf(last.fought_at_ms);
+    if (time === null || !historyEntryId(last.entry_id)) throw new GatewayReadError('unavailable');
+    nextCursor = `${time}:${last.entry_id}`;
+  }
+  return { rows: fetched.flatMap(row => { const entry = historyEntryOf(row, options.kind); return entry ? [entry] : []; }), nextCursor };
+}
+/** The counts of a gladiator with no history yet. */
+export const NO_HISTORY: Readonly<HistoryCounts> = Object.freeze({ arena: { total: 0, won: 0 }, tournament: { total: 0, won: 0 }, expedition: { total: 0, won: 0 } });
+/**
+ * The chips' counts of a gladiator's public history (`gladiator_history_counts`, M37): every row of each kind the history read lists,
+ * and how many of them were won. A gladiator without history has no row: every count is 0. A malformed id is `unavailable` before
+ * any request; a count that is not a whole number (or more won than listed) fails the read.
+ */
+export async function readHistoryCounts(client: SupabaseClient, gladiatorId: GladiatorId): Promise<HistoryCounts> {
+  if (typeof gladiatorId !== 'string' || !GLADIATOR_ID.test(gladiatorId)) throw new GatewayReadError('unavailable');
+  const rows = checked(await client.from('gladiator_history_counts').select('arena,arena_won,tournament,tournament_won,expedition,expedition_won')
+    .eq('gladiator_id', gladiatorId.toLowerCase()).limit(1)) as unknown as Record<string, unknown>[];
+  if (rows.length === 0) return structuredClone(NO_HISTORY) as HistoryCounts;
+  const counts = {} as HistoryCounts;
+  for (const kind of ['arena', 'tournament', 'expedition'] as const) {
+    const total = wholeOf(rows[0][kind]), won = wholeOf(rows[0][`${kind}_won`]);
+    if (total === null || won === null || won > total) throw new GatewayReadError('unavailable');
+    counts[kind] = { total, won };
+  }
+  return counts;
 }

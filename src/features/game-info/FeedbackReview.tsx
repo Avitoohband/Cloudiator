@@ -9,6 +9,9 @@
 // under the text as "Suggested by Claude" with Approve and send (sends it as shown) and Edit (fills the answer box with it, up to the
 // server's 2,000 characters); either is recorded as an approved suggestion, and the item then reads "Answered (approved suggestion)".
 // Answer still opens an empty box for the owner's own words. Nothing reaches a player until the owner sends it here.
+// M37 (Task 25, from the Task 23b review): an approval names the time of the suggestion the owner saw (the item's, or the one Edit filled
+// the box from), and the server refuses it as a conflict when Claude has replaced the suggestion since; the list then reloads with the
+// new one. Sending one item never closes or clears the box open on another.
 import { useCallback, useEffect, useId, useRef, useState } from 'react';
 import type { OwnerFeedbackItem } from '@contracts/reads';
 import { useClockMode } from '../../lib/clock-setting';
@@ -34,8 +37,10 @@ export function FeedbackReview({ onCount }: {
   const [items, setItems] = useState<OwnerFeedbackItem[] | null>(null);
   const [failed, setFailed] = useState(false);
   const [answering, setAnswering] = useState<number | null>(null);
-  /** Whether the open box holds Claude's suggestion (Edit) rather than the owner's own words (Answer). */
-  const [fromSuggestion, setFromSuggestion] = useState(false);
+  /** The item whose box is open now, for a send that finishes after the owner moved on (it closes only its own box). */
+  const answeringNow = useRef<number | null>(null);
+  /** The time of Claude's suggestion the open box was filled from (Edit), or null for the owner's own words (Answer). */
+  const [suggestionAt, setSuggestionAt] = useState<number | null>(null);
   const [draft, setDraft] = useState('');
   const [busy, setBusy] = useState(false);
   const [problem, setProblem] = useState<{ id: number; text: string } | null>(null);
@@ -43,21 +48,24 @@ export function FeedbackReview({ onCount }: {
   const box = useRef<HTMLTextAreaElement>(null);
   const filters = useRef<HTMLDivElement>(null);
 
-  // Only the latest read lands, and nothing after the tab is gone.
-  const load = useCallback(async (which: FeedbackFilter) => {
+  // Only the latest read lands, and nothing after the tab is gone. It answers the items it showed (null when it did not land).
+  const load = useCallback(async (which: FeedbackFilter): Promise<OwnerFeedbackItem[] | null> => {
     const mine = ++ticket.current;
     const result = await listFeedback(which);
-    if (mine !== ticket.current) return;
-    if (result.ok) { setItems(result.items); setFailed(false); onCount(result.newCount); } else setFailed(true);
+    if (mine !== ticket.current) return null;
+    if (result.ok) { setItems(result.items); setFailed(false); onCount(result.newCount); return result.items; }
+    setFailed(true);
+    return null;
   }, [onCount]);
+  const openBox = (id: number | null) => { answeringNow.current = id; setAnswering(id); };
   useEffect(() => { void load(filter); }, [filter, load]);
   useEffect(() => () => { ticket.current++; }, []);
   useEffect(() => { if (answering !== null) box.current?.focus(); }, [answering]);
 
-  const choose = (next: FeedbackFilter) => { setFilter(next); setAnswering(null); setProblem(null); };
+  const choose = (next: FeedbackFilter) => { setFilter(next); openBox(null); setProblem(null); };
   const open = (item: OwnerFeedbackItem, suggested: boolean) => {
     if (busy) return;
-    setDraft(suggested ? item.suggestion ?? '' : ''); setFromSuggestion(suggested); setProblem(null); setAnswering(item.id);
+    setDraft(suggested ? item.suggestion ?? '' : ''); setSuggestionAt(suggested ? item.suggestedAtMs : null); setProblem(null); openBox(item.id);
   };
   async function markRead(item: OwnerFeedbackItem) {
     if (busy) return;
@@ -68,20 +76,31 @@ export function FeedbackReview({ onCount }: {
     await load(filter);
     filters.current?.querySelector<HTMLElement>('[aria-pressed="true"]')?.focus();
   }
-  /** Sends the open box's text, or (`approve`) the suggestion exactly as shown. */
+  /**
+   * Sends the open box's text, or (`approve`) the suggestion exactly as shown. A suggestion's text goes with the time of the suggestion
+   * it came from: this item's (Approve and send) or the one Edit filled the box from. Only this item's box closes, never another's.
+   */
   async function send(item: OwnerFeedbackItem, approve = false) {
-    const suggested = approve || fromSuggestion;
+    const at = approve ? item.suggestedAtMs : suggestionAt;
     const text = (approve ? item.suggestion ?? '' : draft).trim();
-    if (busy || !text) return;
+    if (busy || !text || (approve && at === null)) return;
     setBusy(true); setProblem(null);
-    const result = await answerFeedback(item.id, text, suggested);
+    const result = await answerFeedback(item.id, text, at === null ? undefined : { suggestedAtMs: at });
     setBusy(false);
+    const closeOwnBox = () => { if (answeringNow.current === item.id) { openBox(null); setDraft(''); } };
     if (!result.ok) {
-      if (result.code === 'conflict') { setAnswering(null); setDraft(''); setProblem({ id: item.id, text: 'This feedback was already answered.' }); await load(filter); return; }
+      if (result.code === 'conflict') {
+        closeOwnBox();
+        // Answered meanwhile, or (an approval) Claude replaced the suggestion: the reloaded list shows which.
+        const shown = (await load(filter))?.find(other => other.id === item.id);
+        const replaced = at !== null && shown !== undefined && shown.status !== 'answered' && shown.suggestion !== null;
+        setProblem({ id: item.id, text: replaced ? 'Claude changed this suggestion after you opened it. Read the new one, then send again.' : 'This feedback was already answered.' });
+        return;
+      }
       setProblem({ id: item.id, text: approve ? 'Could not send the answer. Try again.' : 'Could not send the answer. Your text is still here. Try again.' });
       return;
     }
-    setAnswering(null); setDraft('');
+    closeOwnBox();
     await load(filter);
     filters.current?.querySelector<HTMLElement>('[aria-pressed="true"]')?.focus();
   }
@@ -105,7 +124,7 @@ export function FeedbackReview({ onCount }: {
             const details = ownerDetails(item.details, clock);
             const who = item.gladiatorName;
             const textId = `${ids}-answer-${item.id}`;
-            const editing = answering === item.id && fromSuggestion;
+            const editing = answering === item.id && suggestionAt !== null;
             const limit = editing ? SUGGESTION_MAXIMUM : ANSWER_MAXIMUM;
             return <li key={item.id}>
               <article className={styles.feedbackItem} data-feedback-item={item.id} data-new={item.status === 'new' ? '' : undefined}>
@@ -131,7 +150,7 @@ export function FeedbackReview({ onCount }: {
                   </div>
                   <div className={styles.feedbackActions}>
                     <button type="button" className={styles.gold} disabled={!draft.trim()} aria-disabled={busy || undefined} onClick={() => void send(item)}>Send answer</button>
-                    <button type="button" className={styles.ghost} onClick={() => { setAnswering(null); setProblem(null); }}>Cancel</button>
+                    <button type="button" className={styles.ghost} onClick={() => { openBox(null); setProblem(null); }}>Cancel</button>
                   </div>
                 </div> : <div className={styles.feedbackActions}>
                   {item.suggestion !== null && <>

@@ -302,8 +302,16 @@ describe('feedback', () => {
       { tab: 'feedback', action: 'answer', id: ids[1], text: 'Hello.', fromSuggestion: false },
       { tab: 'feedback', action: 'answer', id: ids[1], text: 'Hello.', fromSuggestion: 'true' },
       { tab: 'feedback', action: 'answer', id: ids[1], text: 'Hello.', fromSuggestion: null },
-      { tab: 'feedback', action: 'mark-read', id: ids[1], fromSuggestion: true }]) {
-      expect(await review(owner.id, bad), JSON.stringify(bad).slice(0, 80)).toEqual({ ok: false, code: 'invalid' });
+      { tab: 'feedback', action: 'mark-read', id: ids[1], fromSuggestion: true },
+      // M37: an approval names the suggestion's time (both keys or neither), a whole number.
+      { tab: 'feedback', action: 'answer', id: ids[1], text: 'Hello.', fromSuggestion: true },
+      { tab: 'feedback', action: 'answer', id: ids[1], text: 'Hello.', suggestedAtMs: 0 },
+      { tab: 'feedback', action: 'answer', id: ids[1], text: 'Hello.', fromSuggestion: true, suggestedAtMs: -1 },
+      { tab: 'feedback', action: 'answer', id: ids[1], text: 'Hello.', fromSuggestion: true, suggestedAtMs: 1.5 },
+      { tab: 'feedback', action: 'answer', id: ids[1], text: 'Hello.', fromSuggestion: true, suggestedAtMs: '1' },
+      { tab: 'feedback', action: 'answer', id: ids[1], text: 'Hello.', fromSuggestion: true, suggestedAtMs: null },
+      { tab: 'feedback', action: 'mark-read', id: ids[1], suggestedAtMs: 0 }]) {
+      expect(await review(owner.id, bad), JSON.stringify(bad).slice(0, 100)).toEqual({ ok: false, code: 'invalid' });
     }
     expect((await rows(b.id))[0].status).toBe('read');
     // A 2,000-character answer is accepted; the list holds at most 100, newest first.
@@ -362,8 +370,10 @@ describe('feedback', () => {
     const id = (await send(me.token, feedback())).body.value!.feedbackId;
     const endpoint = await ownerEndpoint();
     const mcp = `Bearer ${endpoint.mcpToken}`;
-    // M36: the MCP credential (Claude) may not send an answer, even "from a suggestion", nor publish; the store is never reached.
-    for (const body of [{ tab: 'feedback', action: 'answer', id, text: 'From the MCP.' }, { tab: 'feedback', action: 'answer', id, text: 'From the MCP.', fromSuggestion: true },
+    // M36: the MCP credential (Claude) may not send an answer, even "from a suggestion" (M37: a well-formed approval, with its time), nor
+    // publish; the store is never reached.
+    for (const body of [{ tab: 'feedback', action: 'answer', id, text: 'From the MCP.' },
+      { tab: 'feedback', action: 'answer', id, text: 'From the MCP.', fromSuggestion: true, suggestedAtMs: 1 },
       { tab: 'wiki', action: 'publish', expectedVersion: 0 }]) {
       expect(await endpoint.call(body, mcp, null), JSON.stringify(body)).toEqual({ status: 403, body: { ok: false, code: 'forbidden' } });
     }
@@ -389,7 +399,8 @@ describe('feedback', () => {
       .toEqual({ status: 403, body: { ok: false, code: 'forbidden' } });
     expect(await endpoint.call({ tab: 'feedback', action: 'mark-read', id }, session, 'http://127.0.0.1:3000'))
       .toEqual({ status: 200, body: { ok: true, id, status: 'read' } });
-    expect(await endpoint.call({ tab: 'feedback', action: 'answer', id, text: 'Thanks, we found it.', fromSuggestion: true }, session, 'http://127.0.0.1:3000'))
+    const shown = (list.body as { items: { suggestedAtMs: number }[] }).items[0].suggestedAtMs;
+    expect(await endpoint.call({ tab: 'feedback', action: 'answer', id, text: 'Thanks, we found it.', fromSuggestion: true, suggestedAtMs: shown }, session, 'http://127.0.0.1:3000'))
       .toEqual({ status: 200, body: { ok: true, id, status: 'answered', messageId: expect.any(Number) } });
     expect(await endpoint.call({ tab: 'feedback', action: 'answer', id, text: 'Again.' }, session, 'http://127.0.0.1:3000'))
       .toEqual({ status: 409, body: { ok: false, code: 'conflict' } });
@@ -457,20 +468,26 @@ describe('feedback', () => {
     const owner = await editor();
     const id = async (who: { token: string }) => (await send(who.token, feedback())).body.value!.feedbackId;
     const [a, b, c, d] = [await id(asIs), await id(edited), await id(own), await id(none)];
+    const at = new Map<number, number>();
     for (const [item, text] of [[a, 'Thanks, found it.\nIt is fixed in the next patch.'], [b, 'Thanks, we will look.'], [c, 'A suggestion the editor ignores.']] as const) {
-      expect(await asMcp({ tab: 'feedback', action: 'suggest', id: item, text })).toMatchObject({ ok: true });
+      const saved = await asMcp({ tab: 'feedback', action: 'suggest', id: item, text });
+      expect(saved).toMatchObject({ ok: true });
+      at.set(item, saved.suggestedAtMs as number);
     }
-    // Approve and send: the editor sends the suggestion's text as it is.
-    const approved = await review(owner.id, { tab: 'feedback', action: 'answer', id: a, text: 'Thanks, found it.\nIt is fixed in the next patch.', fromSuggestion: true });
+    // Approve and send: the editor sends the suggestion's text as it is (M37: naming the suggestion's time).
+    const approved = await review(owner.id, { tab: 'feedback', action: 'answer', id: a, text: 'Thanks, found it.\nIt is fixed in the next patch.', fromSuggestion: true,
+      suggestedAtMs: at.get(a) });
     expect(approved).toEqual({ ok: true, id: a, status: 'answered', messageId: expect.any(Number) });
     // Edit, then send: the edited text is what the player gets, still recorded as an approved suggestion.
-    const changed = await review(owner.id, { tab: 'feedback', action: 'answer', id: b, text: '  Thanks, we will look at it this week.  ', fromSuggestion: true });
+    const changed = await review(owner.id, { tab: 'feedback', action: 'answer', id: b, text: '  Thanks, we will look at it this week.  ', fromSuggestion: true,
+      suggestedAtMs: at.get(b) });
     expect(changed).toMatchObject({ ok: true, id: b, status: 'answered' });
     // The editor's own answer (Answer, not from the suggestion): owner, and the unused suggestion is cleared with the answer.
     const written = await review(owner.id, { tab: 'feedback', action: 'answer', id: c, text: 'My own words.' });
     expect(written).toMatchObject({ ok: true, id: c, status: 'answered' });
     // fromSuggestion on an item without a suggestion is a conflict (the item changed under the editor), and nothing is sent.
-    expect(await review(owner.id, { tab: 'feedback', action: 'answer', id: d, text: 'Approved what?', fromSuggestion: true })).toEqual({ ok: false, code: 'conflict' });
+    expect(await review(owner.id, { tab: 'feedback', action: 'answer', id: d, text: 'Approved what?', fromSuggestion: true, suggestedAtMs: at.get(a) }))
+      .toEqual({ ok: false, code: 'conflict' });
     expect(await sql`select count(*)::int as n from public.game_messages`).toEqual([{ n: 3 }]);
     expect((await rows(none.id))[0]).toMatchObject({ status: 'new', answered_via: null, answer: null });
     // Each answer is one current team reply for its own player (M35's guard admitted each), recorded with who wrote it.
@@ -518,7 +535,40 @@ describe('feedback', () => {
     expect((await rows(me.id))[0]).toMatchObject({ status: 'new', suggested_answer: null, answered_via: null });
     // The consistent shapes pass: a suggestion with its time, then an answer by an editor that clears it.
     await sql`update public.feedback set suggested_answer='Fine.',suggested_at_ms=0 where id=${id}`;
-    expect(await review(owner.id, { tab: 'feedback', action: 'answer', id, text: 'Fine.', fromSuggestion: true })).toMatchObject({ ok: true });
+    expect(await review(owner.id, { tab: 'feedback', action: 'answer', id, text: 'Fine.', fromSuggestion: true, suggestedAtMs: 0 })).toMatchObject({ ok: true });
+  });
+
+  // M37 (supabase/sql/31-history-sellers.sql, Task 23b review): an approval carries the time of the suggestion the editor saw. Claude may
+  // replace a suggestion after the editor loaded the list; approving the old one is then a conflict, and nothing is sent.
+  it('approves only the suggestion the editor saw: a replaced suggestion is conflict, nothing is sent, and the current one can be approved', async () => {
+    const me = await player(), owner = await editor();
+    const id = (await send(me.token, feedback())).body.value!.feedbackId;
+    const first = await asMcp({ tab: 'feedback', action: 'suggest', id, text: 'Thanks, we found it.' });
+    // What the editor loaded: the first suggestion and its time.
+    const loaded = (await review(owner.id, { tab: 'feedback', action: 'list', filter: 'all' })).items as { suggestion: string; suggestedAtMs: number }[];
+    expect(loaded).toEqual([expect.objectContaining({ suggestion: 'Thanks, we found it.', suggestedAtMs: first.suggestedAtMs })]);
+    // Claude replaces it (a later database time) before the editor approves.
+    await new Promise(resolve => setTimeout(resolve, 5));
+    const second = await asMcp({ tab: 'feedback', action: 'suggest', id, text: 'Thanks! It is fixed in the next patch.' });
+    expect(second.suggestedAtMs as number).toBeGreaterThan(first.suggestedAtMs as number);
+    // Approving (as shown, or after Edit) what the editor saw: conflict, nothing sent, the item untouched.
+    for (const text of ['Thanks, we found it.', 'Thanks, we found it. Edited.']) {
+      expect(await review(owner.id, { tab: 'feedback', action: 'answer', id, text, fromSuggestion: true, suggestedAtMs: loaded[0].suggestedAtMs }), text)
+        .toEqual({ ok: false, code: 'conflict' });
+    }
+    // A time that never was is a conflict too.
+    expect(await review(owner.id, { tab: 'feedback', action: 'answer', id, text: 'Hi.', fromSuggestion: true, suggestedAtMs: 0 })).toEqual({ ok: false, code: 'conflict' });
+    expect(await sql`select count(*)::int as n from public.game_messages`).toEqual([{ n: 0 }]);
+    expect((await rows(me.id))[0]).toMatchObject({ status: 'new', answer: null, answered_via: null, suggested_answer: 'Thanks! It is fixed in the next patch.',
+      suggested_at_ms: second.suggestedAtMs });
+    // The editor reloads, sees the new suggestion and approves it: sent, claude-approved. The owner's own answer never needs a time.
+    const reloaded = (await review(owner.id, { tab: 'feedback', action: 'list', filter: 'all' })).items as { suggestedAtMs: number }[];
+    expect(await review(owner.id, { tab: 'feedback', action: 'answer', id, text: 'Thanks! It is fixed in the next patch.', fromSuggestion: true,
+      suggestedAtMs: reloaded[0].suggestedAtMs })).toEqual({ ok: true, id, status: 'answered', messageId: expect.any(Number) });
+    expect((await rows(me.id))[0]).toMatchObject({ status: 'answered', answered_via: 'claude-approved', suggested_answer: null, suggested_at_ms: null });
+    // The function is still M36's one entry point, backend only.
+    expect(await sql`select p.oid::regprocedure::text as fn, p.prosecdef, p.proconfig, p.proacl::text as acl from pg_proc p where p.proname='review_feedback'`)
+      .toEqual([{ fn: 'review_feedback(uuid,boolean,jsonb)', prosecdef: false, proconfig: ['search_path=""'], acl: '{postgres=X/postgres,service_role=X/postgres}' }]);
   });
 
   it('M36 marks every item answered before it as the owner\'s, and leaves the rest without one (a rolled-back re-application of SQL30)', async () => {

@@ -16,7 +16,7 @@ import { CATALOG_V1 } from '../../supabase/functions/_shared/domain/catalog-v1.t
 import type { JobLease, PreparationInput, PreparationResult } from '../../supabase/functions/_shared/domain/types.ts';
 import type { OwnerState } from '../../supabase/functions/_shared/contracts/reads.ts';
 import type { ActivitySummary, RevealedStage } from '../../supabase/functions/_shared/contracts/events.ts';
-import { readProfile, readTimeline, readTournament, readTournamentLog } from '../../src/lib/api/reads.ts';
+import { readHistory, readHistoryCounts, readProfile, readTimeline, readTournament, readTournamentLog } from '../../src/lib/api/reads.ts';
 
 const SLOT = 4_800_000;
 const MINUTE = 60_000;
@@ -1275,6 +1275,23 @@ describe('Task 19: tournament entry, brackets, bout jobs, results, reveals, sett
       }
       // Visitors (Task 13.1) read the same public tournament as a signed-in spectator.
       expect(await readTournament(anonymous, tid)).toEqual(done);
+      // Patch 1.9 (M37): each settled entrant's history lists its fought bouts (never a bye), newest round first, with its run's place, for
+      // visitors and spectators alike; this historical slot's replay is long gone, so no opponent is named, and no reward ever is.
+      const boutRows = (await sql`select bout_id, reveal_at_ms::float8 as at, round, result from public.tournament_bout_results
+        where tournament_id=${tid} and result->>'bye'='false' order by reveal_at_ms desc, bout_id`) as unknown as
+        { bout_id: string; at: number; round: number; result: { winnerId: string; participants: { gladiatorId: string }[] } }[];
+      const label = (round: number) => round === t.rounds ? 'Final' : round === t.rounds - 1 ? 'Semifinal' : round === t.rounds - 2 ? 'Quarterfinal' : `Round ${round}`;
+      for (const f of entrants) {
+        const placement = done.placements.find(p => p.gladiatorId === f.gid)!;
+        const mine = boutRows.filter(b => b.result.participants.some(p => p.gladiatorId === f.gid));
+        expect(mine.length).toBeGreaterThan(0);
+        const expected = mine.map(b => ({ entryId: b.bout_id, kind: 'tournament', activityId: placement.completion.activityId, foughtAtMs: b.at,
+          settledAtMs: placement.completion.settledAtMs, result: b.result.winnerId === f.gid ? 'victory' : 'defeat', success: b.result.winnerId === f.gid,
+          replayExpiry: { state: 'expired' }, league: 'bronze', tournamentId: tid, round: label(b.round), place: placement.place, expeditionId: null, opponent: null }));
+        for (const client of [anonymous, spectator.client]) expect(await readHistory(client, f.gid, 'tournament'), f.gid).toEqual({ rows: expected, nextCursor: null });
+        expect((await readHistoryCounts(anonymous, f.gid)).tournament).toEqual({ total: mine.length, won: mine.filter(b => b.result.winnerId === f.gid).length });
+        expect(JSON.stringify(await readHistory(spectator.client, f.gid, 'tournament'))).not.toMatch(/rewards|receiptId|renown|"money"|rating|grant/i);
+      }
     }, 60_000);
 
     /**

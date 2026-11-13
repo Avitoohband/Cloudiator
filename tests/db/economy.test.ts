@@ -60,11 +60,12 @@ async function reapply(source: string) {
  * Patch 1.9: SQL28 (M34) restates SQL21's inventory_command, SQL22's titles_on_ledger and SQL24's owner_state, so it joins the
  * chain (it is reapplicable: its tables and indexes are created if absent, its constraints and policies dropped and added).
  * Re-committing SQL28 also brings back M34's review_feedback(uuid,jsonb) and revokes the backend's column grants on feedback, so
- * SQL30 (M36) closes the chain: it drops that function again, restores M36's review_feedback and re-grants the new columns.
+ * SQL30 (M36) drops that function again, restores M36's review_feedback and re-grants the new columns. SQL31 (M37) closes the chain:
+ * SQL30's review_feedback lacks M37's suggestion time, so SQL31 restores it (its views, table, trigger and backfill are reapplicable).
  */
 async function reapplyEconomy() {
   const folder = new URL('../../supabase/sql/', import.meta.url);
-  const later = ['22-titles.sql', '23-awards.sql', '24-dungeons.sql', '25-bot-label.sql', '28-feedback-buyback.sql', '30-feedback-mcp.sql'];
+  const later = ['22-titles.sql', '23-awards.sql', '24-dungeons.sql', '25-bot-label.sql', '28-feedback-buyback.sql', '30-feedback-mcp.sql', '31-history-sellers.sql'];
   for (const name of ['21-economy.sql', ...later]) await reapply(readFileSync(new URL(name, folder), 'utf8'));
 }
 

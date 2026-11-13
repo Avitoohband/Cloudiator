@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { createClient } from '@supabase/supabase-js';
-import { readMarket, readProfile, readRecent, readSeasons, readStandingOf, readStandings, readTimeline, readTournament, readTournamentLog, readWorld } from '../src/lib/api/reads';
+import { HISTORY_PAGE, readHistory, readHistoryCounts, readMarket, readProfile, readRecent, readSeasons, readStandingOf, readStandings, readTimeline, readTournament,
+  readTournamentLog, readWorld } from '../src/lib/api/reads';
 import { tournamentLookupId } from '../src/lib/tournament-id';
 
 function transport(rows: Record<string, unknown>, calls: string[]) {
@@ -43,9 +44,10 @@ describe('protected Data API adapters', () => {
     const SELLER = '0d5f8471-d919-428f-9ab7-058c95821757', WEEK = 604_800_000;
     const id = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`;
     const stats = { damage: 6, armor: 0, weight: 4, intervalMs: 1000, attributes: { strength: 0, agility: 0, vitality: 0, endurance: 0, precision: 0 } };
-    // The projection's row; an unexpected item field never crosses into the listing.
+    // The view's row (M37: the offer with its seller's class, league and level); an unexpected item field never crosses into the listing.
     const row = (n: number) => ({ id: id(n), seller_gladiator_id: SELLER, seller_name: 'Aster', price: 10 + n, listed_at_ms: 1_000_000 - n, expires_at_ms: 1_000_000 - n + WEEK,
-      item: { catalogId: 'sword:1:common', catalogVersion: 'v1', tier: 1, rarity: 'common', stats, quantity: 1, origin: 'shop' } });
+      item: { catalogId: 'sword:1:common', catalogVersion: 'v1', tier: 1, rarity: 'common', stats, quantity: 1, origin: 'shop' },
+      seller_class_id: 'duelist', seller_league: 'silver', seller_level: 12 });
     const calls: string[] = [];
     const offers = (rows: unknown[]) => createClient('http://127.0.0.1:54321', 'test-key', { auth: { persistSession: false }, global: { fetch: async (input) => {
       const url = new URL(String(input)); calls.push(decodeURIComponent(url.pathname + url.search));
@@ -56,11 +58,11 @@ describe('protected Data API adapters', () => {
     expect(first.rows).toHaveLength(50);
     expect(first.nextCursor).toBe(`${1_000_000 - 49}:${id(49)}`);
     expect(first.rows[0]).toEqual({ listingId: id(0), seller: { gladiatorId: SELLER, name: 'Aster' }, price: 10, listedAtMs: 1_000_000, expiresAtMs: 1_000_000 + WEEK,
-      item: { catalogId: 'sword:1:common', catalogVersion: 'v1', tier: 1, rarity: 'common', stats, quantity: 1 } });
-    // Newest first, then by id; only the sanitized projection's columns; at most 50 rows; no seller filter by default.
+      item: { catalogId: 'sword:1:common', catalogVersion: 'v1', tier: 1, rarity: 'common', stats, quantity: 1 }, sellerClassId: 'duelist', sellerLeague: 'silver', sellerLevel: 12 });
+    // Newest first, then by id; only the sanitized projection's columns and the seller's three (M37); at most 50 rows; no seller filter by default.
     const query = new URL(`http://local${calls[0]}`);
-    expect(query.pathname).toBe('/rest/v1/market_offers');
-    expect(query.searchParams.get('select')).toBe('id,seller_gladiator_id,seller_name,item,price,listed_at_ms,expires_at_ms');
+    expect(query.pathname).toBe('/rest/v1/market_offer_reads');
+    expect(query.searchParams.get('select')).toBe('id,seller_gladiator_id,seller_name,item,price,listed_at_ms,expires_at_ms,seller_class_id,seller_league,seller_level');
     expect(query.searchParams.get('order')).toBe('listed_at_ms.desc,id.asc');
     expect(query.searchParams.get('limit')).toBe('50');
     expect([query.searchParams.has('or'), query.searchParams.has('seller_gladiator_id')]).toEqual([false, false]);
@@ -76,6 +78,10 @@ describe('protected Data API adapters', () => {
     // An empty cursor is no cursor.
     expect(await readMarket(offers([]), '')).toEqual({ rows: [], nextCursor: null });
     expect(calls[4]).not.toContain('or=');
+    // A seller the view cannot name (no projection: nulls), or a value this client does not know, reads as null.
+    const unknown = await readMarket(offers([{ ...row(1), seller_class_id: null, seller_league: null, seller_level: null },
+      { ...row(2), seller_class_id: 'wizard', seller_league: 'diamond', seller_level: 0 }, { ...row(3), seller_class_id: undefined, seller_league: undefined, seller_level: '7' }]));
+    expect(unknown.rows.map(r => [r.sellerClassId, r.sellerLeague, r.sellerLevel])).toEqual([[null, null, null], [null, null, null], [null, null, null]]);
     // A malformed cursor or seller is refused before any query.
     calls.length = 0;
     for (const cursor of ['bad,filter', `1:${id(1)},id.neq.x`, '1:not-a-uuid', `99999999999999999:${id(1)}`, `x:${id(1)}`]) {
@@ -85,6 +91,83 @@ describe('protected Data API adapters', () => {
       await expect(readMarket(offers([]), undefined, seller), seller).rejects.toMatchObject({ code: 'unavailable' });
     }
     expect(calls).toEqual([]);
+  });
+  // Patch 1.9 (M37): any gladiator's public history, by kind, 20 a page, newest first, and its chip counts.
+  describe('a gladiator\'s history', () => {
+    const GID = '6f1e0a52-3b4c-4d5e-8f90-a1b2c3d4e5f6', ACT = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`;
+    const TID = 'tournament:4000:gold';
+    const arenaRow = (n: number, over: Record<string, unknown> = {}) => ({ entry_id: ACT(n), kind: 'arena', activity_id: ACT(n), fought_at_ms: 9_000_000 - n * 1000,
+      settled_at_ms: 9_500_000 - n * 1000, result: n % 2 ? 'defeat' : 'victory', success: n % 2 === 0, replay_expires_at_ms: 99_000_000, arena_mode: null, league: 'silver',
+      tournament_id: null, round: null, place: null, expedition_id: null, opponent: { name: `Foe ${n}`, npc: false }, ...over });
+    function api(bodies: Record<string, unknown>, calls: string[]) {
+      return createClient('http://127.0.0.1:54321', 'test-key', { auth: { persistSession: false }, global: { fetch: async (input) => {
+        const url = new URL(String(input)); calls.push(decodeURIComponent(url.pathname + url.search));
+        return new Response(JSON.stringify(bodies[url.pathname.split('/').at(-1)!] ?? []), { status: 200, headers: { 'Content-Type': 'application/json' } });
+      } } });
+    }
+    it('reads one kind newest first, 20 at a time, with the last fetched row as the cursor', async () => {
+      const calls: string[] = [];
+      const rows = Array.from({ length: 21 }, (_, n) => arenaRow(n));
+      const page = await readHistory(api({ gladiator_history_reads: rows }, calls), GID.toUpperCase(), 'arena');
+      expect(page.rows).toHaveLength(HISTORY_PAGE);
+      expect(page.rows[0]).toEqual({ entryId: ACT(0), kind: 'arena', activityId: ACT(0), foughtAtMs: 9_000_000, settledAtMs: 9_500_000, result: 'victory', success: true,
+        replayExpiry: { state: 'available', expiresAtMs: 99_000_000 }, league: 'silver', tournamentId: null, round: null, place: null, expeditionId: null,
+        opponent: { name: 'Foe 0', npc: false } });
+      expect(page.nextCursor).toBe(`${9_000_000 - 19_000}:${ACT(19)}`);
+      const query = new URL(`http://local${calls[0]}`);
+      expect(query.pathname).toBe('/rest/v1/gladiator_history_reads');
+      expect(query.searchParams.get('select')).toBe('entry_id,kind,activity_id,fought_at_ms,settled_at_ms,result,success,replay_expires_at_ms,arena_mode,league,tournament_id,round,place,expedition_id,opponent');
+      expect([query.searchParams.get('gladiator_id'), query.searchParams.get('kind')]).toEqual([`eq.${GID}`, 'eq.arena']);
+      expect([query.searchParams.get('order'), query.searchParams.get('limit'), query.searchParams.has('or')]).toEqual(['fought_at_ms.desc,entry_id.asc', '20', false]);
+      // The next page starts strictly after the cursor's row; a tournament bout id (colons) is quoted for the Data API.
+      await readHistory(api({}, calls), GID, 'tournament', `5000:${TID}:2:0`);
+      expect(calls[1]).toContain(`or=(fought_at_ms.lt.5000,and(fought_at_ms.eq.5000,entry_id.gt."${TID}:2:0"))`);
+      expect(calls[1]).toContain('kind=eq.tournament');
+      // A short page ends the list; an empty cursor is no cursor.
+      expect(await readHistory(api({ gladiator_history_reads: rows.slice(0, 3) }, calls), GID, 'arena', '')).toMatchObject({ nextCursor: null });
+      expect(calls[2]).not.toContain('or=');
+    });
+    it('reads each kind\'s own fields, as of the read, and leaves out a row it cannot show without breaking the cursor', async () => {
+      const calls: string[] = [];
+      const tournament = { entry_id: `${TID}:3:0`, kind: 'tournament', activity_id: ACT(7), fought_at_ms: 8_000, settled_at_ms: 9_000, result: 'defeat', success: false,
+        replay_expires_at_ms: null, arena_mode: null, league: 'gold', tournament_id: TID, round: 'Final', place: 2, expedition_id: null, opponent: null };
+      expect((await readHistory(api({ gladiator_history_reads: [tournament] }, calls), GID, 'tournament')).rows).toEqual([{ entryId: `${TID}:3:0`, kind: 'tournament',
+        activityId: ACT(7), foughtAtMs: 8_000, settledAtMs: 9_000, result: 'defeat', success: false, replayExpiry: { state: 'expired' }, league: 'gold', tournamentId: TID,
+        round: 'Final', place: 2, expeditionId: null, opponent: null }]);
+      const trip = { ...arenaRow(1), kind: 'expedition', league: null, opponent: null, expedition_id: 'woodland', result: 'victory', success: true };
+      expect((await readHistory(api({ gladiator_history_reads: [trip] }, calls), GID, 'expedition')).rows).toEqual([expect.objectContaining({ kind: 'expedition',
+        expeditionId: 'woodland', league: null, opponent: null })]);
+      // An unranked bout names its bot; an NPC has no gladiator; a bot team elsewhere is dropped.
+      const bouts = [arenaRow(2, { arena_mode: 'unranked', opponent: { name: 'Nimbus Kael', npc: false, botTeam: 'ludus-nimbus' } }),
+        arenaRow(3, { opponent: { name: 'Iron Warden', npc: true } }), arenaRow(4, { opponent: { name: 'Varro', npc: false, botTeam: 'ludus-nimbus' } })];
+      expect((await readHistory(api({ gladiator_history_reads: bouts }, calls), GID, 'arena')).rows.map(r => [r.arenaMode, r.opponent])).toEqual([
+        ['unranked', { name: 'Nimbus Kael', npc: false, botTeam: 'ludus-nimbus' }], [undefined, { name: 'Iron Warden', npc: true }], [undefined, { name: 'Varro', npc: false }]]);
+      // Rows this client cannot show are left out: another kind, an unknown result or league, a fractional time, a tournament row without its round.
+      const bad = [arenaRow(5, { kind: 'tournament' }), arenaRow(6, { result: 'draw' }), arenaRow(7, { league: 'diamond' }), arenaRow(8, { fought_at_ms: 1.5 }),
+        arenaRow(9, { opponent: { name: '', npc: false } }), arenaRow(10, { place: 1 }), arenaRow(11, { entry_id: 'x' }), arenaRow(12, { arena_mode: 'ranked' }), arenaRow(13)];
+      expect((await readHistory(api({ gladiator_history_reads: bad }, calls), GID, 'arena')).rows.map(r => r.entryId)).toEqual([ACT(13)]);
+      expect((await readHistory(api({ gladiator_history_reads: [{ ...tournament, round: 'Last' }] }, calls), GID, 'tournament')).rows).toEqual([]);
+      // A full page whose last row cannot name a cursor fails the read rather than ending the list early.
+      await expect(readHistory(api({ gladiator_history_reads: Array.from({ length: 20 }, (_, n) => arenaRow(n, n === 19 ? { fought_at_ms: null } : {})) }, calls), GID, 'arena'))
+        .rejects.toMatchObject({ code: 'unavailable' });
+    });
+    it('refuses a malformed gladiator, kind or cursor before any request, and reads the counts', async () => {
+      const calls: string[] = [];
+      for (const [gid, kind, cursor] of [['g1', 'arena'], [`${GID},id.neq.x`, 'arena'], [GID, 'dungeon'], [GID, 'arena', 'bad'], [GID, 'arena', `1:${ACT(1)},x`],
+        [GID, 'arena', `01:${ACT(1)}`], [GID, 'arena', `99999999999999999:${ACT(1)}`], [GID, 'tournament', '1:tournament:1:gold:1:0")'], [GID, 'arena', `1:${ACT(1)}"`]] as const) {
+        await expect(readHistory(api({}, calls), gid, kind as 'arena', cursor), `${gid} ${kind} ${cursor}`).rejects.toMatchObject({ code: 'unavailable' });
+      }
+      await expect(readHistoryCounts(api({}, calls), 'g1')).rejects.toMatchObject({ code: 'unavailable' });
+      expect(calls).toEqual([]);
+      const counts = { gladiator_history_counts: [{ arena: 24, arena_won: 21, tournament: 4, tournament_won: 3, expedition: 12, expedition_won: 9 }] };
+      expect(await readHistoryCounts(api(counts, calls), GID)).toEqual({ arena: { total: 24, won: 21 }, tournament: { total: 4, won: 3 }, expedition: { total: 12, won: 9 } });
+      expect(calls[0]).toBe(`/rest/v1/gladiator_history_counts?select=arena,arena_won,tournament,tournament_won,expedition,expedition_won&gladiator_id=eq.${GID}&limit=1`);
+      // No history yet: no row, every count 0. A count that is not whole (or more won than fought) fails the read.
+      expect(await readHistoryCounts(api({}, calls), GID)).toEqual({ arena: { total: 0, won: 0 }, tournament: { total: 0, won: 0 }, expedition: { total: 0, won: 0 } });
+      for (const broken of [{ ...counts.gladiator_history_counts[0], arena: 1.5 }, { ...counts.gladiator_history_counts[0], tournament_won: 5 }]) {
+        await expect(readHistoryCounts(api({ gladiator_history_counts: [broken] }, calls), GID)).rejects.toMatchObject({ code: 'unavailable' });
+      }
+    });
   });
   /**
    * A Data API over fixed bodies by table (the seasons rows, the open `arena_standing_reads` view, the archived

@@ -13,7 +13,7 @@ import { expectOwnerShown, joinButton, openMenu } from './shell-helpers';
 import { a11yShot, focusDrops, watchFocus } from './a11y-helpers';
 import { forbidRemote } from './remote';
 
-// Task 18.3: the 💰 Marketplace menu. Anyone browses the open offers (the public `market_offers` projection); a player
+// Task 18.3: the 💰 Marketplace menu. Anyone browses the open offers (the public `market_offer_reads` view over the `market_offers` projection, M37); a player
 // buys (after a confirmation), lists an eligible item and cancels a listing through the authenticated command endpoint.
 // A stale page's purchase is explained and the page refreshed (Review Focus 4); a visitor sends no command and never sees
 // a trading control (Review Focus 5). Live reads come from `routeLiveReads`; this spec answers the commands itself.
@@ -209,10 +209,10 @@ test('lets a visitor browse listings with no command and no buy or sell controls
   await page.screenshot({ path: info.outputPath(`market-visitor-browse-${info.project.name}.png`) });
   // Read-only: public offer pages as a visitor, never the owner state or a seller's page, and no command.
   expect(commands).toEqual([]);
-  expect(live.count('market_offers')).toBeGreaterThan(0);
+  expect(live.count('market_offer_reads')).toBeGreaterThan(0);
   expect(live.requests.every(r => r.reader === null)).toBe(true);
   expect(live.count('owner_state')).toBe(0);
-  expect(live.requests.filter(r => r.table === 'market_offers').some(r => r.query.has('seller_gladiator_id'))).toBe(false);
+  expect(live.requests.filter(r => r.table === 'market_offer_reads').some(r => r.query.has('seller_gladiator_id'))).toBe(false);
 });
 
 test('shows a signed-in account without a gladiator Browse only, with no trading control', async ({ page, context }) => {
@@ -231,7 +231,7 @@ test('shows a signed-in account without a gladiator Browse only, with no trading
   await expect(market.getByRole('button', { name: /^(Buy|Cancel listing|List for sale|Sign in)/ })).toHaveCount(0);
   await expect(market.getByText(/My listings|Available gold/)).toHaveCount(0);
   expect(commands).toEqual([]);
-  expect(live.count('market_offers')).toBeGreaterThan(0);
+  expect(live.count('market_offer_reads')).toBeGreaterThan(0);
 });
 
 test('buys a listing, shows the receipt and the item in inventory', { tag: '@render' }, async ({ page, context }, info) => {
@@ -323,7 +323,7 @@ test('lists an eligible item with the fee and NPC value shown, then cancels it',
   await expect(mine.getByTestId(`listing-${listingId}`)).toContainText('You receive 96 gold after the market fee (5%, at least 1)');
   await campReady(page);
   await page.screenshot({ path: info.outputPath(`market-my-listings-${info.project.name}.png`) });
-  expect(flow.live.requests.filter(r => r.table === 'market_offers').some(r => r.query.get('seller_gladiator_id') === `eq.${flow.state.gladiatorId}`)).toBe(true);
+  expect(flow.live.requests.filter(r => r.table === 'market_offer_reads').some(r => r.query.get('seller_gladiator_id') === `eq.${flow.state.gladiatorId}`)).toBe(true);
   // Inventory says the axe is listed for sale.
   const inventory = await openMenu(page, 'Inventory and shops');
   await inventory.getByTestId(`tile-${flow.listable.id}`).click();
@@ -351,11 +351,11 @@ test('explains sold and expired results and refreshes the page', { tag: '@render
   for (const [listing, code, explained] of cases) {
     flow.close(listing, code);
     await expect(row(market, listing)).toHaveCount(1);
-    const reads = flow.live.count('market_offers');
+    const reads = flow.live.count('market_offer_reads');
     await buy(page, market, listing);
     await expect(alert).toHaveText(explained);
     await expect(row(market, listing)).toHaveCount(0);
-    expect(flow.live.count('market_offers')).toBeGreaterThan(reads);
+    expect(flow.live.count('market_offer_reads')).toBeGreaterThan(reads);
     // Nothing to retry: the outcome is final.
     await expect(market.getByRole('button', { name: 'Retry request' })).toHaveCount(0);
   }
@@ -735,7 +735,7 @@ test('refreshes My listings and the owner with its Refresh', async ({ page, cont
   const mine = market.getByRole('tabpanel', { name: 'My listings' });
   await expect(mine.getByRole('listitem')).toHaveCount(2);
   const owners = flow.live.count('owner_state');
-  const sellerReads = () => flow.live.requests.filter(r => r.table === 'market_offers' && r.query.get('seller_gladiator_id') === `eq.${flow.state.gladiatorId}`).length;
+  const sellerReads = () => flow.live.requests.filter(r => r.table === 'market_offer_reads' && r.query.get('seller_gladiator_id') === `eq.${flow.state.gladiatorId}`).length;
   const reads = sellerReads();
   flow.soldElsewhere(listing);
   await mine.getByRole('button', { name: 'Refresh', exact: true }).click();

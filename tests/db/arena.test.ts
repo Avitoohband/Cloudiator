@@ -12,7 +12,7 @@ import type { Attributes, ClassId, FighterSnapshot, JobLease, PreparationInput, 
 import type { GameCommand } from '../../supabase/functions/_shared/contracts/commands.ts';
 import type { ActivitySummary, BattleLog, RevealedStage } from '../../supabase/functions/_shared/contracts/events.ts';
 import type { OwnerState, StandingRow } from '../../supabase/functions/_shared/contracts/reads.ts';
-import { readProfile, readStandings, readTimeline } from '../../src/lib/api/reads.ts';
+import { readHistory, readHistoryCounts, readProfile, readStandings, readTimeline } from '../../src/lib/api/reads.ts';
 
 const SLOT = 4_800_000;
 const MINUTE = 60_000;
@@ -866,6 +866,19 @@ describe('Arena league placement, rating rows and pairing inside the boundary', 
       expect(JSON.stringify(watched)).not.toMatch(/renown|ratingDelta|receiptId|"rewards"/);
       expect((await readProfile(spectator.client, winner.gid)).rating).toBe(1012);
       expect((await readProfile(spectator.client, loser.gid)).rating).toBe(988);
+      // Patch 1.9 (M37): each side's settlement (the backend's RPC, as service_role) records the bout's league and its minute-60 reveal,
+      // and anyone reads it in that gladiator's history, with no reward. This historical slot's replay is long gone: no opponent.
+      for (const [me, result] of [[winner, 'victory'], [loser, 'defeat']] as const) {
+        const activity = await activityOf(me.gid);
+        for (const client of [anonymous, spectator.client, me.client]) {
+          expect(await readHistory(client, me.gid, 'arena')).toEqual({ nextCursor: null, rows: [{ entryId: activity, kind: 'arena', activityId: activity,
+            foughtAtMs: S + 60 * MINUTE, settledAtMs: (await summaryOf(me.gid)).settledAtMs, result, success: result === 'victory', replayExpiry: { state: 'expired' },
+            league: row.league, tournamentId: null, round: null, place: null, expeditionId: null, opponent: null }] });
+          expect(await readHistoryCounts(client, me.gid)).toEqual({ arena: { total: 1, won: result === 'victory' ? 1 : 0 }, tournament: { total: 0, won: 0 },
+            expedition: { total: 0, won: 0 } });
+        }
+        expect(JSON.stringify(await readHistory(spectator.client, me.gid, 'arena'))).not.toMatch(/renown|ratingDelta|receiptId|"rewards"/);
+      }
     });
 
     it('settles both sides concurrently under their own locks: simultaneous settlement retries grant exactly once each', async () => {

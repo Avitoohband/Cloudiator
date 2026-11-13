@@ -18,7 +18,7 @@
     {
       "id": "menus",
       "title": "More room in menus",
-      "body": "A new Settings menu lets you pin the menu and place it on the left, bottom, or right of the screen on desktop, remembered in this browser. Wider menus and small previous and next arrows between sections are still planned. Controls stay usable on phones.",
+      "body": "A new Settings menu lets you pin the menu and place it on the left, bottom, or right of the screen on desktop, remembered in this browser. Still planned: long menus that turn into pages with Back and Next instead of scrolling, and wider menus. Controls stay usable on phones.",
       "patch": "1.9"
     },
     {
@@ -78,6 +78,11 @@
       "title": "Cosmetic companions and gear looks",
       "body": "Real-money purchases arrive with card and Google Pay checkout. The first items are a Supporter Banner and a pet follower. Weapon and armor dyes and skins come with 2.0 too. These are appearance items with no combat or progression bonuses.",
       "patch": "2.0"
+    },
+    {
+      "id": "showoff-card",
+      "title": "Showoff card",
+      "body": "A big, showy card you can open from a gladiator's card to show off gear, titles and achievements, and later skins and dyes. It shows nothing private, such as gold or loot."
     },
     {
       "id": "inventory-shops",

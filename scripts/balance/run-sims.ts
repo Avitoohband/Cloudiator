@@ -53,7 +53,7 @@ Generated ${generated} by \`node scripts/balance/run-sims.ts\` (${FIGHTS} fights
 
 ## Method
 
-- Rules v1 combat (constants identical in v2, the live rules) (the Arena's and the expedition's use the same constants), classless fighters from \`makeFighter\`: attributes are base 5 plus the points, gear comes straight from the catalog, so gear and points are isolated. Balanced stance. Arena rules unless the Context column says expedition.
+- Rules v1 combat whose constants are identical in v2, the live rules (the Arena's and the expedition's use the same constants), classless fighters from \`makeFighter\`: attributes are base 5 plus the points, gear comes straight from the catalog, so gear and points are isolated. Balanced stance. Arena rules unless the Context column says expedition.
 - Points at a level are the Training cap, 10 + 4 per level (level 10 = 50 points). The Balanced split is 20% to each attribute, the leftover points going in the order Strength, Agility, Vitality, Endurance, Precision.
 - The critical sweep keeps the total fixed at 50 points, so raising Precision lowers the other four; read it as concentration, not as critical chance alone.
 - Each fight uses the seed \`sim-<scenario>-<matchup>-<n>\`. The listed first side alternates every fight (half the fights each), so the first-attacker order cancels out.

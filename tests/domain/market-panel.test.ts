@@ -7,10 +7,11 @@ import { RULES_V1 } from '@domain/rules-v1';
 import { RULES_V2 } from '@domain/rules-v2';
 import { createDisplayClock } from '@/game/display-clock';
 import {
-  LOWEST_PRICE_TEXT, MARKET_FEE_PERCENT, MARKET_FEE_TERMS, MINIMUM_PRICE, PRICE_HINT, listableItems, marketErrorText, marketFee, npcValue, npcValueText, priceProblem,
-  sellerReceives, timeLeft, validPrice, WHOLE_PRICE_TEXT,
+  LOWEST_PRICE_TEXT, MARKET_FEE_PERCENT, MARKET_FEE_TERMS, MARKET_SORTS, MINIMUM_PRICE, PRICE_HINT, SELL_SORTS, listableItems, listedAgo, marketCountLine, marketErrorText,
+  marketFee, npcValue, npcValueText, priceProblem, sellerLine, sellerReceives, timeLeft, validPrice, WHOLE_PRICE_TEXT,
 } from '@/features/market/market-text';
 import { MarketOffers, MarketPanel, ownerReads, type OffersModel } from '@/features/market/MarketPanel';
+import { itemStatLines } from '@/features/inventory/item-presentation';
 import { itemFixture, ownerFixture, worldFixture } from '../fixtures/domain';
 import { MARKET_ROWS } from '../fixtures/market';
 
@@ -182,6 +183,41 @@ describe('market refusals (plan Decision 9)', () => {
   });
 });
 
+describe('words of a listing row (Task 26)', () => {
+  it('says how long ago a listing was made, in the units of the time left', () => {
+    expect(listedAgo(NOW - 4 * MINUTE, NOW)).toBe('4 min ago');
+    expect(listedAgo(NOW - 2 * HOUR, NOW)).toBe('2 h ago');
+    expect(listedAgo(NOW - 2 * HOUR - 5 * MINUTE - 59_999, NOW)).toBe('2 h 5 min ago');
+    expect(listedAgo(NOW - 6 * DAY - 22 * HOUR, NOW)).toBe('6 d 22 h ago');
+    expect(listedAgo(NOW - 2 * DAY, NOW)).toBe('2 d ago');
+    expect(listedAgo(NOW - 30_000, NOW)).toBe('just now');
+    // A listing the display clock has not reached yet (a clock a little behind the server's) is just made.
+    expect(listedAgo(NOW + MINUTE, NOW)).toBe('just now');
+  });
+
+  it('names the seller’s class, league and level when the listing carries them, and only those it carries', () => {
+    const spear = MARKET_ROWS.find(r => r.item.catalogId === 'spear:10:rare')!;
+    expect(sellerLine(spear)).toBeNull();
+    expect(sellerLine({ ...spear, sellerClassId: 'duelist', sellerLeague: 'silver', sellerLevel: 14 })).toBe('Duelist · Silver league · Level 14');
+    expect(sellerLine({ ...spear, sellerClassId: null, sellerLeague: null, sellerLevel: null })).toBeNull();
+    expect(sellerLine({ ...spear, sellerLevel: 14 })).toBe('Level 14');
+    expect(sellerLine({ ...spear, sellerLeague: 'champion' })).toBe('Champion league');
+    expect(sellerLine({ ...spear, sellerClassId: 'berserker', sellerLevel: 3 })).toBe('Berserker · Level 3');
+  });
+
+  it('sorts Browse by Newest, Price low-high, Price high-low and Level, and Sell as the Inventory does without Sell value', () => {
+    expect(MARKET_SORTS).toEqual([['newest', 'Newest'], ['price', 'Price low-high'], ['priceDesc', 'Price high-low'], ['level', 'Level']]);
+    expect(SELL_SORTS.map(([, label]) => label)).toEqual(['Newest', 'Level', 'Name', 'Damage', 'Armor', 'Weight']);
+  });
+
+  it('counts the listings shown in the sort’s words', () => {
+    expect(marketCountLine(7, 'newest')).toBe('7 open listings · newest first');
+    expect(marketCountLine(1, 'price')).toBe('1 open listing · cheapest first');
+    expect(marketCountLine(3, 'priceDesc')).toBe('3 open listings · dearest first');
+    expect(marketCountLine(2, 'level')).toBe('2 open listings · lowest level first');
+  });
+});
+
 describe('the Marketplace panel', () => {
   const clock = createDisplayClock();
   clock.freeze(NOW);
@@ -190,12 +226,15 @@ describe('the Marketplace panel', () => {
     reads, gateway: null, owner: null, viewer: 'visitor', clock, refreshOwner: async () => {}, fixture: false, ...props,
   })));
 
-  it('lets a visitor browse only, with a sign-in prompt and no trading tabs or wallet', () => {
+  it('lets a visitor browse only, with a sign-in prompt and no trading tabs, chip or wallet', () => {
     const html = renderToStaticMarkup(createElement(MarketPanel, { reads, gateway: null, owner: null, viewer: 'visitor', clock, refreshOwner: async () => {}, fixture: false }));
     expect(text(html)).toContain('Sign in with Google to trade');
     expect(text(html)).toContain('Browsing only.');
     expect(html).not.toContain('role="tablist"');
     expect(text(html)).not.toMatch(/My listings|Sell|gold:/);
+    // Search, Sort and the item chips are for everyone.
+    expect(html).toContain('aria-label="Search the Marketplace"');
+    expect(text(html)).toMatch(/All Weapons Armor/);
   });
 
   it('shows a signed-in account without a gladiator Browse only, with "Create your gladiator to trade"', () => {
@@ -204,91 +243,130 @@ describe('the Marketplace panel', () => {
     expect(html).not.toMatch(/Sign in with Google to trade|My listings|Sell/);
   });
 
-  it('gives a player the Browse, My listings and Sell tabs and their available gold', () => {
+  it('gives a player the Browse and Sell tabs, the My listings chip with their count, Sort and their available gold (Task 26)', () => {
     const owner = structuredClone(ownerFixture);
+    owner.inventory = [item('iron-helmet:5:uncommon', 'listed-helmet', { reservation: { kind: 'listing', referenceId: 'listing-1' } }), item('axe:5:common', 'free-axe')];
     const html = renderToStaticMarkup(createElement(MarketPanel, { reads, gateway: null, owner, viewer: 'player', clock, refreshOwner: async () => {}, fixture: false }));
     expect(html).toContain('role="tablist"');
-    expect([...html.matchAll(/role="tab"[^>]*>([^<]+)</g)].map(m => m[1])).toEqual(['Browse', 'My listings', 'Sell']);
+    expect([...html.matchAll(/role="tab"[^>]*>([^<]+)</g)].map(m => m[1])).toEqual(['Browse', 'Sell']);
+    expect(html).toContain('aria-label="Marketplace filters"');
+    // The chip's count is drawn as a badge and read as "My listings (1)".
+    expect(text(html)).toContain('All Weapons Armor My listings 1 (1)');
+    expect([...html.matchAll(/<option value="([^"]+)"[^>]*>([^<]+)</g)].map(m => [m[1], m[2]])).toEqual(MARKET_SORTS);
     expect(text(html)).toContain('Available gold: 100');
+    expect(text(html)).toContain('Inventory 2 / 60 slots');
     expect(text(html)).not.toMatch(/Sign in with Google to trade|Create your gladiator to trade/);
   });
 
-  describe('offer rows', () => {
+  describe('listing rows (Task 26: a list with big icons, every detail on the row, the seller in front)', () => {
     const model: OffersModel = { rows: [...MARKET_ROWS], nextCursor: null, status: 'ready' };
     const offers = (props: Partial<Parameters<typeof MarketOffers>[0]> = {}) => renderToStaticMarkup(createElement(MarketOffers, {
-      model, action: null, ownerId: null, now: NOW, busy: false, onAction: noop, onMore: noop, onRetry: noop, ...props,
+      model, access: 'browse', ownerId: null, now: NOW, busy: false, onBuy: noop, onCancel: noop, onMore: noop, onRetry: noop, onRefresh: noop, ...props,
     }));
     const spear = MARKET_ROWS.find(r => r.item.catalogId === 'spear:10:rare')!;
     const helmet = MARKET_ROWS.find(r => r.seller.name === 'Aster')!;
     const bow = MARKET_ROWS.find(r => r.item.catalogId === 'bow:10:common')!;
+    const order = (html: string) => [...html.matchAll(/data-testid="listing-([^"]+)"/g)].map(m => m[1]);
+    const idsOf = (rows: readonly MarketListing[]) => rows.map(r => r.listingId);
 
-    it('shows each offer’s item, tier, rarity, stats, seller, price, NPC sale value and time left', () => {
-      const html = text(offers());
-      expect(html).toContain('Spear');
-      expect(html).toContain('Level 10 · Rare');
-      expect(html).toContain(`Damage ${spear.item.stats.damage} · Weight ${spear.item.stats.weight}`);
-      expect(text(offers({ model: { ...model, rows: [helmet] } }))).toContain(`Armor ${helmet.item.stats.armor} · Weight ${helmet.item.stats.weight}`);
-      expect(html).toContain('Varro');
-      expect(html).toContain('450 gold');
-      expect(html).toContain(`NPC sale value: ${CATALOG_V1.items['spear:10:rare'].npcSellValue} gold`);
-      expect(html).toContain('6 d 23 h left');
+    it('shows each listing’s big icon with its level, the name and rarity, the level line, the stats, when it was listed, the time left, the NPC value and the price', () => {
+      const html = offers({ model: { ...model, rows: [spear] } });
+      const said = text(html);
+      expect(html).toContain('data-item-icon="spear"');
+      expect(said).toContain('L10');
+      expect(said).toMatch(/Spear Rare/);
+      expect(said).toContain('Level 10 · rare · Tradable');
+      // The stat chips are the Inventory card's lines (without "Attribute bonuses: None").
+      for (const [label, value] of itemStatLines(spear.item).filter(([label]) => label !== 'Attribute bonuses')) expect(said).toContain(`${label} ${value}`);
+      expect(said).not.toContain('Attribute bonuses');
+      expect(said).toContain(`Listed 4 min ago · 6 d 23 h left · NPC sale value: ${CATALOG_V1.items['spear:10:rare'].npcSellValue} gold`);
+      expect(said).toContain('450 gold');
+      // The row is a list item named by its item, seller and price.
+      expect(html).toContain(`aria-label="Spear, level 10, rare, sold by Varro, 450 gold"`);
       // The bow was listed 2 hours before its seven days end.
-      expect(text(renderToStaticMarkup(createElement(MarketOffers, { model: { ...model, rows: [bow] }, action: null, ownerId: null, now: NOW, busy: false,
-        onAction: noop, onMore: noop, onRetry: noop })))).toContain('2 h left');
-      expect(html).not.toContain('>Buy<');
+      expect(text(offers({ model: { ...model, rows: [bow] } }))).toContain('2 h left');
+      expect(html).not.toMatch(/aria-label="Buy /);
     });
 
-    it('offers Buy on others’ offers only, and marks the viewer’s own', () => {
-      const html = offers({ action: 'buy', ownerId: helmet.seller.gladiatorId });
-      expect((html.match(/>Buy</g) ?? []).length).toBe(MARKET_ROWS.length - 1);
-      expect(text(html)).toContain('Your listing');
+    it('puts the seller in front: an initial, "Sold by", the name and View profile; class, league and level only when the listing carries them', () => {
+      const plain = offers({ model: { ...model, rows: [spear] }, onProfile: noop });
+      expect(text(plain)).toContain('V Sold by Varro View profile');
+      expect(plain).toContain('aria-label="View profile of Varro"');
+      expect(text(plain)).not.toMatch(/league|Level 3\b/);
+      expect(plain).not.toContain('data-class=');
+      const full = offers({ model: { ...model, rows: [{ ...spear, sellerClassId: 'duelist', sellerLeague: 'silver', sellerLevel: 14 }] }, onProfile: noop });
+      expect(text(full)).toContain('Sold by Varro Duelist · Silver league · Level 14 View profile');
+      expect(full).toContain('data-class="duelist"');
+      expect(full).toMatch(/data-league="silver"[^>]*>S</);
+      const levelOnly = offers({ model: { ...model, rows: [{ ...spear, sellerLevel: 14 }] }, onProfile: noop });
+      expect(text(levelOnly)).toContain('Sold by Varro Level 14 View profile');
+      expect(levelOnly).not.toContain('data-league=');
+      // No profile handler (a view with no profile card), no button.
+      expect(offers({ model: { ...model, rows: [spear] } })).not.toContain('View profile');
+    });
+
+    it('offers Buy for the price on others’ listings, and Cancel listing with what the sale pays on the viewer’s own', () => {
+      const html = offers({ access: 'trade', ownerId: helmet.seller.gladiatorId, available: 10_000 });
+      expect((html.match(/aria-label="Buy /g) ?? []).length).toBe(MARKET_ROWS.length - 1);
       expect(html).toContain(`aria-label="Buy Spear for 450 gold"`);
+      expect(text(html)).toContain('Buy for 450 gold');
+      const own = text(offers({ model: { ...model, rows: [helmet] }, access: 'trade', ownerId: helmet.seller.gladiatorId, available: 10_000 }));
+      expect(own).toContain('Your listing');
+      expect(own).toContain('Yours');
+      expect(own).toContain('Your listing, sold by Aster (you)');
+      expect(own).toContain(`You receive ${95 - 4} gold after the market fee (5%, at least 1)`);
+      expect(own).not.toMatch(/Buy for/);
+      expect(offers({ model: { ...model, rows: [helmet] }, access: 'trade', ownerId: helmet.seller.gladiatorId })).toContain(`aria-label="Cancel listing: Iron helmet for 95 gold"`);
     });
 
-    it('describes a disabled Buy by its reason (Task 23.5, C18)', () => {
-      const html = offers({ model: { ...model, rows: [spear] }, action: 'buy', ownerId: helmet.seller.gladiatorId, available: 100 });
+    it('describes a disabled Buy by its reason and marks the price it cannot pay (Task 23.5, C18)', () => {
+      const html = offers({ model: { ...model, rows: [spear] }, access: 'trade', ownerId: helmet.seller.gladiatorId, available: 100 });
       const reason = /<p id="([^"]+)"[^>]*>Not enough available gold<\/p>/.exec(html);
       expect(reason).not.toBeNull();
-      expect(html).toMatch(new RegExp(`<button[^>]*disabled=""[^>]*aria-describedby="${reason![1]}"[^>]*>Buy</button>`));
+      expect(html).toMatch(new RegExp(`<button[^>]*disabled=""[^>]*aria-describedby="${reason![1]}"`));
+      expect(html).toMatch(/<li[^>]*data-poor=""/);
+      const full = offers({ model: { ...model, rows: [spear] }, access: 'trade', ownerId: helmet.seller.gladiatorId, available: 1000, full: true });
+      expect(text(full)).toContain('Your inventory is full');
+      expect(full).not.toMatch(/<li[^>]*data-poor=""/);
       // An enabled Buy is described by nothing.
-      expect(offers({ model: { ...model, rows: [spear] }, action: 'buy', ownerId: helmet.seller.gladiatorId, available: 1000 })).not.toContain('aria-describedby');
+      expect(offers({ model: { ...model, rows: [spear] }, access: 'trade', ownerId: helmet.seller.gladiatorId, available: 1000 })).not.toContain('aria-describedby');
     });
 
-    it('offers Cancel on the seller’s own listings, with what the sale would pay', () => {
-      const html = offers({ model: { ...model, rows: [helmet] }, action: 'cancel', ownerId: helmet.seller.gladiatorId });
-      expect(html).toContain(`aria-label="Cancel listing: Iron helmet for 95 gold"`);
-      expect(text(html)).toContain(`You receive ${95 - 4} gold after the market fee (5%, at least 1)`);
-      // A low price pays the 1-gold minimum, not the floored 0: an 11-gold offer credits 10, a 2-gold offer credits 1.
-      const low = (price: number) => text(offers({ model: { ...model, rows: [{ ...helmet, price }] }, action: 'cancel', ownerId: helmet.seller.gladiatorId }));
+    it('offers Cancel listing on the seller’s own listings, with what the sale would pay at any price', () => {
+      const low = (price: number) => text(offers({ model: { ...model, rows: [{ ...helmet, price }] }, access: 'trade', mine: true, ownerId: helmet.seller.gladiatorId }));
       expect(low(11)).toContain('You receive 10 gold after the market fee (5%, at least 1)');
       expect(low(2)).toContain('You receive 1 gold after the market fee (5%, at least 1)');
     });
 
-    it('says an offer that ran out while the page was open has expired, without Buy', () => {
-      const html = offers({ model: { ...model, rows: [bow] }, action: 'buy', now: bow.expiresAtMs });
-      expect(text(html)).toContain('Expired');
-      expect(html).toMatch(/<button[^>]*disabled=""[^>]*>Buy</);
+    it('greys a listing that ran out while the page was open, says Expired, and offers no Buy', () => {
+      const html = offers({ model: { ...model, rows: [bow] }, access: 'trade', now: bow.expiresAtMs });
+      expect(text(html)).toMatch(/Expired.*Expired/);
+      expect(html).toMatch(/<li[^>]*data-expired=""/);
+      expect(html).toMatch(/<button[^>]*disabled=""[^>]*>Buy<\/button>/);
+    });
+
+    it('lets a visitor see every row with "Sign in to buy." and no trading control', () => {
+      const html = offers({ access: 'sign-in', onProfile: noop });
+      expect((text(html).match(/Sign in to buy\./g) ?? []).length).toBe(MARKET_ROWS.length);
+      expect(html).not.toMatch(/aria-label="(Buy|Cancel listing)/);
+      expect((html.match(/>View profile</g) ?? []).length).toBe(MARKET_ROWS.length);
     });
 
     it('describes a salvage stack listed through the command endpoint by its quantity and NPC value (final review M-d)', () => {
-      // The database accepts a salvage stack (only the Sell tab offers equipment alone), so Browse can show one.
       const units = 12, unitValue = RULES_V1.inventory.salvageSellValue;
       const stack: MarketListing = { listingId: 'salvage-offer', seller: { gladiatorId: 'cassia-id', name: 'Cassia' },
         item: { catalogId: CATALOG_V1.salvage.id, catalogVersion: CATALOG_V1.version, tier: 1, rarity: 'common', stats: structuredClone(CATALOG_V1.salvage.stats), quantity: units },
         price: 150, listedAtMs: NOW - HOUR, expiresAtMs: NOW + DAY };
-      const html = offers({ model: { ...model, rows: [stack] }, action: 'buy', ownerId: null });
+      const html = offers({ model: { ...model, rows: [stack] }, access: 'trade', ownerId: null, available: 1000 });
       expect(text(html)).toContain(`${units} × Salvage`);
       expect(html).toContain(`aria-label="Buy ${units} × Salvage for 150 gold"`);
       expect(text(html)).toContain(`NPC sale value: ${units * unitValue} gold (${unitValue} gold each)`);
       expect(text(html)).not.toContain('NPC merchants do not buy');
-      // A neutral glyph, not a weapon's.
-      expect(html).not.toContain('🗡');
-      expect(html).toContain('aria-hidden="true">📦</span>');
-      // Equipment keeps its slot glyph and shows no quantity of one.
+      expect(html).toContain('data-item-icon="salvage"');
+      expect(text(html)).toContain(`×${units}`);
       const spearRow = offers({ model: { ...model, rows: [spear] } });
-      expect(spearRow).toContain('aria-hidden="true">🗡</span>');
+      expect(spearRow).toContain('data-item-icon="spear"');
       expect(text(spearRow)).not.toContain('×');
-      expect(text(spearRow)).toContain(`NPC sale value: ${CATALOG_V1.items['spear:10:rare'].npcSellValue} gold`);
       expect(text(spearRow)).not.toContain(' each)');
     });
 
@@ -302,18 +380,50 @@ describe('the Marketplace panel', () => {
       const gear = { ...spear.item };
       expect(npcValue(gear, RULES_V2)).toBe(CATALOG_V1.items['spear:10:rare'].npcSellValue);
       expect(npcValueText(gear, RULES_V2)).toBe(npcValueText(gear, RULES_V1));
-      // A Browse row of a salvage stack says the active value.
       const stack: MarketListing = { listingId: 'salvage-offer', seller: { gladiatorId: 'cassia-id', name: 'Cassia' },
         item: { ...salvage, stats: structuredClone(CATALOG_V1.salvage.stats) }, price: 150, listedAtMs: NOW - HOUR, expiresAtMs: NOW + DAY };
       expect(text(offers({ model: { ...model, rows: [stack] }, rules: RULES_V2 }))).toContain('NPC sale value: 48 gold (4 gold each)');
       expect(text(offers({ model: { ...model, rows: [stack] } }))).toContain('NPC sale value: 120 gold (10 gold each)');
     });
 
-    it('says when there are no offers, and when they could not be loaded', () => {
+    it('filters by the Weapons and Armor chips, searches by name and sorts by price and level, and counts in the sort’s words', () => {
+      const weapons = MARKET_ROWS.filter(r => CATALOG_V1.items[r.item.catalogId].slot === 'weapon');
+      const armor = MARKET_ROWS.filter(r => CATALOG_V1.items[r.item.catalogId].slot !== 'weapon');
+      expect(weapons.length).toBeGreaterThan(0);
+      expect(order(offers({ filter: 'Weapons' }))).toEqual(idsOf(weapons));
+      expect(order(offers({ filter: 'Armor' }))).toEqual(idsOf(armor));
+      expect(order(offers({ query: 'BOW' }))).toEqual([bow.listingId]);
+      expect(text(offers({ query: 'bow' }))).toContain('1 listing match “bow”');
+      const by = (key: (r: MarketListing) => number, direction = 1) => idsOf([...MARKET_ROWS].sort((a, b) => direction * (key(a) - key(b))));
+      expect(order(offers({ sort: 'price' }))).toEqual(by(r => r.price));
+      expect(order(offers({ sort: 'priceDesc' }))).toEqual(by(r => r.price, -1));
+      expect(order(offers({ sort: 'level' }))).toEqual(by(r => r.item.tier));
+      expect(text(offers())).toContain(`${MARKET_ROWS.length} open listings · newest first`);
+      expect(text(offers({ sort: 'priceDesc' }))).toContain(`${MARKET_ROWS.length} open listings · dearest first`);
+      // A search the chip hides says so, and offers to clear it.
+      const hidden = text(offers({ query: 'bow', filter: 'Armor' }));
+      // (The shared NoMatch puts the query in bold: this test's text() spaces the tags.)
+      expect(hidden).toMatch(/No match for “\s*bow\s*” in Armor/);
+      expect(hidden).toContain('Clear search');
+    });
+
+    it('counts the viewer’s own listings against the limit under My listings, with today’s words', () => {
+      const html = text(offers({ model: { ...model, rows: [helmet] }, access: 'trade', mine: true, ownerId: helmet.seller.gladiatorId }));
+      expect(html).toContain('1 of your 5 listings');
+      expect(html).toContain('A listing lasts 7 days. Cancel it, or let it expire, to return the item to your inventory.');
+      const empty = offers({ model: { rows: [], nextCursor: null, status: 'ready' }, access: 'trade', mine: true, onSell: noop });
+      expect(text(empty)).toContain('You have no open listings.');
+      expect(empty).toContain('>List an item<');
+    });
+
+    it('says when there are no offers, when they could not be loaded, and that Sort and search apply to the listings loaded so far', () => {
       expect(text(offers({ model: { rows: [], nextCursor: null, status: 'ready' } }))).toContain('No open listings right now.');
       expect(text(offers({ model: { rows: [], nextCursor: null, status: 'failed' } }))).toContain('Listings could not be loaded right now.');
       expect(text(offers({ model: { rows: [], nextCursor: null, status: 'loading' } }))).toContain('Loading listings…');
       expect(offers({ model: { ...model, nextCursor: 'x' } })).toContain('>More<');
+      expect(text(offers({ model: { ...model, nextCursor: 'x' }, sort: 'price' }))).toContain('Sort and search apply to the listings loaded so far.');
+      expect(text(offers({ model: { ...model, nextCursor: 'x' } }))).not.toContain('loaded so far');
+      expect(text(offers({ model: { ...model, nextCursor: null }, sort: 'price' }))).not.toContain('loaded so far');
     });
   });
 });

@@ -172,6 +172,14 @@ export type MarketListing = {
   /** Database time the listing was created; pages run newest first by it, then by listing id. */
   listedAtMs: number;
   expiresAtMs: number;
+  /**
+   * Patch 1.9 (Task 26): the seller's class, league and level for the Marketplace's seller band. Optional, client-side for now: the
+   * `market_offers` read does not select them until a later server task (M37) adds them; the fixture preview's read fills them from its
+   * public profiles. Absent or null, the band shows the seller's name only.
+   */
+  sellerClassId?: ClassId | null;
+  sellerLeague?: LeagueId | null;
+  sellerLevel?: number | null;
 };
 export type MarketPage = CursorPage<MarketListing>;
 export type StandingRow = {

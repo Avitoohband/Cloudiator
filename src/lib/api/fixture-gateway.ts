@@ -1,5 +1,5 @@
 import type { RevealedTimeline } from '@contracts/events';
-import type { OwnerState, PublicActor, SeasonView } from '@contracts/reads';
+import type { MarketListing, MarketPage, OwnerState, PublicActor, SeasonView } from '@contracts/reads';
 import { validAppearance } from '@domain/appearance';
 import { RULES_V1 } from '@domain/rules-v1';
 import { RULES_V2 } from '@domain/rules-v2';
@@ -249,13 +249,20 @@ export function createFixtureGateway(options: { resting?: boolean; bag?: 'demo' 
     },
     // Open offers, newest first, paged as the live read is, with its cursor and seller rules: a malformed cursor or seller is
     // refused as `unavailable`, a seller keeps only its own offers, and a well-formed cursor that no page issued ends the list.
+    // Patch 1.9 (Task 26): each offer carries its seller's class, league and level from the seller's public profile, as the read
+    // will once a later server task (M37) adds them; the live read does not select them yet.
     market: async (cursor, seller) => {
       const read = parseMarketRead(cursor, seller);
       const pages = read.seller === null ? FIXTURE_MARKET
         : marketPages(FIXTURE_MARKET.flatMap(page => page.rows).filter(row => row.seller.gladiatorId === read.seller));
       const previous = read.after === null ? -1 : pages.findIndex(page => page.nextCursor === cursor);
       if (read.after !== null && previous < 0) return { rows: [], nextCursor: null };
-      return structuredClone(pages[previous + 1]);
+      const withSeller = (row: MarketListing): MarketListing => {
+        const actor = Object.hasOwn(profiles, row.seller.gladiatorId) ? profiles[row.seller.gladiatorId].actor : null;
+        return actor ? { ...row, sellerClassId: actor.classId, sellerLeague: actor.league, sellerLevel: actor.level } : row;
+      };
+      const page: MarketPage = pages[previous + 1];
+      return structuredClone({ ...page, rows: page.rows.map(withSeller) });
     },
   };
 }

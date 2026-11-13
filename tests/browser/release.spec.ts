@@ -129,10 +129,8 @@ test.describe('release accessibility in the fixture preview', () => {
         });
         expect(where.body, `${label}: Tab ${steps + 1} left the focus on <body>`).toBe(false);
         if (!(await inside(panel))) break;
-        // The Marketplace tabs answer the arrow keys (one tab stop for the list).
+        // The Marketplace tabs answer the arrow keys (one tab stop for the list): Browse and Sell (Task 26: My listings is a chip).
         if (where.tab === 'Browse' && where.selected === 'true') {
-          await press('ArrowRight');
-          await expect(panel.getByRole('tab', { name: 'My listings' })).toBeFocused();
           await press('ArrowRight');
           await expect(panel.getByRole('tab', { name: 'Sell' })).toBeFocused();
           await expect(panel.getByRole('tab', { name: 'Sell' })).toHaveAttribute('aria-selected', 'true');

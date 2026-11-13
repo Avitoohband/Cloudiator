@@ -605,7 +605,7 @@ export function CampShell({ fixture, previewAs, previewResting = false, previewB
         initialMerchant={shop?.merchant} merchantRequest={shop?.request} /> : null;
       // Anyone browses; the command gateway is a player's only, so a visitor's or a new account's panel cannot send one.
       case 'market': return reads ? <MarketPanel key={ownerId ?? viewer} reads={reads} gateway={viewer === 'player' ? gateway : null} owner={owner} viewer={viewer}
-        clock={clock} refreshOwner={game.refreshOwner} fixture={fixture} rules={game.rules} />
+        clock={clock} refreshOwner={game.refreshOwner} fixture={fixture} rules={game.rules} onProfile={(gladiatorId, name) => openRow(gladiatorId, null, name)} />
         : <p role="status">{previewError ? 'The fixture preview could not be loaded.' : 'Loading local preview…'}</p>;
       case 'arena': return <ArenaMenu bouts={bouts} onWatchBout={bout => openScene({ kind: 'replay', activityId: bout.activityId, from: 'arena' })}
         onAllBouts={() => { chooseResults({ view: 'mine', filter: 'all' }); show('results'); }} open={open === 'arena'} bridge={bridge} reads={reads} owner={owner} world={world} clock={clock} fixture={fixture}

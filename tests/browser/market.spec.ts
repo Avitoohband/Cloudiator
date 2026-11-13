@@ -44,6 +44,10 @@ const ownList = (market: Locator) => market.getByRole('list', { name: 'Your open
 const part = (scope: Locator, name: 'icon' | 'details' | 'deal' | 'seller') => scope.locator(`[data-part="${name}"]`);
 /** Waits until the menu has stopped animating (its fade-in or rise), so a capture for the visual review shows it as it stays. */
 const settledMenu = (market: Locator) => market.evaluate(el => Promise.all(el.getAnimations().map(a => a.finished)));
+/** The game's gold (`--gold`), as computed styles give it. */
+const GOLD = 'rgb(242, 198, 107)';
+/** A tile's border colour and box shadow (its chosen ring and, for a stack, the layers behind it). */
+const tileLook = (tile: Locator) => tile.evaluate(el => { const style = getComputedStyle(el); return { border: style.borderTopColor, shadow: style.boxShadow }; });
 const itemName = (listing: MarketListing) => CATALOG_V1.items[listing.item.catalogId].name;
 const noHorizontalScroll = (page: Page) => page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth);
 /** Waits until the camp scene is drawn, so a capture for the visual review shows the camp behind the menu. */
@@ -505,7 +509,7 @@ test('shows each listing as a row: the big icon, the details, the price and acti
   const market = await openMarket(page);
   const phone = info.project.name === 'mobile';
   // A desktop gets the Inventory's 704 px; a phone keeps its bottom sheet.
-  if (!phone) expect((await market.boundingBox())!.width).toBe(704);
+  if (!phone) expect(Math.round((await market.boundingBox())!.width)).toBe(704);
   await expect(market.getByRole('group', { name: 'Marketplace filters' }).getByRole('button')).toHaveText(['All', 'Weapons', 'Armor', /^My listings/]);
   await expect(market.getByRole('button', { name: 'All', exact: true })).toHaveAttribute('aria-pressed', 'true');
   await expect(myListings(market)).toHaveAccessibleName('My listings (1)');
@@ -550,6 +554,21 @@ test('shows each listing as a row: the big icon, the details, the price and acti
   await campReady(page);
   await settledMenu(market);
   await page.screenshot({ path: info.outputPath(`task-26-live-${info.project.name}.png`) });
+});
+
+test('keeps Buy and Cancel listing at 44 px in a wide touch layout (a tablet)', async ({ page, context }, info) => {
+  test.skip(info.project.name !== 'mobile', 'A touch screen: the phone project, widened.');
+  await page.setViewportSize({ width: 1024, height: 768 });
+  await marketFlow(context);
+  const market = await openMarket(page);
+  const spear = row(market, SPEAR);
+  const [details, deal] = await Promise.all([part(spear, 'details'), part(spear, 'deal')].map(async locator => (await locator.boundingBox())!));
+  // The wide row (price and action at the right), on a touch screen.
+  expect(deal.x).toBeGreaterThanOrEqual(details.x + details.width - 1);
+  for (const [name, control] of [['Buy', spear.getByRole('button', { name: /^Buy/ })], ['Cancel listing', row(market, HELMET).getByRole('button', { name: /^Cancel listing/ })],
+    ['View profile', spear.getByRole('button', { name: /^View profile/ })]] as const) {
+    expect((await control.boundingBox())!.height, name).toBeGreaterThanOrEqual(43.5);
+  }
 });
 
 test('filters by Weapons and Armor, searches by name, and sorts by price and level', async ({ page, context }) => {
@@ -609,6 +628,10 @@ test('lists from a tile grid of the free, tradable pieces, stacked as in the Inv
   // One Tab stop: the arrow keys choose the next piece, as radio buttons do.
   await axe.click();
   await expect(axe).toHaveAttribute('aria-checked', 'true');
+  // Fix round 1: the chosen tile looks chosen (a gold border and an inset gold ring), with the pointer away from it too.
+  await page.mouse.move(0, 0);
+  await expect.poll(() => tileLook(axe)).toEqual({ border: GOLD, shadow: expect.stringContaining(`${GOLD} 0px 0px 0px 1px inset`) });
+  expect((await tileLook(sword)).border).not.toBe(GOLD);
   await expect(sell).toContainText('List on the Marketplace');
   await expect(sell).toContainText('NPC sale value: 30 gold');
   await axe.focus();
@@ -617,6 +640,11 @@ test('lists from a tile grid of the free, tradable pieces, stacked as in the Inv
   await expect(sword).toHaveAttribute('aria-checked', 'true');
   await expect(axe).toHaveAttribute('aria-checked', 'false');
   await expect(axe).toHaveAttribute('tabindex', '-1');
+  // A chosen stack keeps its layers behind the ring; the tile left behind loses the ring.
+  await expect.poll(() => tileLook(sword)).toEqual({ border: GOLD,
+    shadow: expect.stringMatching(new RegExp(`^${GOLD.replace(/[()]/g, '\\$&')} 0px 0px 0px 1px inset, rgb\\(74, 64, 54\\) 3px 3px`)) });
+  expect((await tileLook(axe)).border).not.toBe(GOLD);
+  expect((await tileLook(axe)).shadow).toBe('none');
   await page.keyboard.press('ArrowLeft');
   await expect(axe).toBeFocused();
   await expect(axe).toHaveAttribute('aria-checked', 'true');
@@ -689,6 +717,11 @@ test('shows the Sell tab of the demo bag for the visual review', { tag: '@render
   await sell.getByLabel('Price in gold').fill('101');
   await expect(sell).toContainText('You receive: 96 gold');
   expect(await noHorizontalScroll(page)).toBe(true);
+  // The pointer off the tile, so the capture shows the chosen look, not the hover border (fix round 1).
+  await page.mouse.move(0, 0);
+  expect((await tileLook(sell.getByRole('radio', { name: /^Axe, level 1/ }))).border).toBe(GOLD);
+  // A phone's tap brought the card into view below the grid: the capture shows the grid with its chosen tile.
+  if (info.project.name === 'mobile') await sell.getByRole('radiogroup', { name: 'Item to list' }).evaluate(el => el.scrollIntoView({ block: 'center' }));
   await campReady(page);
   await settledMenu(market);
   await page.screenshot({ path: info.outputPath(`task-26-sell-${info.project.name}.png`) });
@@ -777,9 +810,12 @@ test('pins the purchase confirmation in an accessibility snapshot', async ({ pag
   `);
 });
 
-test('leaves the focus and the scroll where they are after a pointer trade', async ({ page, context }) => {
+test('leaves the focus and the rows in view where they are after a pointer trade', async ({ page, context }) => {
   // Fix round 1 (the controller's ruling on review Minor 1): a trade sent with the pointer moves nothing. The bought row
-  // leaves, so the focus goes to the menu panel without scrolling it, never to the receipt or <body>.
+  // leaves, so the focus goes to the menu panel, never to the receipt or <body>. Task 26 (its fix round 1): the receipt now
+  // shows above the list, under the tabs; the browser's scroll anchoring scrolls the menu by its height, so the rows in view
+  // stay where they are on screen. When the bought row then leaves, the browser keeps one of its neighbours where it was (the
+  // one it anchors on: the row above on a desktop, the row below on a phone, where the rows above slide down into the gap).
   await watchFocus(page);
   const flow = await marketFlow(context);
   const market = await openMarket(page);
@@ -796,6 +832,9 @@ test('leaves the focus and the scroll where they are after a pointer trade', asy
   expect(before).toBeGreaterThan(0);
   const buy = (await axeBuy.boundingBox())!;
   const view = (await body.boundingBox())!;
+  // The rows just above and below the Axe's (the Round shield's and the Heavy boots'), on screen.
+  const topOf = (listing: MarketListing) => row(market, listing).evaluate(el => el.getBoundingClientRect().top);
+  const [shieldBefore, bootsBefore] = [await topOf(SHIELD), await topOf(BOOTS)];
   expect(buy.y >= view.y && buy.y + buy.height <= view.y + view.height, 'Buy is in view').toBe(true);
   const point = { x: buy.x + buy.width / 2, y: buy.y + buy.height / 2 };
   // What the pointer will land on: Axe's Buy itself, not whatever lies at that point by the time the click arrives.
@@ -810,12 +849,25 @@ test('leaves the focus and the scroll where they are after a pointer trade', asy
   // The confirmation is for the Axe, before it is confirmed.
   await expect(confirm).toContainText(`Buy ${itemName(AXE)} (Level 5 · Common) from ${AXE.seller.name} for 90 gold?`);
   expect(await body.evaluate(el => el.scrollTop)).toBe(before);
+  // The listings read after the purchase is held, so the receipt shows while the Axe's row is still there.
+  let release!: () => void;
+  const held = new Promise<void>(resolve => { release = resolve; });
+  await page.route(url => url.pathname.endsWith('/rest/v1/market_offers'), async route => { await held; await route.fallback(); });
   await confirm.getByRole('button', { name: 'Confirm purchase', exact: true }).click();
   const receipt = market.getByRole('status').filter({ hasText: 'Purchase confirmed' });
   await expect(receipt).toBeVisible();
+  const frames = () => page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+  await frames();
+  await expect(row(market, AXE)).toHaveCount(1);
+  expect(await body.evaluate(el => el.scrollTop), 'the menu scrolled by the receipt').toBeGreaterThan(before);
+  expect(Math.abs((await topOf(SHIELD)) - shieldBefore), 'the Round shield row moved when the receipt showed').toBeLessThanOrEqual(1);
+  expect(Math.abs((await topOf(BOOTS)) - bootsBefore), 'the Heavy boots row moved when the receipt showed').toBeLessThanOrEqual(1);
+  release();
   await expect(row(market, AXE)).toHaveCount(0);
   await expect(receipt).not.toBeFocused();
-  expect(await body.evaluate(el => el.scrollTop)).toBe(before);
+  await frames();
+  const kept = [Math.abs((await topOf(SHIELD)) - shieldBefore), Math.abs((await topOf(BOOTS)) - bootsBefore)];
+  expect(Math.min(...kept), `a neighbour of the bought row stays where it was (moved ${kept.join(' and ')} px)`).toBeLessThanOrEqual(1);
   expect(await page.evaluate(() => document.activeElement?.hasAttribute('data-menu-surface'))).toBe(true);
   expect(flow.commands.map(c => c.kind)).toEqual(['buy-listing']);
   expect(await focusDrops(page)).toEqual([]);

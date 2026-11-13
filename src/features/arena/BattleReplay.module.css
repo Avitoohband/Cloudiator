@@ -496,3 +496,121 @@
     height: 44px;
   }
 }
+
+/*
+ * Patch 1.9 Task 27 (the approved mockup's tournament replay): a tournament bout's header is a gold band (trophy, the eyebrow's words, the
+ * title, a run's round pips and laurels), and the picture sits in a gold double frame. Dark ink on the band's lightest gold keeps 5:1 at its
+ * darkest stop. Arena bouts and expeditions keep the plain header.
+ */
+.band {
+  box-sizing: border-box;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px 16px;
+  width: 100%;
+  max-width: 960px;
+  margin: 0 auto;
+  padding: 8px 16px;
+  border: 1.5px solid #ffe08a;
+  border-radius: 8px;
+  background: linear-gradient(90deg, #b8862a, #e5b650 30%, #f6d27a 50%, #e5b650 70%, #b8862a);
+  box-shadow: 0 0 18px rgba(242, 198, 107, 0.35);
+  color: #2a1c04;
+}
+
+.bandText {
+  min-width: 0;
+}
+
+.header .bandEyebrow {
+  margin: 0 0 2px;
+  color: #2a1c04;
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0.14em;
+}
+
+.band :is(h1, h2, h3, h4, h5, h6) {
+  color: #2a1c04;
+  overflow-wrap: anywhere;
+}
+
+.laurels {
+  color: #2a1c04;
+  font-size: 18px;
+  white-space: nowrap;
+}
+
+.pips {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 12px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  color: #2a1c04;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+}
+
+.pips li {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.pips i {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: #6b5220;
+}
+
+.pips li[data-state='done'] i,
+.pips li[aria-current='step'] i {
+  background: #fff3c4;
+  box-shadow: 0 0 6px #fff;
+}
+
+.pips li[aria-current='step'] {
+  font-weight: 800;
+}
+
+/* A phone: the pips under the picture, gold on the scene. */
+.pipsUnder {
+  color: #f2c66b;
+  font-size: 12px;
+}
+
+.pipsUnder i {
+  background: #6b5220;
+}
+
+.pipsUnder li[data-state='done'] i,
+.pipsUnder li[aria-current='step'] i {
+  background: #f2c66b;
+  box-shadow: none;
+}
+
+.pipsUnder li[aria-current='step'] {
+  color: #fff3c4;
+}
+
+.goldFrame {
+  border-radius: 2px;
+  box-shadow: 0 0 0 3px #e5b650, 0 0 0 6px #3b2a0c, 0 0 0 8px #f2c66b, 0 0 24px rgba(242, 198, 107, 0.45);
+}
+
+@media (hover: none), (max-width: 480px) {
+  .band {
+    padding: 8px 12px;
+  }
+
+  .header .bandEyebrow {
+    font-size: 11px;
+  }
+}

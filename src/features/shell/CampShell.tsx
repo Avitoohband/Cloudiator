@@ -672,7 +672,7 @@ export function CampShell({ fixture, previewAs, previewResting = false, previewB
         following={following} menuPlace={prefs.place} onClose={() => closeCard(true)} onCover={setCardCovers} onOpenMenu={id => { closeCard(false); show(id); }}
         onFollow={id => { bridge.emit('follow-character', { gladiatorId: following === id ? null : id }); closeCard(false); handBack(); }}
         onWatch={(activityId, gladiatorId) => { closeCard(false); bridge.emit('open-arena', { activityId, gladiatorId }); }}
-        onSpar={viewer === 'player' && owner ? practice.spar : undefined} compare={compare} />}
+        onSpar={viewer === 'player' && owner ? practice.spar : undefined} compare={compare} onWatchHistory={openScene} />}
       <main id="main" className={styles.camp} data-camp-view="" tabIndex={-1}
         onPointerDown={event => { press.current = { x: event.clientX, y: event.clientY }; }}
         onPointerUp={event => {

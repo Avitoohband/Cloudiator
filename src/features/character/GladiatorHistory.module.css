@@ -1,0 +1,420 @@
+/*
+ * Patch 1.9 Task 27: a gladiator's History on its card (the approved mockup's CSS): a header with ←, the chips, the retention line, the day
+ * groups of rows (the list scrolls inside a pointer card, 380 px), Show more and the foot. Tournament rows are gold: a double-trimmed frame
+ * with a soft glow, a trophy medallion with laurels (phone: the medallion only), the round in gold small caps and a gold-gradient ▶ Watch.
+ * A row whose replay is gone is dimmed. Text on these fills keeps 4.5:1 (the a11y helper composites the gradients' worst stop).
+ */
+.history {
+  min-width: 0;
+}
+
+.head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding-right: 30px;
+}
+
+.back {
+  flex: none;
+  min-width: 36px;
+  min-height: 32px;
+  padding: 0 10px;
+  border: 1px solid #4a4752;
+  border-radius: 8px;
+  background: #26242d;
+  color: var(--ink);
+  font-size: 14px;
+}
+
+.heading {
+  min-width: 0;
+}
+
+.title {
+  margin: 0;
+  font: 700 17px/1.25 Georgia, serif;
+  overflow-wrap: anywhere;
+}
+
+.subtitle {
+  margin: 0;
+  color: #aeb4c4;
+  font-size: 12px;
+}
+
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 12px 0 6px;
+}
+
+.chip {
+  min-height: 30px;
+  padding: 4px 13px;
+  border: 1px solid #4a4752;
+  border-radius: 999px;
+  background: #26242d;
+  color: var(--ink);
+  font-size: 13px;
+}
+
+.chip b {
+  font-weight: 600;
+  color: #cfd3de;
+}
+
+.chip[aria-pressed='true'] {
+  border-color: #ffdf97;
+  background: #f2c66b;
+  color: #2a2112;
+  font-weight: 700;
+}
+
+.chip[aria-pressed='true'] b {
+  color: #3d2f17;
+}
+
+.keep {
+  margin: 2px 0 4px;
+  color: #a3adc1;
+  font-size: 12px;
+}
+
+.list {
+  max-height: 380px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding-right: 2px;
+}
+
+.group {
+  min-width: 0;
+}
+
+.day {
+  margin: 10px 0 3px;
+  color: #a3adc1;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+}
+
+.rows {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 0;
+  border-bottom: 1px solid #2b2935;
+}
+
+.badge {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 6px;
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.won {
+  border: 1px solid #2f7a42;
+  background: #1f4b2b;
+  color: #9fe0a8;
+}
+
+.lost {
+  border: 1px solid #7a3236;
+  background: #4a2224;
+  color: #f0a0a0;
+}
+
+.sr {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.who {
+  flex: 1;
+  min-width: 0;
+}
+
+.name {
+  display: block;
+  font: 700 14px/1.3 Georgia, serif;
+  overflow-wrap: anywhere;
+}
+
+.tag {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 0 4px;
+  border: 1px solid #5a5a70;
+  border-radius: 4px;
+  color: #c9c9dc;
+  font: 600 9.5px/1.5 system-ui, sans-serif;
+  letter-spacing: 0.06em;
+  vertical-align: 2px;
+}
+
+.sub {
+  display: block;
+  color: #aeb4c4;
+  font-size: 12px;
+}
+
+.part {
+  white-space: nowrap;
+}
+
+.up {
+  color: #7fd88b;
+}
+
+.down {
+  color: #ef8b8b;
+}
+
+.watch {
+  flex: none;
+  min-height: 32px;
+  padding: 6px 11px;
+  border: 1px solid #ffdf97;
+  border-radius: 8px;
+  background: #f2c66b;
+  color: #2a2112;
+  font-size: 13px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.watch:hover {
+  background: #f7d385;
+}
+
+.result {
+  flex: none;
+  padding: 6px 10px;
+  border: 1px solid #4a4752;
+  border-radius: 8px;
+  background: #26242d;
+  color: #c9ccd8;
+  font-size: 13px;
+  white-space: nowrap;
+}
+
+/* A row whose replay is gone (My bouts' dimmed row). */
+.row.gone .who {
+  opacity: 0.75;
+}
+
+/* Tournament fights: gold, and fancier than an Arena bout (Avi). */
+.trow {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 8px 3px;
+  padding: 9px 10px;
+  border: 1.5px solid #d9a940;
+  border-radius: 10px;
+  background: linear-gradient(100deg, rgba(242, 198, 107, 0.16), rgba(242, 198, 107, 0.04) 55%, rgba(242, 198, 107, 0.1));
+  box-shadow: inset 0 0 0 3px rgba(21, 19, 28, 0.96), inset 0 0 0 4px rgba(217, 169, 64, 0.55), 0 0 14px rgba(242, 198, 107, 0.14);
+}
+
+.trow.gone {
+  filter: saturate(0.6) brightness(0.85);
+}
+
+.medal {
+  position: relative;
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 38px;
+  height: 38px;
+  /* Room for the laurels either side, clear of the text. */
+  margin: 0 8px 0 20px;
+  border: 2px solid #fff1c4;
+  border-radius: 50%;
+  background: radial-gradient(circle at 35% 30%, #ffe9a8, #c88f2c 70%);
+  color: #4a3208;
+  font-size: 20px;
+}
+
+/* The laurels either side of the medallion (❦, a picture only). */
+.medal::before,
+.medal::after {
+  content: '\2766';
+  position: absolute;
+  top: 10px;
+  color: #e9bd5a;
+  font-size: 12px;
+}
+
+.medal::before {
+  left: -15px;
+  transform: scaleX(-1);
+}
+
+.medal::after {
+  right: -15px;
+}
+
+.round {
+  display: block;
+  color: #f2c66b;
+  font-size: 10.5px;
+  font-weight: 800;
+  letter-spacing: 0.14em;
+}
+
+.tname {
+  display: block;
+  color: #fff3d0;
+  font: 700 15px/1.25 Georgia, serif;
+}
+
+.pill {
+  display: inline-block;
+  padding: 1px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+}
+
+.trow .watch {
+  border-color: #fff1c4;
+  background: linear-gradient(#ffe08a, #e2a93c);
+}
+
+.more {
+  display: block;
+  min-height: 34px;
+  margin: 10px auto 2px;
+  padding: 7px 22px;
+  border: 1px solid #4a4752;
+  border-radius: 8px;
+  background: #26242d;
+  color: var(--ink);
+  font-size: 13.5px;
+}
+
+.more:disabled {
+  opacity: 0.6;
+}
+
+.everything,
+.state {
+  margin: 10px 0 2px;
+  color: #a3adc1;
+  font-size: 12px;
+  text-align: center;
+}
+
+.failed,
+.moreFailed {
+  margin: 10px 0;
+  color: #f0b4b4;
+  font-size: 12.5px;
+  text-align: center;
+}
+
+.failed p {
+  margin: 0;
+}
+
+.empty {
+  padding: 26px 8px;
+  color: #aeb4c4;
+  text-align: center;
+}
+
+.empty b {
+  display: block;
+  margin-bottom: 4px;
+  color: var(--ink);
+  font: 700 15px Georgia, serif;
+}
+
+.empty p {
+  margin: 0;
+}
+
+.footer {
+  margin: 8px 0 0;
+  padding: 3px 8px;
+  border-left: 2px solid #667797;
+  color: #a3adc1;
+  font-size: 11.5px;
+}
+
+.back:focus-visible,
+.chip:focus-visible,
+.watch:focus-visible,
+.more:focus-visible {
+  outline: 2px solid var(--accent, #e6b450);
+  outline-offset: 2px;
+}
+
+/* Touch (and very narrow windows): the sheet's body scrolls the whole view; 44 px targets; the medallion without laurels. */
+@media (hover: none), (max-width: 480px) {
+  .head {
+    padding-right: 40px;
+  }
+
+  .back,
+  .chip,
+  .watch,
+  .more {
+    min-height: 44px;
+  }
+
+  .back {
+    min-width: 44px;
+  }
+
+  .list {
+    max-height: none;
+    overflow: visible;
+    padding-right: 0;
+  }
+
+  .trow {
+    padding: 8px;
+  }
+
+  .medal {
+    width: 34px;
+    height: 34px;
+    margin: 0;
+  }
+
+  .medal::before,
+  .medal::after {
+    display: none;
+  }
+
+  .tname {
+    font-size: 14px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+}

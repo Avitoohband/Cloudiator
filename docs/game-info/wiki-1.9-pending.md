@@ -78,6 +78,12 @@ The Marketplace shows each listing as a row with a big item icon, its level, rar
 
 Tournament bouts play in their own arena. The stands are split into Bronze, Silver, Gold and Champion sections, each crowd and banner in its league's colours, and the ring on the sand is painted in all four. Arena bouts keep the usual Arena.
 
+## Gladiator history (profile card, Arena, tournaments and expeditions topics)
+
+Open any gladiator's card and press 📜 History (or See all next to History in the Record section) to see their Arena bouts, tournament fights and expeditions, newest first, 20 at a time: press Show more for older ones. The chips switch between the three lists and show how many there are (the Arena chip shows wins and losses). Press ▶ Watch to watch any replay that is still kept: an Arena bout, a tournament fight at its round, or a whole expedition. Replays are kept for 7 days (tournament replays for 7 days after the tournament ends); after that the row stays, dimmed, with its result. Rewards stay private: on another gladiator's card you see results only, and on your own card (My history) you also see your renown, rating change, prize and loot. A replay shows the fights, never loot. Press ← to go back to the card.
+
+Tournament fights stand out: they are gold rows with a trophy, the round (Final, Semifinal, Quarterfinal) and the tournament's name, and a tournament fight's replay has a gold header with its rounds marked and a gold frame around the arena.
+
 ## Also
 
 - Renown now uses a gold laurel icon, in the corner chip too. Update any Wiki text or picture that shows the old icon.

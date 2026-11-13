@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { createClient } from '@supabase/supabase-js';
-import { HISTORY_PAGE, readHistory, readHistoryCounts, readMarket, readProfile, readRecent, readSeasons, readStandingOf, readStandings, readTimeline, readTournament,
+import { HISTORY_PAGE, readHistory, readHistoryCounts, readMarket, readOwnRewards, readProfile, readRecent, readSeasons, readStandingOf, readStandings, readTimeline, readTournament,
   readTournamentLog, readWorld } from '../src/lib/api/reads';
 import { tournamentLookupId } from '../src/lib/tournament-id';
 
@@ -167,6 +167,40 @@ describe('protected Data API adapters', () => {
       for (const broken of [{ ...counts.gladiator_history_counts[0], arena: 1.5 }, { ...counts.gladiator_history_counts[0], tournament_won: 5 }]) {
         await expect(readHistoryCounts(api({ gladiator_history_counts: [broken] }, calls), GID)).rejects.toMatchObject({ code: 'unavailable' });
       }
+    });
+    // Patch 1.9 Task 27: the owner's own card shows its own rewards beside its history rows, from its own `activities` (owner-only
+    // under RLS): one read per page, for the page's activities only, never a receipt or anything but the summary's rewards.
+    it('reads the owner’s own rewards for the rows on its own card from its own activities', async () => {
+      const calls: string[] = [];
+      const summary = (n: number, over: Record<string, unknown> = {}) => ({ activityId: ACT(n), resolvedKind: 'arena', result: 'victory', success: true, receiptId: 'secret-receipt',
+        settledAtMs: 9_000_000, replayExpiry: { state: 'expired' }, ratingDelta: 13,
+        rewards: { money: 0, renown: 10, xp: 0, attributePoints: 0, items: [], overflowMoney: 0 }, ...over });
+      const rows = [
+        { id: ACT(1), summary: summary(1) },
+        { id: ACT(2), summary: summary(2, { resolvedKind: 'expedition', ratingDelta: undefined,
+          rewards: { money: 85, renown: 0, xp: 100, attributePoints: 0, items: [{ catalogId: 'iron-helmet:1:common', catalogVersion: 'v1', tier: 1, rarity: 'common', quantity: 1 }], overflowMoney: 0 } }) },
+        { id: ACT(3), summary: summary(3, { arenaMode: 'unranked', ratingDelta: undefined, rewards: { money: 0, renown: 4, xp: 0, attributePoints: 0, items: [], overflowMoney: 0 } }) },
+        // A row this client cannot read is left out, never shown half-read.
+        { id: ACT(4), summary: summary(4, { rewards: { renown: -1 } }) },
+        { id: 'not-a-uuid', summary: summary(5) },
+      ];
+      const rewards = await readOwnRewards(api({ activities: rows }, calls), [ACT(1), ACT(2), ACT(3), ACT(4)]);
+      expect([...rewards]).toEqual([
+        [ACT(1), { renown: 10, money: 0, ratingDelta: 13, unranked: false, items: [] }],
+        [ACT(2), { renown: 0, money: 85, ratingDelta: null, unranked: false, items: [{ catalogId: 'iron-helmet:1:common', quantity: 1 }] }],
+        [ACT(3), { renown: 4, money: 0, ratingDelta: null, unranked: true, items: [] }],
+      ]);
+      const query = new URL(`http://local${calls[0]}`);
+      expect(query.pathname).toBe('/rest/v1/activities');
+      expect(query.searchParams.get('select')).toBe('id,summary');
+      expect(query.searchParams.get('id')).toBe(`in.(${[1, 2, 3, 4].map(ACT).join(',')})`);
+      expect(query.searchParams.get('status')).toBe('eq.completed');
+      // Nothing to ask: no request. A malformed id, or more than a page of them, is refused before any request.
+      calls.length = 0;
+      expect((await readOwnRewards(api({}, calls), [])).size).toBe(0);
+      await expect(readOwnRewards(api({}, calls), [ACT(1), `${ACT(2)},id.neq.x`])).rejects.toMatchObject({ code: 'unavailable' });
+      await expect(readOwnRewards(api({}, calls), Array.from({ length: 21 }, (_, n) => ACT(n)))).rejects.toMatchObject({ code: 'unavailable' });
+      expect(calls).toEqual([]);
     });
   });
   /**

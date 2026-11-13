@@ -403,6 +403,11 @@
   outline-offset: 1px;
 }
 
+/* Patch 1.9 Task 27: the History view, in place of the card's sections and actions (GladiatorHistory.module.css draws it). */
+.historyBody {
+  min-width: 0;
+}
+
 /* Patch 1.9 Task 23c: the comparison block (the approved mockup's CSS), in place of the grid while "Compare with mine" is on. */
 .compare {
   margin-top: 12px;

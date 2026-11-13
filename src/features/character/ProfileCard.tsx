@@ -28,8 +28,14 @@
 // Patch 1.9 Task 23c: a player's card on another gladiator offers "⇄ Compare with mine" after Follow (never on the viewer's own card, never to a visitor
 // or an account without a gladiator). While it is on, the Attributes, Stats, Gear and Record sections give way to the comparison (`ProfileCompare`). The
 // on/off state lives in the shell (a card is re-created for each gladiator), so it stays on while other cards open.
+//
+// Patch 1.9 Task 27 (Avi, 2026-11-12; the approved mockup `.superpowers/design/2026-11-12-gladiator-history/`): every player's card (never a Ludus
+// Nimbus bot's) opens their History: "📜 History" after ⚔ Spar a copy, or "See all" on the History line of RECORD. The history then stands in
+// for the card's sections and actions (`GladiatorHistory`) until ← goes back to the card, the focus back on what opened it; the chip chosen
+// stays while the card is open. Its lists are public (the same for every reader, visitors too); the viewer's own card adds its own rewards.
+// ▶ Watch opens the scene over the camp, which closes the card.
 import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
-import type { PublicActor, WorldSnapshot } from '@contracts/reads';
+import type { HistoryKind, PublicActor, WorldSnapshot } from '@contracts/reads';
 import type { GameGateway } from '../../lib/api/gateway';
 import type { ProfileRead } from '../../lib/api/reads';
 import type { Point } from '../../game/iso';
@@ -48,6 +54,9 @@ import { useStatHints } from './stat-hints';
 import { ClassChips } from './ClassCard';
 import { attributeHelp, attributeRows, cardStats, compareStats, gearRows, overloadLine, pointsTotal, recordText, sinceText, statHelp, statRows, type CompareSide } from './profile-card';
 import { CompareBlock } from './ProfileCompare';
+import { GladiatorHistory } from './GladiatorHistory';
+import { createHistoryStore, type HistoryReads, type HistoryStore } from './history-store';
+import type { SceneView } from '../shell/scene-url';
 import { copySide, type PracticeSide } from '../practice/practice';
 import styles from './ProfileCard.module.css';
 
@@ -76,7 +85,7 @@ const RARITY_CLASS = { common: styles.rCommon, uncommon: styles.rUncommon, rare:
 export type CompareProp = { mine: CompareSide; on: boolean; onToggle(): void };
 
 export function ProfileCard({ actor, profile, profileFailed = false, own, ownPlace = null, record = null, followReason = null, following = false, nowMs, onFollow,
-  onWatch, onOpenMenu, onSpar, compare }: {
+  onWatch, onOpenMenu, onSpar, compare, history = null, onWatchHistory }: {
   actor: PublicActor;
   /** The public profile with its card data, once loaded (null while it loads or when it failed). */
   profile: ProfileRead | null;
@@ -103,8 +112,19 @@ export function ProfileCard({ actor, profile, profileFailed = false, own, ownPla
   onSpar?(copy: PracticeSide): void;
   /** ⇄ Compare with mine: a player's only, and never on their own card (Patch 1.9 Task 23c); without it the card offers none. */
   compare?: CompareProp;
+  /** The card's history (Patch 1.9 Task 27): its lists, counts and (own card) rewards; without it the card offers no History. */
+  history?: HistoryStore | null;
+  /** ▶ Watch on a history row: the scene to open over the camp. */
+  onWatchHistory?(view: SceneView): void;
 }) {
   const reasonId = useId();
+  // The History view (Task 27): open or not, and the chip chosen (kept while the card is open). The focus goes to ← when it opens and
+  // back to what opened it (📜 History or See all) when it closes.
+  const [shown, setShown] = useState<{ open: boolean; kind: HistoryKind }>({ open: false, kind: 'arena' });
+  const historyButton = useRef<HTMLButtonElement>(null);
+  const seeAll = useRef<HTMLButtonElement>(null);
+  const historyBack = useRef<HTMLButtonElement>(null);
+  const opener = useRef<'button' | 'link' | null>(null);
   const bodyRef = useRef<HTMLDivElement>(null);
   const compareRef = useRef<HTMLButtonElement>(null);
   // The help tooltips are shared with My gladiator (`useStatHints`); here the body scrolls on touch, the card itself on desktop.
@@ -139,6 +159,22 @@ export function ProfileCard({ actor, profile, profileFailed = false, own, ownPla
   const comparison = useMemo(() => (compare && !own && build ? compareStats(compare.mine, { name: actor.name, level: actor.level, classId: actor.classId, build }) : null),
     [compare, own, actor.name, actor.level, actor.classId, build]);
   const comparing = !!compare && !own && compare.on && comparison !== null;
+  const historyOn = history !== null && !bot;
+  const historyOpen = historyOn && shown.open;
+  useEffect(() => {
+    if (historyOpen) { historyBack.current?.focus({ preventScroll: true }); return; }
+    const from = opener.current;
+    if (!from) return;
+    opener.current = null;
+    (from === 'link' ? seeAll : historyButton).current?.focus({ preventScroll: true });
+  }, [historyOpen]);
+  const openHistory = (from: 'button' | 'link') => { opener.current = from; setShown(current => ({ ...current, open: true })); };
+  if (historyOpen && history) {
+    return <div ref={bodyRef} className={`${styles.body} ${styles.historyBody}`} data-testid="profile-body">
+      <GladiatorHistory store={history} kind={shown.kind} onKind={kind => setShown({ open: true, kind })} name={actor.name} own={own} nowMs={nowMs}
+        onBack={() => setShown(current => ({ ...current, open: false }))} onWatch={view => onWatchHistory?.(view)} backRef={historyBack} />
+    </div>;
+  }
   return <>
     <div ref={bodyRef} className={`${styles.body} ${comparing ? styles.comparing : ''}`} data-testid="profile-body" data-comparing={comparing ? '' : undefined}>
       <div className={styles.head}>
@@ -195,6 +231,7 @@ export function ProfileCard({ actor, profile, profileFailed = false, own, ownPla
             {!bot && profile?.arenaRecord && <div><dt>Arena record</dt><dd>{recordText(profile.arenaRecord)}
               {profile.arenaRecord.wins + profile.arenaRecord.losses > 0 && <small> · all seasons</small>}</dd></div>}
             {record && <div><dt>{record.season ? seasonName(record.season) : 'This season'}</dt><dd>{record.wins}–{record.losses}</dd></div>}
+            {historyOn && <div><dt>History</dt><dd><button ref={seeAll} type="button" className={styles.back} data-history-link="" onClick={() => openHistory('link')}>See all</button></dd></div>}
             {since && <div><dt>In camp since</dt><dd>{since}</dd></div>}
           </dl>
           {own && profile && <p className={styles.see}>Other players see this card too.</p>}
@@ -214,6 +251,9 @@ export function ProfileCard({ actor, profile, profileFailed = false, own, ownPla
       </button>}
       {onSpar && <button type="button" data-spar-button="" disabled={!copy} onClick={() => { if (copy) onSpar(copy); }}>
         <span aria-hidden="true">⚔</span> Spar a copy
+      </button>}
+      {historyOn && <button ref={historyButton} type="button" data-history-button="" onClick={() => openHistory('button')}>
+        <span aria-hidden="true">📜</span> History
       </button>}
       {bout && onWatch && <button type="button" onClick={() => onWatch(bout)}>Watch bout</button>}
     </div>
@@ -295,11 +335,11 @@ function followReasonOf(actor: PublicActor, roster: Roster | null, sceneStatus: 
 
 /** The profile card over the camp: resolves the actor, loads the public profile and places the card. */
 export function ProfileLayer({ target, world, reads, ownerId, ownPlace = null, roster, sceneStatus, following, nowMs, menuPlace = 'left', onFollow, onWatch, onOpenMenu, onClose,
-  onCover, onSpar, compare }: {
+  onCover, onSpar, compare, onWatchHistory }: {
   target: ProfileTarget;
   world: WorldSnapshot | null;
-  /** Public profile reads (null until the fixture preview's reads load). */
-  reads: Pick<GameGateway, 'profile'> | null;
+  /** Public profile reads (null until the fixture preview's reads load), and the history reads (Patch 1.9 Task 27). */
+  reads: (Pick<GameGateway, 'profile'> & HistoryReads) | null;
   /** The viewer's own gladiator, or null. */
   ownerId: string | null;
   /** The owner's own words while its gladiator rests at home, for its own card (Task 23.9 fix round 1). */
@@ -322,6 +362,8 @@ export function ProfileLayer({ target, world, reads, ownerId, ownPlace = null, r
   onSpar?(copy: PracticeSide): void;
   /** ⇄ Compare with mine: a player's (Patch 1.9 Task 23c); the state is the shell's. */
   compare?: CompareProp;
+  /** ▶ Watch on a history row (Patch 1.9 Task 27): the shell opens the scene. */
+  onWatchHistory?(view: SceneView): void;
 }) {
   const card = useRef<HTMLElement>(null);
   const [loaded, setLoaded] = useState<{ profile: ProfileRead | null; failed: boolean } | null>(null);
@@ -333,6 +375,8 @@ export function ProfileLayer({ target, world, reads, ownerId, ownPlace = null, r
   onCoverRef.current = onCover;
   useLayoutEffect(() => () => onCoverRef.current?.(false), []);
   const id = target.gladiatorId;
+  // The card's history: read only when it is shown; the viewer's own card asks for its own rewards too.
+  const history = useMemo(() => (reads?.history ? createHistoryStore(reads, id, ownerId === id) : null), [reads, id, ownerId]);
 
   useEffect(() => {
     if (!reads) return;
@@ -377,7 +421,7 @@ export function ProfileLayer({ target, world, reads, ownerId, ownPlace = null, r
       {actor ? (
         <ProfileCard key={id} actor={actor} profile={loaded?.profile ?? null} profileFailed={loaded?.failed ?? false} own={ownerId === id} ownPlace={ownPlace} record={target.record}
           followReason={followReasonOf(actor, roster, sceneStatus)} following={following === id} nowMs={nowMs} onFollow={onFollow}
-          onWatch={activityId => onWatch(activityId, id)} onOpenMenu={onOpenMenu} onSpar={onSpar} compare={compare} />
+          onWatch={activityId => onWatch(activityId, id)} onOpenMenu={onOpenMenu} onSpar={onSpar} compare={compare} history={history} onWatchHistory={onWatchHistory} />
       ) : <div className={styles.body} data-testid="profile-body">
         <div className={styles.headPlain}><h2 className={styles.name}>{name}</h2></div>
         {target.record && <dl className={styles.facts}><div><dt>Record</dt><dd>{target.record.wins}–{target.record.losses}</dd></div></dl>}

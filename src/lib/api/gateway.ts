@@ -5,8 +5,9 @@ import type { HistoryCounts, HistoryKind, HistoryPage, MarketPage, OwnFeedback, 
 import type { PatchEntry } from '../patch';
 import { getBrowserClient } from './client';
 import {
-  GatewayReadError, parseDungeonFightRef, readBouts, readDungeonFight, readHistory, readHistoryCounts, readLooks, readMarket, readMessages, readNotifications, readOwnFeedback, readOwner, readPatchNumbers, readPatches, readWorld, readRevision, readTimeline, readProfile,
-  readRecent, readRestAfter, readSeasons, readStandingOf, readStandings, readTournament, readTournamentLog, type BoutFilter, type BoutsPage, type NotificationsRead, type ProfileRead, type RevisionRead, type ShownMessage,
+  GatewayReadError, parseDungeonFightRef, readBouts, readDungeonFight, readHistory, readHistoryCounts, readOwnRewards, readLooks, readMarket, readMessages, readNotifications, readOwnFeedback, readOwner, readPatchNumbers, readPatches, readWorld, readRevision, readTimeline, readProfile,
+  readRecent, readRestAfter, readSeasons, readStandingOf, readStandings, readTournament, readTournamentLog, type BoutFilter, type BoutsPage, type NotificationsRead, type OwnRewards,
+  type ProfileRead, type RevisionRead, type ShownMessage,
 } from './reads';
 export { GatewayReadError, type NotificationsRead, type ProfileRead, type RevisionRead, type ShownMessage } from './reads';
 
@@ -123,6 +124,12 @@ export interface GameGateway {
   history?(gladiatorId: GladiatorId, kind: HistoryKind, cursor?: string): Promise<HistoryPage>;
   /** Patch 1.9 (M37): the history's counts per kind (every row the history lists, and how many were won); all 0 without history. */
   historyCounts?(gladiatorId: GladiatorId): Promise<HistoryCounts>;
+  /**
+   * Patch 1.9 Task 27: the owner's own rewards for some of its own activities (at most a page of 20), for its own card's history rows. Owner-only:
+   * it needs a signed-in account and reads `activities`, whose row security answers only the reader's own gladiators' activities, so another
+   * gladiator's activity is never answered. A malformed id is `unavailable`, without a request; an activity it cannot read is left out.
+   */
+  ownRewards?(activityIds: readonly ActivityId[]): Promise<Map<ActivityId, OwnRewards>>;
 }
 
 type BrowserClient = NonNullable<ReturnType<typeof getBrowserClient>>;
@@ -314,5 +321,6 @@ export function createLiveGateway(): GameGateway {
     market: (cursor, seller) => publicRead(client => readMarket(client, cursor, seller)),
     history: (gladiatorId, kind, cursor) => publicRead(client => readHistory(client, gladiatorId, kind, cursor)),
     historyCounts: gladiatorId => publicRead(client => readHistoryCounts(client, gladiatorId)),
+    ownRewards: activityIds => read(client => readOwnRewards(client, activityIds)),
   };
 }

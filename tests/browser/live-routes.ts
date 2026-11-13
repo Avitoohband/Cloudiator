@@ -108,6 +108,11 @@ export type LiveData = {
    * order; none by default. A visitor is refused, as `anon` has no grant.
    */
   feedback?: readonly OwnFeedback[];
+  /**
+   * Patch 1.9 Task 27: the public history (the M37 `gladiator_history_reads` view rows, snake_case, each with its `gladiator_id`), readable by
+   * visitors too, and the `gladiator_history_counts` the transport counts from them; none by default.
+   */
+  history?: readonly Row[];
   /** When set, only this account can see the fixture owner and its activities. Other signed-in readers receive no owner rows. */
   ownerAccountId?: string;
   /** The server's current time; by default `world.serverNowMs` running on in real time from the call. */
@@ -487,6 +492,9 @@ function tables({ world, owner, now, reader, data }: LiveState): Record<string, 
     // asked for, and the gladiator it embeds with its level and XP now and the count of results that settled after the server's now:
     // none here, every result a spec lists has been revealed) and the owner's bouts as `readBouts` selects them.
     activities: { private: true, rows: ownsRows ? activityRows(timelines, owner, data) : [] },
+    // Patch 1.9 Task 27 (M37's public views): any gladiator's history rows, and per gladiator its counts and wins of each kind.
+    gladiator_history_reads: { rows: [...(data.history ?? [])] },
+    gladiator_history_counts: { rows: historyCounts(data.history ?? []) },
     // Patch 1.9 (M34): the account's own feedback, the six columns its grant serves (RLS: `owner_id = auth.uid()`).
     feedback: { private: true, rows: ownsRows ? (data.feedback ?? []).map(f => ({ id: f.id, category: f.category, text: f.text, status: f.status,
       created_at_ms: f.createdAtMs, answered_at_ms: f.answeredAtMs })) : [] },
@@ -516,6 +524,19 @@ function activityRows(timelines: readonly RevealedTimeline[], owner: OwnerState 
     merge(b.activityId, { gladiator_id: owner.gladiatorId, slot_index: slot, starts_at_ms: slot * SLOT_MS, resolved_kind: b.summary.resolvedKind });
   }
   return [...rows.values()];
+}
+
+/** The M37 counts view: per gladiator, how many history rows of each kind, and how many of them were won. */
+function historyCounts(rows: readonly Row[]): Row[] {
+  const counts = new Map<string, Row>();
+  for (const row of rows) {
+    const id = String(row.gladiator_id), kind = String(row.kind);
+    const counted = counts.get(id) ?? { gladiator_id: id, arena: 0, arena_won: 0, tournament: 0, tournament_won: 0, expedition: 0, expedition_won: 0 };
+    counted[kind] = Number(counted[kind]) + 1;
+    if (row.result === 'victory') counted[`${kind}_won`] = Number(counted[`${kind}_won`]) + 1;
+    counts.set(id, counted);
+  }
+  return [...counts.values()];
 }
 
 /** Round r of R reveals `ceil(duration × r / (R + 1))` after the start (spec §8.4; written apart from the app's helper). */

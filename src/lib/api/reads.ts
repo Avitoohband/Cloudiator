@@ -1158,3 +1158,46 @@ export async function readHistoryCounts(client: SupabaseClient, gladiatorId: Gla
   }
   return counts;
 }
+
+// ------------------------------------------------------------------ The owner's own rewards beside its history (Patch 1.9 Task 27)
+
+/**
+ * What the owner's own card shows beside a history row (the approved mockup): an Arena bout's renown and rating change (none for an NPC
+ * bout; "Rating unchanged" for an unranked one), a tournament run's prize and renown, an expedition's gold and items.
+ */
+export type OwnRewards = { renown: number; money: number; ratingDelta: number | null; unranked: boolean; items: { catalogId: string; quantity: number }[] };
+/** An owner summary's rewards as the card shows them, or null for a summary this client cannot read faithfully. */
+export function ownRewardsOf(value: unknown): OwnRewards | null {
+  if (!record(value)) return null;
+  const rewards = value.rewards, delta: unknown = value.ratingDelta;
+  if (!record(rewards)) return null;
+  if (!whole(rewards.renown) || !whole(rewards.money) || !Array.isArray(rewards.items) || (delta !== undefined && delta !== null && !Number.isSafeInteger(delta))) return null;
+  const items: OwnRewards['items'] = [];
+  for (const item of rewards.items as unknown[]) {
+    if (!record(item) || typeof item.catalogId !== 'string' || item.catalogId === '' || !whole(item.quantity) || item.quantity < 1) return null;
+    items.push({ catalogId: item.catalogId, quantity: item.quantity });
+  }
+  return { renown: rewards.renown, money: rewards.money, ratingDelta: typeof delta === 'number' ? delta : null, unranked: value.arenaMode === 'unranked', items };
+}
+/** The activity ids of one page of the owner's own rewards, checked before any query: activity ids, at most a page of them. */
+export function parseOwnRewardsRead(activityIds: readonly string[]): string[] {
+  if (!Array.isArray(activityIds) || activityIds.length > HISTORY_PAGE || activityIds.some(id => typeof id !== 'string' || !GLADIATOR_ID.test(id))) throw new GatewayReadError('unavailable');
+  return [...new Set(activityIds.map(id => id.toLowerCase()))];
+}
+/**
+ * The owner's own rewards for some of its own activities (its own card's history rows: one read per page), from the owner-only
+ * `activities` (RLS: a reader's own gladiators only, so another gladiator's activity is never answered). Only `id` and `summary`
+ * cross, and only the summary's rewards, rating change and mode are kept: never a receipt. A row this client cannot read is left out.
+ * Nothing to ask is no request; a malformed id (or more than a page) is `unavailable` before any request.
+ */
+export async function readOwnRewards(client: SupabaseClient, activityIds: readonly string[]): Promise<Map<string, OwnRewards>> {
+  const ids = parseOwnRewardsRead(activityIds);
+  const found = new Map<string, OwnRewards>();
+  if (ids.length === 0) return found;
+  const rows = checked(await client.from('activities').select('id,summary').in('id', ids).eq('status', 'completed')) as unknown as { id?: unknown; summary?: unknown }[];
+  for (const row of rows) {
+    const rewards = typeof row.id === 'string' && ids.includes(row.id) ? ownRewardsOf(row.summary) : null;
+    if (rewards) found.set(row.id as string, rewards);
+  }
+  return found;
+}

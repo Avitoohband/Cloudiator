@@ -34,7 +34,7 @@ import { ReplayBar, type BarStep } from '../replay/ReplayBar';
 import { COMPACT_QUERY } from '../shell/rail-reveal';
 import {
   FIGHT_AGAIN, PRACTICE_CHIP, PRACTICE_NOTE, PRACTICE_RESULT, PRACTICE_TAG, RESULT_HINT, againLabel, boutEyebrow, chapterLabel, counterText, nextLabel, rewardChips,
-  upNextText, verdictText,
+  roundPips, upNextText, verdictText, type RoundPip,
 } from '../bouts/bout-text';
 import { nextQueuePage, nextTarget, previousTarget, queueEntries, type ReplayQueue, type StepTarget } from '../bouts/bout-queue';
 import type { BoutList } from '../bouts/bouts-store';
@@ -118,6 +118,18 @@ function IconText({ text }: { text: string }) {
   const space = text.indexOf(' ');
   return space < 0 ? <>{text}</> : <><span aria-hidden="true">{text.slice(0, space)}</span>{text.slice(space)}</>;
 }
+/**
+ * Patch 1.9 Task 27: a tournament run's rounds on its gold band (the approved mockup's pips): the rounds before the one shown are done (✓),
+ * the one shown is the current step. Below the picture on a phone.
+ */
+function RoundPips({ pips, under = false }: { pips: readonly RoundPip[]; under?: boolean }) {
+  return <ol className={under ? `${styles.pips} ${styles.pipsUnder}` : styles.pips} aria-label="Rounds">
+    {pips.map(pip => <li key={pip.label} data-state={pip.state} aria-current={pip.state === 'current' ? 'step' : undefined}>
+      <i aria-hidden="true" />{pip.label}{pip.state === 'done' && <span aria-hidden="true"> ✓</span>}
+    </li>)}
+  </ol>;
+}
+
 /** A label that may start with an icon ("← Camp") or not ("Change dummy"): only a leading icon is hidden from its name. */
 const LabelText = ({ text }: { text: string }) => (/^[^\p{L}\p{N}\s]+\s/u.test(text) ? <IconText text={text} /> : <>{text}</>);
 
@@ -570,6 +582,11 @@ function BattlePlayer({ battle, summary, keptUntil, bridge: external, level, vie
   const npc = stage.kind === 'bout' && log.participants.some(p => p.gladiatorId === null);
   const unranked = stage.kind === 'bout' && (stage.arenaMode === 'unranked' || summary?.arenaMode === 'unranked');
   const eyebrow = practice ? practice.eyebrow : boutEyebrow(stage, { npc, league, compact, unranked }, clockMode);
+  // Patch 1.9 Task 27 (Avi: tournament battles "should be fancier, so people can distinguish"): a tournament bout's eyebrow and title sit in
+  // a gold band (its words are still `boutEyebrow`'s), a run's rounds as pips, and the picture in a gold frame. Arena bouts, expeditions and
+  // practice fights keep the plain header.
+  const band = tournament && !practice;
+  const pips = band && chapters ? roundPips(chapters.labels, chapters.current) : [];
   // A bracket's bouts show no rewards (spec 2); a run's show on its last chapter. A practice fight has none to show.
   const chips = practice ? [PRACTICE_CHIP] : league !== null ? []
     : rewardChips(summary, { fighter, npc, unranked, kind: stage.kind === 'encounter' ? 'expedition' : tournament ? 'tournament' : 'arena', last });
@@ -591,8 +608,15 @@ function BattlePlayer({ battle, summary, keptUntil, bridge: external, level, vie
   return (
     <section className={styles.player} aria-labelledby={`${resultId}-title`} onKeyDown={onKeyDown}>
       <header className={styles.header}>
-        <p className="eyebrow">{eyebrow}</p>
-        {practice
+        {band ? <div className={styles.band} data-tournament-band="">
+          <div className={styles.bandText}>
+            <p className={`eyebrow ${styles.bandEyebrow}`}><span aria-hidden="true">🏆 </span>{eyebrow}</p>
+            <Heading level={level} id={`${resultId}-title`}>{a.name}{a.botTeam && <BotTag />} vs {b.name}{b.botTeam && <BotTag />}</Heading>
+          </div>
+          {!compact && pips.length > 0 && <RoundPips pips={pips} />}
+          {!compact && <span className={styles.laurels} aria-hidden="true">❦ 🏆 ❦</span>}
+        </div> : <p className="eyebrow">{eyebrow}</p>}
+        {band ? null : practice
           ? <div className={styles.titleRow}>
             <Heading level={level} id={`${resultId}-title`}>{a.name} vs {b.name}</Heading>
             <span className={styles.practiceTag} data-practice-tag="">{PRACTICE_TAG}</span>
@@ -600,7 +624,7 @@ function BattlePlayer({ battle, summary, keptUntil, bridge: external, level, vie
           : <Heading level={level} id={`${resultId}-title`}>{a.name}{a.botTeam && <BotTag />} vs {b.name}{b.botTeam && <BotTag />}</Heading>}
         {!compact && nav?.counter && <p className={styles.counter} data-bout-counter="">{nav.counter.wide}</p>}
       </header>
-      <div className={styles.arena}>
+      <div className={band ? `${styles.arena} ${styles.goldFrame}` : styles.arena} data-tournament-frame={band ? '' : undefined}>
         {settledLooks
           ? <BattleViewport log={log} looks={settledLooks} position={position} reducedMotion={reduced} bridge={bridge} label={closeUp} tournament={tournament} />
           : <BattleViewportWaiting label={closeUp} />}
@@ -620,6 +644,7 @@ function BattlePlayer({ battle, summary, keptUntil, bridge: external, level, vie
           </div>
         </div>}
       </div>
+      {compact && pips.length > 0 && <RoundPips pips={pips} under />}
       <div className={styles.health}>
         {log.participants.map((p, i) => {
           const hp = frame.hp[i];

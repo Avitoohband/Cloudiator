@@ -147,6 +147,17 @@ export function boutEyebrow(stage: RevealedStage, options: { npc: boolean; leagu
   return ['ARENA', options.unranked ? 'Unranked' : '', when, options.npc ? (options.compact ? 'NPC' : 'NPC OPPONENT') : ''].filter(Boolean).join(SEP).toUpperCase();
 }
 
+/** One round on a tournament run's gold band (Patch 1.9 Task 27): played before the one shown, the one shown, or still to come. */
+export type RoundPip = { label: string; state: 'done' | 'current' | 'later' };
+/**
+ * A tournament run's round chapters ("Quarterfinal", "Semifinal", "Final") as the gold band's pips, the shown one current and those before it
+ * done. None for a bracket's chapters ("QF 1", "SF 2"…), which name bouts rather than the viewer's rounds, nor for a single bout.
+ */
+export function roundPips(labels: readonly string[], current: number): RoundPip[] {
+  if (labels.length < 2 || !labels.every(label => /^(Final|Semifinal|Quarterfinal|Round [1-9]\d{0,2})$/.test(label))) return [];
+  return labels.map((label, i) => ({ label, state: i < current ? 'done' : i === current ? 'current' : 'later' }));
+}
+
 /** A chapter's name on the bar: a tournament run's round ("Quarterfinal"), an expedition encounter's label, else "Bout". */
 export function chapterLabel(stage: RevealedStage): string {
   return tournamentRound(stage.label) ?? (stage.kind === 'encounter' ? stage.label : 'Bout');

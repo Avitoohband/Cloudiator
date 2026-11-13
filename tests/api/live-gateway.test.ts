@@ -11,7 +11,8 @@ test('without a configured backend, every live read and command fails explicitly
   const reads = [gateway.world(), gateway.revision(), gateway.timeline('activity'), gateway.profile('gladiator'),
     gateway.market(), gateway.standings('bronze'), gateway.standings('bronze', undefined, '0'), gateway.seasons(), gateway.standingOf('bronze', '0d5f8471-d919-428f-9ab7-058c95821757'),
     gateway.tournament('tournament'), gateway.tournamentLog('tournament:301:bronze:1:0'), gateway.recent(), gateway.messages(),
-    gateway.history!('0d5f8471-d919-428f-9ab7-058c95821757', 'arena'), gateway.historyCounts!('0d5f8471-d919-428f-9ab7-058c95821757')];
+    gateway.history!('0d5f8471-d919-428f-9ab7-058c95821757', 'arena'), gateway.historyCounts!('0d5f8471-d919-428f-9ab7-058c95821757'),
+    gateway.ownRewards!(['0d5f8471-d919-428f-9ab7-058c95821757'])];
   await Promise.all(reads.map(read => expect(read).rejects.toMatchObject({ code: 'unavailable' })));
   await expect(gateway.command({ kind: 'edit-schedule', operationId: 'd43f7844-52e0-4302-b8e4-740035047765',
     expectedVersion: 1, phase: 'morning', choice: { kind: 'arena' } })).resolves.toEqual({ ok: false, code: 'unavailable' });

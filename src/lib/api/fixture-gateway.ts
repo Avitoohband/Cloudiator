@@ -1,10 +1,13 @@
 import type { RevealedTimeline } from '@contracts/events';
-import type { MarketListing, MarketPage, OwnerState, PublicActor, SeasonView } from '@contracts/reads';
+import type { HistoryCounts, HistoryEntry, MarketListing, MarketPage, OwnerState, PublicActor, SeasonView } from '@contracts/reads';
 import { validAppearance } from '@domain/appearance';
 import { RULES_V1 } from '@domain/rules-v1';
 import { RULES_V2 } from '@domain/rules-v2';
 import type { GameGateway } from './gateway';
-import { BOUTS_PAGE, GatewayReadError, boutOf, nextBoutsCursor, parseBoutsRead, parseDungeonFightRef, parseMarketRead, parseResultsCursor, parseRestAfter, parseStandingOf, parseStandingsRead, type LastBout } from './reads';
+import {
+  BOUTS_PAGE, GatewayReadError, HISTORY_PAGE, boutOf, historyEntryOf, nextBoutsCursor, ownRewardsOf, parseBoutsRead, parseDungeonFightRef, parseHistoryRead, parseMarketRead,
+  parseOwnRewardsRead, parseResultsCursor, parseRestAfter, parseStandingOf, parseStandingsRead, type LastBout,
+} from './reads';
 import { replayKept } from '../replay-retention';
 import { worldFixture } from '../../../tests/fixtures/domain';
 import { DUNGEON_BY_ACTIVITY, DUNGEON_BY_RUN, DUNGEON_SAMPLES } from '../../../tests/fixtures/dungeons';
@@ -12,7 +15,8 @@ import { REPLAY_SAMPLES, REPLAY_TIMELINES } from '../../../tests/fixtures/battle
 import { EXPEDITION_FIXTURES, EXPEDITION_SAMPLES, EXPEDITION_TIMELINES } from '../../../tests/fixtures/expeditions';
 import { EXPEDITION_GLADIATORS } from '../../../tests/fixtures/expedition-ids';
 import { ARENA_OWNER, ARENA_PROFILES, ARENA_SAMPLES, ARENA_STANDINGS, ARENA_TIMELINES, ARENA_WORLD_ACTORS, arenaStandingsPage } from '../../../tests/fixtures/arena';
-import { TOURNAMENT_OWNER_TIMELINES, TOURNAMENT_SAMPLES, TOURNAMENT_VIEWS_BY_ID } from '../../../tests/fixtures/tournaments';
+import { TOURNAMENT_OWNER_TIMELINES, TOURNAMENT_SAMPLES, TOURNAMENT_VIEWS, TOURNAMENT_VIEWS_BY_ID } from '../../../tests/fixtures/tournaments';
+import { buildHistoryFixtures } from '../../../tests/fixtures/history';
 import { RESULTS_FIXTURE } from '../../../tests/fixtures/results';
 import { FIXTURE_MARKET, marketPages } from '../../../tests/fixtures/market';
 import { FIXTURE_SEASONS } from '../../../tests/fixtures/seasons';
@@ -42,7 +46,25 @@ export const FIXTURE_ARENA: readonly { activityId: string; label: string; gladia
  */
 export const FIXTURE_TOURNAMENTS: readonly { id: string; label: string; asOfMs: number }[] = TOURNAMENT_SAMPLES;
 // The owner's own settled tournament activities carry its credited summary, read by the Tournaments panel (Task 19 2b).
-const FIXTURE_TIMELINES = { ...REPLAY_TIMELINES, ...EXPEDITION_TIMELINES, ...ARENA_TIMELINES, ...TOURNAMENT_OWNER_TIMELINES };
+const SAMPLE_TIMELINES = { ...REPLAY_TIMELINES, ...EXPEDITION_TIMELINES, ...ARENA_TIMELINES, ...TOURNAMENT_OWNER_TIMELINES };
+/**
+ * Patch 1.9 Task 27: the gladiators' public history (tests/fixtures/history.ts), as the `gladiator_history_reads` view rows, and the kept
+ * tournament runs' replays it adds (another gladiator's: no owner summary).
+ */
+const HISTORY = buildHistoryFixtures(SAMPLE_TIMELINES, TOURNAMENT_VIEWS);
+const FIXTURE_TIMELINES = { ...SAMPLE_TIMELINES, ...HISTORY.timelines };
+/** The history entries by gladiator and kind, newest first by `foughtAtMs`, then by `entryId` (the live read's order), each read through `historyEntryOf`. */
+const HISTORY_ENTRIES: ReadonlyMap<string, HistoryEntry[]> = (() => {
+  const lists = new Map<string, HistoryEntry[]>();
+  for (const row of HISTORY.rows) {
+    const entry = historyEntryOf(row, row.kind);
+    if (!entry) throw new Error(`The fixture history row ${row.entry_id} cannot be read`);
+    const key = `${row.gladiator_id}|${row.kind}`;
+    lists.set(key, [...(lists.get(key) ?? []), entry]);
+  }
+  for (const list of lists.values()) list.sort((p, q) => q.foughtAtMs - p.foughtAtMs || (p.entryId < q.entryId ? -1 : p.entryId > q.entryId ? 1 : 0));
+  return lists;
+})();
 /**
  * The owner plus the current slot's Arena entrants, warming up at the fixture time (minute 40), and Otho, resting at home
  * (Task 23.9: listed, not drawn in the camp).
@@ -246,6 +268,32 @@ export function createFixtureGateway(options: { resting?: boolean; bag?: 'demo' 
       const previous = after === null ? -1 : RESULTS_FIXTURE.findIndex(page => page.nextCursor === cursor);
       if (after !== null && previous < 0) return { rows: [], nextCursor: null };
       return structuredClone(RESULTS_FIXTURE[previous + 1]);
+    },
+    // Patch 1.9 Task 27: a gladiator's public history, 20 a page, newest first, with the live read's cursor rules (a malformed id, kind or
+    // cursor is `unavailable`; the cursor is the last row's `foughtAtMs:entryId`; a short page ends the list), and its counts.
+    history: async (gladiatorId, kind, cursor) => {
+      const read = parseHistoryRead(gladiatorId, kind, cursor);
+      const list = HISTORY_ENTRIES.get(`${read.gladiatorId}|${read.kind}`) ?? [];
+      const after = read.after;
+      const rows = (after ? list.filter(row => row.foughtAtMs < after.time || (row.foughtAtMs === after.time && row.entryId > after.id)) : list).slice(0, HISTORY_PAGE);
+      return structuredClone({ rows, nextCursor: rows.length === HISTORY_PAGE ? `${rows[HISTORY_PAGE - 1].foughtAtMs}:${rows[HISTORY_PAGE - 1].entryId}` : null });
+    },
+    historyCounts: async gladiatorId => {
+      const id = parseHistoryRead(gladiatorId, 'arena').gladiatorId;
+      const count = (kind: 'arena' | 'tournament' | 'expedition') => {
+        const list = HISTORY_ENTRIES.get(`${id}|${kind}`) ?? [];
+        return { total: list.length, won: list.filter(row => row.result === 'victory').length };
+      };
+      return { arena: count('arena'), tournament: count('tournament'), expedition: count('expedition') } satisfies HistoryCounts;
+    },
+    // The owner's own rewards for its own activities (the preview's owner summaries are all Aster's; another gladiator's timeline has none).
+    ownRewards: async activityIds => {
+      const found = new Map<string, NonNullable<ReturnType<typeof ownRewardsOf>>>();
+      for (const id of parseOwnRewardsRead(activityIds)) {
+        const rewards = Object.hasOwn(FIXTURE_TIMELINES, id) ? ownRewardsOf(FIXTURE_TIMELINES[id].summary) : null;
+        if (rewards) found.set(id, rewards);
+      }
+      return found;
     },
     // Open offers, newest first, paged as the live read is, with its cursor and seller rules: a malformed cursor or seller is
     // refused as `unavailable`, a seller keeps only its own offers, and a well-formed cursor that no page issued ends the list.

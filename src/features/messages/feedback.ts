@@ -42,11 +42,25 @@ export const sentToday = (list: readonly Pick<OwnFeedback, 'createdAtMs'>[], now
 /** What is left of the 5 a game day. */
 export const leftToday = (list: readonly Pick<OwnFeedback, 'createdAtMs'>[], nowMs: number): number => Math.max(0, FEEDBACK.dailyLimit - sentToday(list, nowMs));
 
+/**
+ * Where the team's answer arrives for an account without a gladiator (final fix wave): it has no inbox yet. The sent line ends with it, and
+ * the Settings Help row says it in place of "The team answers in your messages."
+ */
+export const FEEDBACK_ANSWER_LATER = 'The team’s answer will arrive in your messages once you have a gladiator.';
+
 /** The dialog's limit line: what is left (unknown: the rule alone), or at 0 when the next game day starts. */
 export function limitLine(left: number | null, nowMs: number): string {
-  if (left === null) return `You can send ${FEEDBACK.dailyLimit} a game day.`;
-  if (left > 0) return `You can send ${FEEDBACK.dailyLimit} a game day; ${left} left today.`;
-  return `You have sent ${FEEDBACK.dailyLimit} today. You can send more on the next game day (in ${waitText(nextGameDayMs(nowMs) - nowMs)}).`;
+  const { said, wait } = limitLineParts(left, nowMs);
+  return said + wait;
+}
+/**
+ * The limit line in two parts (final fix wave): `said`, the static words the dialog's polite status announces, and `wait`, the minute
+ * countdown at 0 (" (in 2 h 20 min).") shown right after it outside the live region, so it is not announced every minute; else ''.
+ */
+export function limitLineParts(left: number | null, nowMs: number): { said: string; wait: string } {
+  if (left === null) return { said: `You can send ${FEEDBACK.dailyLimit} a game day.`, wait: '' };
+  if (left > 0) return { said: `You can send ${FEEDBACK.dailyLimit} a game day; ${left} left today.`, wait: '' };
+  return { said: `You have sent ${FEEDBACK.dailyLimit} today. You can send more on the next game day`, wait: ` (in ${waitText(nextGameDayMs(nowMs) - nowMs)}).` };
 }
 
 /** What the text box says is wrong: under 10 characters once trimmed (nothing typed is not wrong yet). */

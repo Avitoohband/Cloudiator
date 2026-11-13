@@ -5,7 +5,7 @@ import {
   notificationsStale, tagName,
 } from '../../src/features/messages/messages';
 import {
-  CATEGORIES, canSendFeedback, deviceText, feedbackDate, feedbackDetails, leftToday, limitLine, mineSummary, ownerDetails, ownerStatus, playerStatus, replyFor,
+  CATEGORIES, canSendFeedback, deviceText, feedbackDate, feedbackDetails, leftToday, limitLine, limitLineParts, mineSummary, ownerDetails, ownerStatus, playerStatus, replyFor,
   sentToday, textProblem, unseenAnswers,
 } from '../../src/features/messages/feedback';
 import { nextGameDayMs, waitText } from '../../src/lib/game-day';
@@ -189,6 +189,13 @@ it('writes the limit line, and at 0 when the next game day starts', () => {
   expect(limitLine(3, now)).toBe('You can send 5 a game day; 3 left today.');
   expect(limitLine(null, now)).toBe('You can send 5 a game day.');
   expect(plain(limitLine(0, now))).toBe('You have sent 5 today. You can send more on the next game day (in 2 h 20 min).');
+  // Final fix wave: the dialog's polite status says only the static words; the minute countdown is shown after it, outside the live region.
+  const parts = limitLineParts(0, now);
+  expect(parts.said).toBe('You have sent 5 today. You can send more on the next game day');
+  expect(plain(parts.wait)).toBe(' (in 2 h 20 min).');
+  expect(limitLineParts(0, now + 60_000).said).toBe(parts.said);
+  for (const left of [null, 0, 3]) expect(plain(limitLineParts(left, now).said + limitLineParts(left, now).wait)).toBe(plain(limitLine(left, now)));
+  expect(limitLineParts(3, now)).toEqual({ said: 'You can send 5 a game day; 3 left today.', wait: '' });
   expect(plain(waitText(45 * 60_000 + 59_000))).toBe('45 min');
   expect(plain(waitText(3_600_000))).toBe('1 h');
   expect(waitText(30_000)).toBe('under a minute');

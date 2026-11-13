@@ -13,7 +13,7 @@ import inventory from '../inventory/InventoryPanel.module.css';
 import { BuyBackCard } from './BuyBackCard';
 import { AtlasIcon, BannerArt, CurrencyIcon } from './ShopArt';
 import { BannerCard, OfferCard, spendable } from './ShopCard';
-import { BUY_BACK_EMPTY, BUY_BACK_EMPTY_CARD, BUY_BACK_SORTS, buyBackCellLabel, buyBackCount, buyBackView } from './buy-back';
+import { BUY_BACK_EMPTY, BUY_BACK_EMPTY_CARD, BUY_BACK_SORTS, buyBackCellLabel, buyBackCount, buyBackSales, buyBackView } from './buy-back';
 import {
   BANNER, SHOP_FILTERS, choiceView, counterpartId, currencyWord, merchantFilter, shopChoices, type ShopChoice, type ShopCurrency, type ShopFilter,
 } from './shop-offers';
@@ -39,7 +39,8 @@ const BUY_BACK_CELLS = 12;
  * Buy back (patch 1.9, the approved feedback-buyback mockup): a fourth chip, "Buy back" with a red count, shows the owner's last 10 gear
  * sales of this game day (`owner.buyBack`, newest first) in the same grid and card, each at the price it was sold for. In that view the
  * Gold/Renown group is hidden and the sort starts at Newest. `buyBackRequest` (the inventory's "Open Buy back" after a sale) opens it,
- * brings the shops into view and puts the focus on the chip. `buyBackOutcome` is what the last buy back said (shown above the card).
+ * brings the shops into view and puts the focus on the chip. `buyBackOutcome` is what the last buy back said (shown above the card). An owner
+ * read without the list (an older server, before M34) shows no Buy back chip at all (final fix wave).
  */
 export function ShopPanel({ owner, busy, preview, buy, initialMerchant, clock, buyBack, buyBackOutcome, buyBackRequest = 0 }: {
   owner: OwnerState; busy: boolean; preview: boolean; buy(catalogId: string, quantity: number): void; initialMerchant?: Merchant;
@@ -60,25 +61,30 @@ export function ShopPanel({ owner, busy, preview, buy, initialMerchant, clock, b
   const [stopId, setStopId] = useState<string | null>(null);
   const [quantity, setQuantity] = useState(1);
   const [query, setQuery] = useState(''), [sort, setSort] = useState<SortKey>('level'), [backSort, setBackSort] = useState<SortKey>('newest');
-  const back = filter === 'Buy back';
-  const sales = owner.buyBack ?? [];
+  const offered = buyBackSales(owner);
+  // Without the list (an older server) there is no Buy back view: All shows instead.
+  const view: ShopView = offered === undefined && filter === 'Buy back' ? 'All' : filter;
+  const back = view === 'Buy back';
+  const sales = offered ?? [];
   // "Open Buy back": the view, the shops at the top of their menu, and the focus on the chip. Only a request newer than the one present when
   // the shops mounted (fix round 1): a merchant's request remounts them (`key`) at that merchant, and an earlier "Open Buy back" must not
   // take the view and the focus again.
-  const handledRequest = useRef(buyBackRequest);
+  const handledRequest = useRef(buyBackRequest), offeredRef = useRef(offered !== undefined);
+  offeredRef.current = offered !== undefined;
   useEffect(() => {
     if (buyBackRequest === handledRequest.current) return;
     handledRequest.current = buyBackRequest;
+    if (!offeredRef.current) return;
     setFilter('Buy back');
     scrollToTop(section.current);
     backChip.current?.focus({ preventScroll: true });
   }, [buyBackRequest]);
-  const choices = back ? [] : queryItems(shopChoices(filter, currency), choiceView, query, sort);
+  const choices = back ? [] : queryItems(shopChoices(view, currency), choiceView, query, sort);
   const backCells = back ? queryItems(sales, buyBackView, query, backSort) : [];
   const cellId = (entry: BuyBackEntry) => `sale-${entry.saleId}`;
   const ids = back ? backCells.map(cellId) : choices.map(choice => choice.id);
   // A search with no match under a chip that hides matches All would show says so ("No match for “sword” in Armor").
-  const hiddenBy = !back && !choices.length && query.trim() && filter !== 'All' && queryItems(shopChoices('All', currency), choiceView, query, sort).length ? filter : undefined;
+  const hiddenBy = !back && !choices.length && query.trim() && view !== 'All' && queryItems(shopChoices('All', currency), choiceView, query, sort).length ? view : undefined;
   // The first visible cell when nothing visible is chosen; remembered, so Buy never sends an offer the grid hides.
   const picked = back ? saleId : chosenId;
   const chosenKey = ids.find(id => id === picked) ?? ids[0];
@@ -168,10 +174,10 @@ export function ShopPanel({ owner, busy, preview, buy, initialMerchant, clock, b
           setSort={back ? setBackSort : setSort} label="Search the shops" sortLabel="Sort the shops" />
         <div className={styles.bar}>
           <div className={inventory.filters} role="group" aria-label="Shop filters">
-            {SHOP_FILTERS.map(option => <button key={option} type="button" aria-pressed={option === filter} onClick={() => setFilter(option)}>{option}</button>)}
-            <button ref={backChip} type="button" className={styles.bbChip} aria-pressed={back} data-buyback-chip="" onClick={() => setFilter('Buy back')}>
+            {SHOP_FILTERS.map(option => <button key={option} type="button" aria-pressed={option === view} onClick={() => setFilter(option)}>{option}</button>)}
+            {offered && <button ref={backChip} type="button" className={styles.bbChip} aria-pressed={back} data-buyback-chip="" onClick={() => setFilter('Buy back')}>
               Buy back{sales.length > 0 && <><span className={styles.chipCount} aria-hidden="true">{sales.length}</span><span className={inventory.visuallyHidden}> ({sales.length})</span></>}
-            </button>
+            </button>}
           </div>
           {!back && <div className={inventory.filters} role="group" aria-label="Shop currency">
             {CURRENCIES.map(([value, label]) => <button key={value} type="button" aria-pressed={value === currency} onClick={() => switchCurrency(value)}>{label}</button>)}
@@ -181,7 +187,7 @@ export function ShopPanel({ owner, busy, preview, buy, initialMerchant, clock, b
           {back && sales.length === 0 ? <div className={styles.empty}><span><AtlasIcon frame="inventory" size={40} /></span><p>{BUY_BACK_EMPTY}</p></div>
             : count === 0 ? <NoMatch query={query} clear={() => setQuery('')} filter={hiddenBy} /> : <div ref={grid} className={inventory.grid}>
               {back ? backCells.map(saleCell) : choices.map(cell)}
-              {Array.from({ length: Math.max(0, (back ? BUY_BACK_CELLS : filter === 'All' && !query.trim() ? 30 : 6) - count) }, (_, index) => <span key={index} className={inventory.emptyCell} aria-hidden="true" />)}
+              {Array.from({ length: Math.max(0, (back ? BUY_BACK_CELLS : view === 'All' && !query.trim() ? 30 : 6) - count) }, (_, index) => <span key={index} className={inventory.emptyCell} aria-hidden="true" />)}
             </div>}
         </div>
         <MatchCount count={count} query={query} filter={hiddenBy} />

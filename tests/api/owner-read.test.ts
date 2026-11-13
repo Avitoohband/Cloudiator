@@ -1,6 +1,7 @@
 import { afterEach, expect, test, vi } from 'vitest';
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
-import { ownerFixture, worldFixture } from '../fixtures/domain';
+import { CATALOG_V1 } from '@domain/catalog-v1';
+import { itemFixture, ownerFixture, worldFixture } from '../fixtures/domain';
 import { readLooks, readOwner, readWorld } from '../../src/lib/api/reads';
 const holder = vi.hoisted(() => ({ client: null as SupabaseClient | null }));
 vi.mock('../../src/lib/api/client', () => ({ getBrowserClient: () => holder.client }));
@@ -45,6 +46,19 @@ test('keeps the well-formed titles and drops a malformed row or an id this clien
   expect(owner.wornTitle).toBe('tiro');
   // Not an array: none.
   expect((await readOwner(api(() => ownerRow({ titles: 'tiro' })).client)).titles).toEqual([]);
+});
+
+// Final fix wave (Patch 1.9): an owner read without `buyBack` (an older server, before M34) keeps it undefined, so Buy back stays hidden; a
+// present but malformed list is none to buy back, and a malformed sale is dropped.
+test('reads an owner state without buyBack (an older server) as no Buy back, and a malformed list as an empty one', async () => {
+  const { buyBack: _b, ...withoutBuyBack } = ownerFixture;
+  const older = await readOwner(api(() => json({ state: withoutBuyBack })).client);
+  expect(older.buyBack).toBeUndefined();
+  expect('buyBack' in older).toBe(false);
+  expect(older.name).toBe(ownerFixture.name);
+  for (const junk of [null, 'sales', 5, {}]) expect((await readOwner(api(() => ownerRow({ buyBack: junk })).client)).buyBack, String(junk)).toEqual([]);
+  const sale = { saleId: 7, item: itemFixture(CATALOG_V1.items['sword:5:rare']), price: 39, soldAtMs: 5, expiresAtMs: 14_400_000 };
+  expect((await readOwner(api(() => ownerRow({ buyBack: [sale, { ...sale, saleId: 0 }, { ...sale, price: -1 }, 'x'] })).client)).buyBack).toEqual([sale]);
 });
 
 // Patch 1.7.1: a title the Game Master gave carries source `award`; the client keeps it (the server counts it in newNotifications).

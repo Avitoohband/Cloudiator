@@ -9,6 +9,15 @@ import { waitText } from '../../lib/game-day';
 import { timeOfDay } from '../../lib/time-format';
 import type { Queryable, SortKey } from '../inventory/item-query';
 
+/**
+ * The sales Buy back offers, or undefined when the owner read has no list (final fix wave): an older server, before M34, keeps no sales and
+ * refuses `buy-back`, so the Shops show no Buy back chip and a sale no buy-back line. The shared contract types the list as present; this is
+ * the client's view of it, the one place the client reads it.
+ */
+export const buyBackSales = (owner: OwnerView): BuyBackEntry[] | undefined => owner.buyBack;
+/** The owner read as the client sees it: `buyBack` may be absent (an older server). Every `OwnerState` is one. */
+export type OwnerView = Omit<OwnerState, 'buyBack'> & { buyBack?: BuyBackEntry[] };
+
 /** The sorts of the Buy back view: Newest (the sale time, the server's order) first. */
 export const BUY_BACK_SORTS: readonly [SortKey, string][] = [['newest', 'Newest'], ['level', 'Level'], ['price', 'Price'], ['name', 'Name'], ['damage', 'Damage'],
   ['armor', 'Armor'], ['weight', 'Weight']];
@@ -65,3 +74,7 @@ export function afterSaleLine(gold: number, count: number, name = ''): string {
   const back = count <= BUY_BACK.recentSales ? 'You can buy them back' : `You can buy back the last ${BUY_BACK.recentSales}`;
   return `Sold ${count} × ${name} for ${gold} gold. ${back} in Shops until the next game day.`;
 }
+
+/** What a gear sale says where the server has no Buy back (`buyBackSales` undefined): the line from before 1.9. */
+export const plainSaleLine = (gold: number, count: number, name: string): string =>
+  (count <= 1 ? `Sold ${name} for ${gold} gold.` : `Sold ${count} × ${name} for ${gold} gold.`);

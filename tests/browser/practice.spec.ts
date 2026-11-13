@@ -8,7 +8,7 @@ import { lookFor } from '../../src/game/actors';
 import { ownBuild } from '../../src/features/character/profile-card';
 import { cardFighter, comparisonRows, dummyFighter, presetSetup } from '../../src/features/practice/practice';
 import { noHorizontalScroll } from './a11y-helpers';
-import { SLOT_MS, emptyWorld, routeLiveReads, seedSession } from './live-routes';
+import { SLOT_MS, SUPABASE_URL, emptyWorld, isPresence, routeLiveReads, seedSession } from './live-routes';
 import { creationDialog, expectOwnerShown, menuDialog, openMenu, quietArrivals, touchLayout } from './shell-helpers';
 
 // Patch 1.9 Task 18 (additions spec section 3, the approved practice mockups): a gold ⚔ Practice fight button under Stats in My gladiator
@@ -531,6 +531,21 @@ test.describe('Spar a copy from a gladiator\'s card (fixture)', () => {
     expect(sent).toEqual([]);
   });
 
+  // Final fix wave: Lucilla is a Guardian like Aster, so her case cannot tell the copy's class tag from yours. Marcellus is a Berserker.
+  test('a copy of another class carries its own class tag: Aster vs Marcellus (copy) is GUARDIAN vs BERSERKER', async ({ page }) => {
+    await openCamp(page);
+    const actor = (await page.evaluate(() => window.__cloudiatorCamp!.world()!.actors.find(a => a.name === 'Marcellus')))!;
+    expect(actor.classId).toBe('berserker');
+    const marcellus = await openCard(page, 'Marcellus');
+    await sparButton(marcellus).click();
+    const scene = resultScene(page);
+    await expect(scene).toBeVisible();
+    await replayReady(page);
+    await expect(scene.getByRole('heading', { level: 2, name: 'Aster vs Marcellus (copy)', exact: true })).toBeVisible();
+    const kinds = await scene.locator('[data-fighter-kind]').evaluateAll(nodes => nodes.map(node => (node as HTMLElement).innerText));
+    expect(kinds).toEqual(['GUARDIAN', 'BERSERKER']);
+  });
+
   test('your own card spars a mirror: Aster vs Aster (copy), both drawn (Review Focus 2)', async ({ page }) => {
     const sent = watchGateway(page);
     await openCamp(page);
@@ -620,6 +635,38 @@ test.describe('practice in the live camp', () => {
     await routeLiveReads(context, { world, owner: shown, profiles: profiles as never, timelines: { [TRIP_ID]: timeline }, serverNowMs: () => at });
     return at;
   }
+
+  // Final fix wave: the fixture cases' "nothing sent" checks cannot fail (the fixture gateway sends nothing at all). Here the live gateway
+  // posts commands to `game-command` (its command path, `gateway.command` and the presence alike): the watcher sees the page's own presence
+  // there, so it would see a command too; a practice fight and Fight again send none, and nothing else is written.
+  test('a practice fight in the live camp sends no command: the watcher on game-command sees only the presence', async ({ page, context }) => {
+    await live(context, { owner: structuredClone(ownerFixture) });
+    const presences: string[] = [], commands: string[] = [], writes: string[] = [];
+    await context.route(/\/functions\/v1\/game-command$/, async route => {
+      const request = route.request();
+      if (request.method() === 'POST') (isPresence(request) ? presences : commands).push(request.postData() ?? '');
+      return route.fallback();
+    });
+    page.on('request', request => {
+      const url = new URL(request.url());
+      if (url.origin !== SUPABASE_URL || ['GET', 'OPTIONS'].includes(request.method()) || url.pathname.startsWith('/auth/') || url.pathname === '/functions/v1/game-command') return;
+      writes.push(`${request.method()} ${url.pathname}`);
+    });
+    await page.goto('/game/');
+    await expectOwnerShown(page, 'Aster');
+    // The watcher sees what the gateway posts: the page's own presence arrives on the same path.
+    await expect.poll(() => presences.length, { timeout: 45_000 }).toBeGreaterThan(0);
+    await openMenu(page, 'My gladiator');
+    const dialog = await openPractice(page);
+    await fightToEnd(page, dialog);
+    const card = resultScene(page).locator('[data-end-card]');
+    await card.getByRole('button', { name: 'Fight again', exact: true }).click();
+    await skipToEnd(page);
+    await page.keyboard.press('Escape');
+    await expect(resultScene(page)).toHaveCount(0);
+    expect(commands).toEqual([]);
+    expect(writes).toEqual([]);
+  });
 
   test('an account with no gladiator is offered no ⚔ Spar a copy', async ({ page, context }) => {
     await live(context, { owner: null });

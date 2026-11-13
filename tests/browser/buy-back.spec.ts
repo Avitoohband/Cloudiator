@@ -46,7 +46,8 @@ const piece = (catalogId: string): ItemInstance => ({ ...itemFixture(CATALOG_V1.
 const SALES: [string, number, number][] = [['sword:5:rare', 39, 20], ['iron-helmet:5:uncommon', 34, 38], ['round-shield:1:common', 7, 69], ['round-shield:1:common', 7, 69],
   ['heavy-boots:1:common', 10, 95]];
 
-type Options = { money?: number; bagSize?: number; sales?: typeof SALES; refuse?: 'expired' | 'processing' };
+/** `olderServer`: an owner read without `buyBack` (a server before M34), whose sales are not kept for buying back. */
+type Options = { money?: number; bagSize?: number; sales?: typeof SALES; refuse?: 'expired' | 'processing'; olderServer?: boolean };
 async function shopFlow(context: BrowserContext, options: Options = {}) {
   await quietArrivals(context);
   await seedSession(context);
@@ -58,6 +59,7 @@ async function shopFlow(context: BrowserContext, options: Options = {}) {
   const entry = (catalogId: string, price: number, minutesAgo: number, item = piece(catalogId)): BuyBackEntry =>
     ({ saleId: ++saleIds, item, price, soldAtMs: now - minutesAgo * MIN, expiresAtMs: (Math.floor(now / DAY) + 1) * DAY });
   state.buyBack = (options.sales ?? SALES).map(([id, price, ago]) => entry(id, price, ago));
+  if (options.olderServer) delete (state as Partial<typeof state>).buyBack;
   const live = await routeLiveReads(context, { world: emptyWorld(now), owner: state, serverNowMs: () => now });
   const commands: GameCommand[] = [];
   let refusal = options.refuse;
@@ -89,7 +91,7 @@ async function shopFlow(context: BrowserContext, options: Options = {}) {
       const price = CATALOG_V1.items[sold.catalogId].npcSellValue ?? 0;
       state.inventory = state.inventory.filter(item => item !== sold);
       state.wallets.money += price;
-      state.buyBack = [entry(sold.catalogId, price, 0, sold), ...state.buyBack].slice(0, 10);
+      if (!options.olderServer) state.buyBack = [entry(sold.catalogId, price, 0, sold), ...state.buyBack].slice(0, 10);
       live.setOwner(state);
       return answer(200, { ok: true, receiptId: randomUUID(), value: {} });
     }
@@ -240,6 +242,27 @@ test('the empty state, then a sale: the after-sale line and Open Buy back', asyn
   await expect(cells(shops)).toHaveCount(1);
   await expect(cells(shops).nth(0)).toHaveAccessibleName('Axe, level 1, common, buy back for 10 gold');
   await expect(chip(shops)).toBeInViewport();
+});
+
+// Final fix wave: an owner read without `buyBack` (an older server, before M34) hides Buy back: no chip in the Shops, and a sale says only
+// what it sold for, with no buy-back line and no "Open Buy back".
+test('an older server without Buy back: no Buy back chip, and a sale says only what it sold for', async ({ page, context }) => {
+  const flow = await shopFlow(context, { olderServer: true });
+  await page.goto('/game/');
+  await expectOwnerShown(page, ownerFixture.name);
+  const menu = await openMenu(page, 'Inventory and shops');
+  const shops = shopsOf(menu);
+  await expect(filters(shops).getByRole('button')).toHaveText(['All', 'Weapons', 'Armor']);
+  await expect(chip(shops)).toHaveCount(0);
+  const axe = flow.state.inventory[0];
+  await menu.getByTestId(`tile-${axe.id}`).click();
+  await menu.getByTestId(`item-${axe.id}`).getByRole('button', { name: 'Sell Axe · 10 gold' }).click();
+  const itemDetails = menu.getByRole('region', { name: 'Item details' });
+  await expect(itemDetails.getByRole('status').filter({ hasText: 'Sold Axe for 10 gold.' })).toBeVisible();
+  await expect(menu).not.toContainText('buy it back');
+  await expect(menu.getByRole('button', { name: 'Open Buy back' })).toHaveCount(0);
+  await expect(chip(shops)).toHaveCount(0);
+  expect(flow.commands.map(command => command.kind)).toEqual(['sell-item']);
 });
 
 // Fix round 1: "Open Buy back" once must not keep opening Buy back: a merchant's stall clicked later opens that merchant's shop.

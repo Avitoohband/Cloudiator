@@ -10,7 +10,7 @@
 // "Send feedback" and Send…, which opens the same dialog as the Messages panel's footer.
 import { useId, useRef, useState, type ReactNode } from 'react';
 import { FeedbackDialog } from '../messages/FeedbackDialog';
-import type { FeedbackActions } from '../messages/feedback';
+import { FEEDBACK_ANSWER_LATER, type FeedbackActions } from '../messages/feedback';
 import type { LabelMode, LabelPrefs, MenuPlace, MenuPrefs } from './menu-prefs';
 import styles from './shell.module.css';
 
@@ -57,7 +57,7 @@ function ModeChoice({ id, label, value, onChange, disabled = false, help }: {
   );
 }
 
-export function SettingsPanel({ prefs, onChange, labels, onLabels, compact, feedback, onSeeMine }: {
+export function SettingsPanel({ prefs, onChange, labels, onLabels, compact, feedback, onSeeMine, noGladiator = false }: {
   prefs: MenuPrefs; onChange(change: Partial<MenuPrefs>): void;
   labels: LabelPrefs; onLabels(change: Partial<LabelPrefs>): void;
   compact: boolean;
@@ -65,6 +65,8 @@ export function SettingsPanel({ prefs, onChange, labels, onLabels, compact, feed
   feedback?: FeedbackActions;
   /** "See my feedback" once sent: Settings closes and Messages opens on My feedback (absent without a gladiator, which has no Messages). */
   onSeeMine?(): void;
+  /** A signed-in account without a gladiator (final fix wave): the team's answer arrives once it has one, so Help and the sent line say so. */
+  noGladiator?: boolean;
 }) {
   const id = useId();
   const namesOff = labels.names === 'off';
@@ -110,7 +112,7 @@ export function SettingsPanel({ prefs, onChange, labels, onLabels, compact, feed
         <div className={styles.settingsRow}>
           <div>
             <div className={styles.settingsLabel} id={`${id}-feedback`}>Send feedback</div>
-            <p className={styles.settingsHelp} id={`${id}-feedback-help`}>Report a bug or share an idea. The team answers in your messages.</p>
+            <p className={styles.settingsHelp} id={`${id}-feedback-help`}>Report a bug or share an idea. {noGladiator ? FEEDBACK_ANSWER_LATER : 'The team answers in your messages.'}</p>
           </div>
           <button ref={sendButton} type="button" className={styles.settingsSend} aria-labelledby={`${id}-feedback`} aria-describedby={`${id}-feedback-help`}
             aria-haspopup="dialog" onClick={() => setWriting(true)}>
@@ -120,7 +122,7 @@ export function SettingsPanel({ prefs, onChange, labels, onLabels, compact, feed
         </div>
       </section>}
       <p className={styles.settingsFoot}>Saved in this browser. Changes apply at once.</p>
-      {writing && feedback && <FeedbackDialog actions={feedback} screen="Settings" canSeeMine={!!onSeeMine} onClose={({ then }) => {
+      {writing && feedback && <FeedbackDialog actions={feedback} screen="Settings" canSeeMine={!!onSeeMine} noGladiator={noGladiator} onClose={({ then }) => {
         setWriting(false);
         if (then === 'mine') onSeeMine?.();
         else window.setTimeout(() => sendButton.current?.focus(), 0);

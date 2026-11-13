@@ -18,7 +18,7 @@ import { timeOfDay } from '../../lib/time-format';
 import { useMinuteNow } from '../schedule/use-minute-now';
 import { COMPACT_QUERY } from '../shell/rail-reveal';
 import {
-  CATEGORIES, canSendFeedback, deviceText, feedbackDetails, leftToday, limitLine, placeholderFor, textProblem, type FeedbackActions, type SendFeedbackCommand,
+  CATEGORIES, FEEDBACK_ANSWER_LATER, canSendFeedback, deviceText, feedbackDetails, leftToday, limitLine, limitLineParts, placeholderFor, textProblem, type FeedbackActions, type SendFeedbackCommand,
 } from './feedback';
 import styles from './feedback.module.css';
 
@@ -34,12 +34,14 @@ const subscribeView = (onChange: () => void) => {
 /** The game's layout (phone: the touch layout) and the window's size, as one string so the store's value is stable between changes. */
 const readView = () => `${window.matchMedia?.(COMPACT_QUERY).matches ? 'phone' : 'desktop'}|${window.innerWidth}|${window.innerHeight}`;
 
-export function FeedbackDialog({ actions, screen, canSeeMine, onClose }: {
+export function FeedbackDialog({ actions, screen, canSeeMine, noGladiator = false, onClose }: {
   actions: FeedbackActions;
   /** The screen it was opened from, sent as a game detail ("Messages", "Settings"). */
   screen: string;
   /** Whether "See my feedback" is offered once sent (the Messages panel exists: a player with a gladiator). */
   canSeeMine: boolean;
+  /** An account without a gladiator (final fix wave): it has no inbox yet, so the sent line says the answer arrives once it has one. */
+  noGladiator?: boolean;
   /** The dialog has closed; `then` is 'mine' after "See my feedback", and `sent` says whether a feedback was accepted. */
   onClose(result: { then: 'mine' | null; sent: boolean }): void;
 }) {
@@ -127,12 +129,15 @@ export function FeedbackDialog({ actions, screen, canSeeMine, onClose }: {
   const hint = CATEGORIES.find(c => c.id === category)?.hint ?? '';
   const problem = textProblem(text);
   const ready = canSendFeedback(text, left);
+  /** "What is sent?" shows the details only while they are included; its label follows what is shown (final fix wave). */
+  const detailsShown = include && showDetails;
+  const limit = limitLineParts(left, nowMs);
   const shownAt = timeOfDay(Date.now(), clock);
   return <dialog ref={dialog} className={styles.dialog} aria-labelledby={headingId}
     onClose={() => finish(null)} onCancel={event => { event.preventDefault(); if (!sending.current) finish(null); }}>
     {sent ? <>
       <h2 id={headingId} ref={heading} className={styles.heading} tabIndex={-1}>Feedback sent</h2>
-      <p className={styles.ok} role="status">Thanks — your feedback was sent. The team’s answer will arrive in your messages.</p>
+      <p className={styles.ok} role="status">Thanks — your feedback was sent. {noGladiator ? FEEDBACK_ANSWER_LATER : 'The team’s answer will arrive in your messages.'}</p>
       <p className={styles.limit}>{limitLine(left, nowMs)}</p>
       <div className={styles.actions}>
         {canSeeMine && <button type="button" className={styles.ghost} onClick={() => finish('mine')}>See my feedback</button>}
@@ -161,19 +166,20 @@ export function FeedbackDialog({ actions, screen, canSeeMine, onClose }: {
         <div>
           <label htmlFor={`${ids}-include`}>Include game details</label>
           <p id={`${ids}-include-help`} className={styles.hint}>Helps the team find the problem.{' '}
-            <button type="button" className={styles.link} aria-expanded={include && showDetails} aria-controls={include && showDetails ? `${ids}-details` : undefined}
-              onClick={() => setShowDetails(open => !open)}>{showDetails ? 'Hide' : 'What is sent?'}</button>
+            <button type="button" className={styles.link} aria-expanded={detailsShown} aria-controls={detailsShown ? `${ids}-details` : undefined}
+              onClick={() => setShowDetails(!detailsShown)}>{detailsShown ? 'Hide' : 'What is sent?'}</button>
           </p>
         </div>
       </div>
-      {include && showDetails && <div id={`${ids}-details`} className={styles.attached} data-feedback-details="">
+      {detailsShown && <div id={`${ids}-details`} className={styles.attached} data-feedback-details="">
         <p><b>Patch</b> {PATCH} · <b>Screen</b> {screen}</p>
         <p><b>Device</b> {deviceText(navigator.userAgent, layout === 'phone')}</p>
         <p><b>Sent at</b> {shownAt} · <b>Window</b> {width} x {height}</p>
         <p className={styles.hint}>Nothing else. The team sees your gladiator’s name, and the answer comes to your messages.</p>
       </div>}
-      {/* A polite status (fix round 1): a daily-limit answer is said where the player is, and the focus stays on Send. */}
-      <p className={left === 0 ? styles.limitZero : styles.limit} role="status">{limitLine(left, nowMs)}</p>
+      {/* A polite status (fix round 1): a daily-limit answer is said where the player is, and the focus stays on Send. Only the static words
+          are in it (final fix wave); the minute countdown follows outside it, so it is not announced every minute. */}
+      <p className={left === 0 ? styles.limitZero : styles.limit}><span role="status">{limit.said}</span>{limit.wait}</p>
       {failed && <p className={styles.alert} role="alert">Could not send. Your text is still here. Try again.</p>}
       <div className={styles.actions}>
         <button type="button" className={styles.ghost} onClick={() => { if (!sending.current) finish(null); }}>Cancel</button>

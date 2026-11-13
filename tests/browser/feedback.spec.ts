@@ -164,13 +164,21 @@ test('Send feedback from Messages: categories, the counter, the minimum, the det
   expect(await noHorizontalScroll(page)).toBe(true);
   expect(await contrastIssues(dialog)).toEqual([]);
   await shot(page, info, 'feedback-dialog');
+  // Final fix wave: the toggle names what a press does with what is shown: unchecked, nothing is shown, so it offers "What is sent?" again.
+  await include.uncheck();
+  await expect(details).toHaveCount(0);
+  await expect(dialog.getByRole('button', { name: 'Hide' })).toHaveCount(0);
+  await expect(dialog.getByRole('button', { name: 'What is sent?' })).toHaveAttribute('aria-expanded', 'false');
+  await include.check();
+  await expect(details).toBeVisible();
+  await expect(dialog.getByRole('button', { name: 'Hide' })).toHaveAttribute('aria-expanded', 'true');
   await dialog.getByRole('button', { name: 'Hide' }).click();
   await expect(details).toBeHidden();
 
   await send.click();
   const sent = sentDialog(page);
   await expect(sent).toBeVisible();
-  await expect(sent).toContainText('Thanks — your feedback was sent. The team’s answer will arrive in your messages.');
+  await expect(sent.getByRole('status')).toHaveText('Thanks — your feedback was sent. The team’s answer will arrive in your messages.');
   await expect(sent).toContainText('You can send 5 a game day; 2 left today.');
   expect(sends(flow.commands)).toHaveLength(1);
   const [command] = sends(flow.commands);
@@ -214,8 +222,10 @@ test('the daily limit: 5 sent shows the limit line with Send off, and a daily-li
   await dialog.getByRole('textbox', { name: 'Your message' }).fill(IDEA_TEXT);
   await dialog.getByRole('button', { name: 'Send', exact: true }).focus();
   await page.keyboard.press('Enter');
-  // Fix round 1: the limit line is said (a polite status) and the focus stays on Send, which is off but focusable.
-  await expect(dialog.getByRole('status')).toContainText(/You have sent 5 today\. You can send more on the next game day \(in \d+\s*h(?: \d+\s*min)?\)\./);
+  // Fix round 1: the limit line is said (a polite status) and the focus stays on Send, which is off but focusable. Final fix wave: the status
+  // holds only the static words; the minute countdown is shown after it, outside the live region, so it is not announced every minute.
+  await expect(dialog.getByRole('status')).toHaveText('You have sent 5 today. You can send more on the next game day');
+  await expect(dialog).toContainText(/You have sent 5 today\. You can send more on the next game day \(in \d+\s*h(?: \d+\s*min)?\)\./);
   await expect(dialog.getByRole('button', { name: 'Send', exact: true })).toBeDisabled();
   await expect(dialog.getByRole('button', { name: 'Send', exact: true })).toBeFocused();
   await expect(dialog.getByRole('button', { name: 'Send', exact: true })).toHaveAttribute('aria-disabled', 'true');
@@ -335,11 +345,16 @@ test('an account without a gladiator sends from Settings, with no "See my feedba
   await expect(creationDialog(page)).toBeHidden();
   await expect(cornerChip(page).getByRole('button', { name: 'Create your gladiator' })).toBeVisible();
   const settings = await openMenu(page, 'Settings');
-  await settings.getByRole('region', { name: 'Help' }).getByRole('button', { name: /^Send/ }).click();
+  // Final fix wave: without a gladiator there is no inbox yet, so the answer arrives once there is one.
+  const help = settings.getByRole('region', { name: 'Help' });
+  await expect(help).toContainText('Report a bug or share an idea. The team’s answer will arrive in your messages once you have a gladiator.');
+  await expect(help).not.toContainText('The team answers in your messages.');
+  await help.getByRole('button', { name: /^Send/ }).click();
   const dialog = feedbackDialog(page);
   await dialog.getByRole('textbox', { name: 'Your message' }).fill('I cannot find where to create my gladiator.');
   await dialog.getByRole('button', { name: 'Send', exact: true }).click();
   await expect(sentDialog(page)).toBeVisible();
+  await expect(sentDialog(page).getByRole('status')).toHaveText('Thanks — your feedback was sent. The team’s answer will arrive in your messages once you have a gladiator.');
   // No Messages panel without a gladiator: no "See my feedback".
   await expect(sentDialog(page).getByRole('button', { name: 'See my feedback' })).toHaveCount(0);
   expect(sends(flow.commands)).toHaveLength(1);
@@ -355,6 +370,9 @@ test('a visitor sees no feedback entry anywhere', async ({ page }) => {
   await expect(settings).toContainText('Saved in this browser. Changes apply at once.');
   await expect(settings.getByRole('region', { name: 'Help' })).toHaveCount(0);
   await expect(page.getByRole('button', { name: /Send feedback|^Send…$/ })).toHaveCount(0);
+  // Final fix wave: a visitor's Game Info has no feedback count.
+  await expect(cornerChip(page).getByRole('button', { name: 'Game Info', exact: true })).toBeVisible();
+  await expect(page.getByTestId('info-feedback-badge')).toHaveCount(0);
 });
 
 test('the fixture preview shows no feedback entry', async ({ page }) => {
@@ -366,15 +384,21 @@ test('the fixture preview shows no feedback entry', async ({ page }) => {
   await panel.getByRole('button', { name: 'Close messages' }).click();
   const settings = await openMenu(page, 'Settings');
   await expect(settings.getByRole('region', { name: 'Help' })).toHaveCount(0);
+  // Final fix wave: the fixture provides no feedback count, so Game Info shows none.
+  await expect(cornerChip(page).getByRole('button', { name: 'Game Info', exact: true })).toBeVisible();
+  await expect(page.getByTestId('info-feedback-badge')).toHaveCount(0);
 });
 
 // ---- The owner's Feedback tab in Game Info (Avi only: the Game Info editors). ----
 
 type Owned = OwnerFeedbackItem & { who: string };
-async function owner(page: Page, editor: boolean) {
+/** The browser key the corner chip remembers an editor account under (the Game Info panel's own editor probe passed here before). */
+const EDITOR_KEY = 'cloudiator.feedback-editor';
+async function owner(page: Page, editor: boolean, { remembered = false } = {}) {
   const context = page.context();
   await quietArrivals(context);
-  await seedSession(context);
+  const user = await seedSession(context);
+  if (remembered) await context.addInitScript(([key, id]) => { localStorage.setItem(key, id); }, [EDITOR_KEY, user.id]);
   await routeLiveReads(context, { world: worldFixture, owner: ownerFixture });
   const now = Date.now();
   const detail = (screen: string, device: string, window: string, minutesAgo: number): FeedbackDetails => ({ patch: '1.9', screen, device, window, sentAtMs: now - minutesAgo * MIN });
@@ -389,10 +413,13 @@ async function owner(page: Page, editor: boolean) {
       answer: 'Thank you, this made our day. Enjoy!', answeredAtMs: now - 25 * 60 * MIN, who: 'Aster' },
   ];
   const actions: Record<string, unknown>[] = [];
+  /** Every game-info post, an editor's or not (the corner chip's count reads are among them). */
+  const posts: Record<string, unknown>[] = [];
   const cors = { 'access-control-allow-origin': '*', 'access-control-allow-headers': 'authorization, apikey, content-type, x-client-info' };
   await context.route(`${SUPABASE_URL}/functions/v1/game-info`, async route => {
     if (route.request().method() === 'OPTIONS') return route.fulfill({ status: 204, headers: { ...cors, 'access-control-allow-methods': 'POST' } });
     const body = route.request().postDataJSON() as Record<string, unknown>;
+    posts.push(body);
     const answer = (status: number, json: unknown) => route.fulfill({ status, json, headers: cors });
     if (!editor) return answer(403, { ok: false, code: 'forbidden' });
     if (body.tab !== 'feedback') return answer(200, { ok: true, version: 0, document: { entries: [{ id: 'combat', title: 'Combat', body: 'Public combat guide.' }] } });
@@ -414,17 +441,70 @@ async function owner(page: Page, editor: boolean) {
   });
   await page.goto('/game/');
   await expectOwnerShown(page, ownerFixture.name);
+  const info = cornerChip(page).getByRole('button', { name: /^Game Info/ });
+  if (remembered) return { panel: page.getByRole('dialog', { name: 'Game Info' }), actions, items, posts, info, user };
+  // An account this browser has not seen as an editor: the chip asks the game-info function nothing at camp load.
+  await expect(cornerChip(page).getByRole('button', { name: 'Game Info', exact: true })).toBeVisible();
+  expect(posts).toEqual([]);
   await cornerChip(page).getByRole('button', { name: 'Game Info', exact: true }).click();
   const panel = page.getByRole('dialog', { name: 'Game Info' });
   await expect(panel).toBeVisible();
-  return { panel, actions, items };
+  return { panel, actions, items, posts, info, user };
 }
 
 test('the Feedback tab is hidden from a player who is not an editor', async ({ page }) => {
-  const { panel, actions } = await owner(page, false);
+  const { panel, actions, posts, info } = await owner(page, false);
   await expect(panel.getByRole('tab')).toHaveCount(2);
   await expect(panel.getByRole('tab', { name: /^Feedback/ })).toHaveCount(0);
   expect(actions).toEqual([]);
+  // Final fix wave: no count on the chip for a player who is not an editor, and no feedback read for it, before or after Game Info closes.
+  await panel.getByRole('button', { name: 'Close Game Info', exact: true }).click();
+  await expect(panel).toBeHidden();
+  await expect(info).toHaveAccessibleName('Game Info');
+  await expect(page.getByTestId('info-feedback-badge')).toHaveCount(0);
+  expect(posts.filter(post => post.tab === 'feedback')).toEqual([]);
+  expect(await page.evaluate(key => localStorage.getItem(key), EDITOR_KEY)).toBeNull();
+});
+
+// Final fix wave (notes.md Q5, "the red count on the Feedback tab and on Game Info"): an editor sees the number of New feedback on the corner
+// chip's Game Info button. The Game Info panel's own editor probe makes an account an editor in this browser; the count is read then, again
+// when Game Info closes, at every later camp load, and every 3 minutes while the camp is open.
+test('the corner chip counts New feedback for an editor: after the editor probe, when Game Info closes and every 3 minutes', async ({ page }) => {
+  await page.clock.install();
+  const { panel, items, posts, info, user } = await owner(page, true);
+  await expect(info).toHaveAccessibleName('Game Info, 2 new feedback');
+  await expect(page.getByTestId('info-feedback-badge')).toHaveText('2');
+  expect(await page.evaluate(key => localStorage.getItem(key), EDITOR_KEY)).toBe(user.id);
+  // Mark one read in the tab, then close Game Info: the chip reads the count again.
+  await panel.getByRole('tab', { name: /^Feedback/ }).click();
+  await panel.locator('[data-feedback-item]').first().getByRole('button', { name: 'Mark read', exact: true }).click();
+  await expect(panel.locator('[data-feedback-item]')).toHaveCount(1);
+  await panel.getByRole('button', { name: 'Close Game Info', exact: true }).click();
+  await expect(panel).toBeHidden();
+  await expect(info).toHaveAccessibleName('Game Info, 1 new feedback');
+  await expect(page.getByTestId('info-feedback-badge')).toHaveText('1');
+  expect(await noHorizontalScroll(page)).toBe(true);
+
+  // Every 3 minutes while the camp is open, and not sooner.
+  const reads = () => posts.filter(post => post.tab === 'feedback' && post.action === 'list').length;
+  const before = reads();
+  items.unshift({ ...items[0], id: 5, status: 'new', text: 'The countdown in the corner skipped a minute.', gladiatorName: 'Varro', who: 'Varro' });
+  await page.clock.fastForward(2 * 60_000);
+  await expect(info).toHaveAccessibleName('Game Info, 1 new feedback');
+  expect(reads()).toBe(before);
+  await page.clock.fastForward(60_000);
+  await expect(info).toHaveAccessibleName('Game Info, 2 new feedback');
+  expect(reads()).toBe(before + 1);
+});
+
+test('an editor seen in this browser before gets the count at camp load, without opening Game Info', async ({ page }, testInfo) => {
+  const { info, posts } = await owner(page, true, { remembered: true });
+  await expect(info).toHaveAccessibleName('Game Info, 2 new feedback');
+  await expect(page.getByTestId('info-feedback-badge')).toHaveText('2');
+  expect(posts.map(post => [post.tab, post.action, post.filter])).toEqual([['feedback', 'list', 'new']]);
+  expect(await noHorizontalScroll(page)).toBe(true);
+  expect(await contrastIssues(cornerChip(page))).toEqual([]);
+  await shot(page, testInfo, 'info-feedback-badge');
 });
 
 test('the owner reads New, Answered and All, marks one read and answers one', async ({ page }, info) => {

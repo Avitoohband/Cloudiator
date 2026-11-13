@@ -6,10 +6,10 @@ import type { PatchEntry } from '../patch';
 import { getBrowserClient } from './client';
 import {
   GatewayReadError, parseDungeonFightRef, readBouts, readDungeonFight, readHistory, readHistoryCounts, readOwnRewards, readLooks, readMarket, readMessages, readNotifications, readOwnFeedback, readOwner, readPatchNumbers, readPatches, readWorld, readRevision, readTimeline, readProfile,
-  readRecent, readRestAfter, readSeasons, readStandingOf, readStandings, readTournament, readTournamentLog, type BoutFilter, type BoutsPage, type NotificationsRead, type OwnRewards,
-  type ProfileRead, type RevisionRead, type ShownMessage,
+  readRecent, readRestAfter, readRested, readSeasons, readStandingOf, readStandings, readTournament, readTournamentLog, type BoutFilter, type BoutsPage, type NotificationsRead, type OwnRewards,
+  type ProfileRead, type RestedActivity, type RevisionRead, type ShownMessage,
 } from './reads';
-export { GatewayReadError, type NotificationsRead, type ProfileRead, type RevisionRead, type ShownMessage } from './reads';
+export { GatewayReadError, type NotificationsRead, type ProfileRead, type RestedActivity, type RevisionRead, type ShownMessage } from './reads';
 
 /**
  * Public projections (world, revision, timeline, profile, market offers, seasons, standings and one gladiator's standing,
@@ -130,6 +130,13 @@ export interface GameGateway {
    * gladiator's activity is never answered. A malformed id is `unavailable`, without a request; an activity it cannot read is left out.
    */
   ownRewards?(activityIds: readonly ActivityId[]): Promise<Map<ActivityId, OwnRewards>>;
+  /**
+   * Patch 1.9 Task 29: the owner's own rests that replaced a planned activity (not enough stamina, or a Training past the day's limit), with
+   * what was planned and why. Without ids, the newest settled ones (the Notifications tab); with ids (at most 50), those activities, running or
+   * settled (the running card, the owner's own Results rows). Owner-only, from `activities` under its row security. Optional: a gateway
+   * without it (the fixture preview) shows none.
+   */
+  rested?(activityIds?: readonly ActivityId[]): Promise<RestedActivity[]>;
 }
 
 type BrowserClient = NonNullable<ReturnType<typeof getBrowserClient>>;
@@ -322,5 +329,6 @@ export function createLiveGateway(): GameGateway {
     history: (gladiatorId, kind, cursor) => publicRead(client => readHistory(client, gladiatorId, kind, cursor)),
     historyCounts: gladiatorId => publicRead(client => readHistoryCounts(client, gladiatorId)),
     ownRewards: activityIds => read(client => readOwnRewards(client, activityIds)),
+    rested: activityIds => read(client => readRested(client, activityIds)),
   };
 }

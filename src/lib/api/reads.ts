@@ -494,7 +494,11 @@ export async function readPatchNumbers(client: SupabaseClient, messageIds: reado
 /** How many results one notifications read lists (the Notifications tab's page; patch 1.7's notices use it to know a full page). */
 export const NOTIFICATIONS_PAGE = 20;
 /** What the notifications read brings: the results to show, and the newest settled time of every row it fetched (see `readNotifications`). */
-export type NotificationsRead = { items: GameNotification[]; newestSettledMs: number | null };
+export type NotificationsRead = {
+  items: GameNotification[]; newestSettledMs: number | null;
+  /** Patch 1.9 Task 29: the owner's settled rests that replaced a planned activity (`readRested`), when the reader asked for them; never counted by the badge. */
+  rested?: RestedActivity[];
+};
 type NotificationRow = { id: unknown; settled_at_ms: unknown; summary: unknown; destination: unknown; gladiators?: unknown };
 const NOTIFICATION_KINDS: readonly string[] = ['training', 'expedition', 'arena', 'tournament', 'dungeon'];
 const whole = (value: unknown): value is number => typeof value === 'number' && Number.isSafeInteger(value) && value >= 0;
@@ -585,6 +589,56 @@ export async function readNotifications(client: SupabaseClient): Promise<Notific
     list.push({ activityId: row.id, kind, settledAtMs: row.settledAtMs, summary: row.summary, destination, levelAfter: levels[i] });
   });
   return { items: list, newestSettledMs };
+}
+/**
+ * Patch 1.9 Task 29: one of the owner's own rests that replaced a planned activity (the boundary's "Resting (not enough stamina)", or a v2
+ * Training request past the day's limit), from the owner-only `activities` row: the kind planned (`requested.kind`), its destination's
+ * name, the reason (`fallback` true: stamina; false with a Training planned: the daily limit), when it settled (null while it runs) and the
+ * gladiator's name. Owner only: other players never see a reason or the planned activity.
+ */
+export type RestedActivity = {
+  activityId: string; settledAtMs: number | null; planned: 'training' | 'expedition' | 'arena' | 'dungeon'; destination: string | null;
+  reason: 'stamina' | 'limit'; name: string | null;
+};
+type RestedRow = { id?: unknown; settled_at_ms?: unknown; fallback?: unknown; planned?: unknown; expedition?: unknown; dungeon?: unknown; gladiators?: unknown };
+const PLANNED: readonly string[] = ['training', 'expedition', 'arena', 'dungeon'];
+/** How many rests one read asks for (the Notifications tab's page, and at most one Results page's own rows by id). */
+const RESTED_PAGE = 50;
+function restedOf(row: RestedRow): RestedActivity | null {
+  if (typeof row.id !== 'string' || typeof row.planned !== 'string' || !PLANNED.includes(row.planned) || typeof row.fallback !== 'boolean') return null;
+  const planned = row.planned as RestedActivity['planned'];
+  // The daily limit makes a Rest of a Training only, with no stamina fallback; any other kind becomes a Rest only for lack of stamina.
+  const reason = row.fallback ? 'stamina' : planned === 'training' ? 'limit' : null;
+  if (!reason) return null;
+  const settled = row.settled_at_ms === null || row.settled_at_ms === undefined ? null : Number(row.settled_at_ms);
+  if (settled !== null && !Number.isSafeInteger(settled)) return null;
+  const destination = planned === 'expedition' && typeof row.expedition === 'string' && Object.hasOwn(CATALOG_V1.expeditions, row.expedition)
+    ? CATALOG_V1.expeditions[row.expedition as keyof typeof CATALOG_V1.expeditions].name
+    : planned === 'dungeon' && typeof row.dungeon === 'string' && Object.hasOwn(CATALOG_V1.dungeons, row.dungeon)
+      ? CATALOG_V1.dungeons[row.dungeon as keyof typeof CATALOG_V1.dungeons].name : null;
+  const gladiator = row.gladiators as { name?: unknown } | null | undefined;
+  return { activityId: row.id, settledAtMs: settled, planned, destination, reason, name: typeof gladiator?.name === 'string' ? gladiator.name : null };
+}
+/**
+ * The owner's own rests that replaced a planned activity (`RestedActivity`), from the owner-only `activities` (row security answers a reader's
+ * own gladiators only): with `activityIds`, those activities (at most 50, running or settled; a malformed id is `unavailable` before any
+ * request; nothing to ask is no request); without, the newest 50 settled and revealed ones (settled at or before the server's now), newest
+ * first, for the Notifications tab. Only these columns cross; a row this client cannot read, and an ordinary Rest, are left out.
+ */
+export async function readRested(client: SupabaseClient, activityIds?: readonly string[]): Promise<RestedActivity[]> {
+  const select = 'id,settled_at_ms,fallback,planned:requested->>kind,expedition:requested->>expeditionId,dungeon:requested->>dungeonId,gladiators(name)';
+  let rows: RestedRow[];
+  if (activityIds) {
+    if (!Array.isArray(activityIds) || activityIds.length > RESTED_PAGE || activityIds.some(id => typeof id !== 'string' || !GLADIATOR_ID.test(id))) throw new GatewayReadError('unavailable');
+    const ids = [...new Set(activityIds.map(id => id.toLowerCase()))];
+    if (ids.length === 0) return [];
+    rows = checked(await client.from('activities').select(select).in('id', ids).eq('resolved_kind', 'rest').neq('requested->>kind', 'rest')) as unknown as RestedRow[];
+  } else {
+    const clock = await readRevision(client);
+    rows = checked(await client.from('activities').select(select).eq('status', 'completed').eq('resolved_kind', 'rest').neq('requested->>kind', 'rest')
+      .lte('settled_at_ms', clock.serverNowMs).order('settled_at_ms', { ascending: false }).order('slot_index', { ascending: false }).limit(RESTED_PAGE)) as unknown as RestedRow[];
+  }
+  return rows.map(restedOf).filter((rest): rest is RestedActivity => rest !== null);
 }
 // ------------------------------------------------------------------ My bouts
 

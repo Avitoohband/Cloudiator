@@ -20,6 +20,18 @@ export function ownRestingText(restingUntilSlot: number | null, nowMs = 0, clock
   return time ? `Resting at home: back on your schedule at ${time}` : 'Resting at home.';
 }
 
+/**
+ * Patch 1.9 Task 29 (A3, the boundary window): the owner's current activity once the server has processed its slot, else null. For a minute
+ * or two after a boundary the owner read already holds the next slot's row (`queued`: the server prepares it, and may already have resolved
+ * it to a Rest) while the published world still shows the previous slot. The boundary makes the row active in the same transaction that
+ * moves `processedSlotIndex` and publishes the world, so `queued` is exactly "not processed yet": the screens that name what the gladiator
+ * does use this and keep the settled state until then, never contradicting the world.
+ */
+export function settledActivity(owner: Pick<OwnerState, 'currentActivity'>): OwnerState['currentActivity'] {
+  const activity = owner.currentActivity;
+  return activity && activity.status !== 'queued' ? activity : null;
+}
+
 const PROCESSING = { status: 'processing', label: 'Processing results', endsAtMs: null } as const;
 const PREPARING = { status: 'preparing', label: 'Preparing your next activity', endsAtMs: null } as const;
 const SLOT_MS = RULES_V1.clock.slotMs;

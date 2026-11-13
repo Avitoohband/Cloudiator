@@ -51,6 +51,7 @@ import { prefersReducedMotion } from '../../game/webgl';
 import { useClockMode, type ClockMode } from '../../lib/clock-setting';
 import { slotTimeText } from '../schedule/slot-time';
 import { restingGain } from '../schedule/rest-stamina';
+import { settledActivity } from './activity-status';
 import { COMPACT_QUERY } from '../shell/rail-reveal';
 import { campBanner, campPhase, tripMarks } from './trip-text';
 import { TripBar } from './TripBar';
@@ -138,14 +139,17 @@ function rewardLines(summary: ActivitySummary): string[] {
   ].filter((line): line is string => !!line);
 }
 
-/** The current phase in words. Titles never name an encounter number, so a log line stays the only "Encounter N". */
-function phaseText(state: ExpeditionSceneState, expedition: string): { title: string; detail: string } {
+/**
+ * The current phase in words. Titles never name an encounter number, so a log line stays the only "Encounter N". Patch 1.9 Task 29: after a
+ * defeat the gladiator is still on its expedition, resting at the safe return point until the slot ends, and `status` says so above the detail.
+ */
+export function phaseText(state: ExpeditionSceneState, expedition: string): { title: string; detail: string; status?: string } {
   const lost = state.stages.find(s => s.outcome === 'defeat')?.encounter;
   switch (state.phase) {
     case 'depart': return { title: 'Setting out', detail: `Travelling the ${expedition} and searching the trail.` };
     case 'exploration': return { title: 'Exploring', detail: 'Searching the trail and waiting for whatever comes next.' };
     case 'encounter': return { title: 'Fighting', detail: 'The revealed battle plays in the scene. Its result shows when it ends.' };
-    case 'safe-return': return { title: 'Returning without rewards', detail: `Defeated${lost ? ` in the ${ORDINALS[lost - 1]} encounter` : ''}. Resting at the safe return point until the slot ends, with all gear kept.` };
+    case 'safe-return': return { title: 'Returning without rewards', status: 'On an expedition · resting at the safe return point after a defeat', detail: `Defeated${lost ? ` in the ${ORDINALS[lost - 1]} encounter` : ''}. Resting at the safe return point until the slot ends, with all gear kept.` };
     case 'returning': return { title: 'Returning to camp', detail: 'All three encounters cleared. Heading back along the trail.' };
     case 'preparing': return state.stages.length
       ? { title: 'Preparing', detail: 'The next stage has not been published yet. It appears here as soon as it is revealed.' }
@@ -392,8 +396,10 @@ export function ExpeditionView({ reads, activityId, fixture, startMinute = null,
   const departureMs = timeline?.stages.find(stage => stage.kind === 'depart')?.startedAtMs ?? timeline?.stages[0]?.startedAtMs ?? null;
   const tripEndMs = departureMs === null ? null : departureMs + EXPEDITION_MS;
   const ownTrip = !!owner && !!gladiatorId && owner.gladiatorId.toLowerCase() === gladiatorId.toLowerCase();
-  const current = owner?.currentActivity ?? null;
-  const ownerRest = ownTrip && tripEndMs !== null && current?.kind === 'rest' && current.startsAtMs === tripEndMs ? current : null;
+  // Patch 1.9 Task 29 (A3): only once the server has processed that slot (`settledActivity`): in the minute or two after the boundary the
+  // owner read may already name the next slot's Rest while the world still shows the trip.
+  const settled = settledActivity({ currentActivity: owner?.currentActivity ?? null });
+  const ownerRest = ownTrip && tripEndMs !== null && settled?.kind === 'rest' && settled.startsAtMs === tripEndMs ? settled : null;
   const restKey = gladiatorId ? `${activityId}|${gladiatorId}` : null;
   const complete = !!state?.complete;
   const [restRead, setRestRead] = useState<{ key: string; resting: boolean } | null>(null);
@@ -710,6 +716,7 @@ export function ExpeditionView({ reads, activityId, fixture, startMinute = null,
       <div className={styles.now}>
         <div className={styles.phase} role="status" aria-live="polite" aria-label="Current stage">
           <strong>{text.title}</strong>
+          {'status' in text && typeof text.status === 'string' && <span className={styles.phaseStatus} data-testid="phase-status">{text.status}</span>}
           <span>{text.detail}</span>
         </div>
         <div className={styles.health}>

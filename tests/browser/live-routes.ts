@@ -53,6 +53,12 @@ export function emptyWorld(serverNowMs = Date.now()): WorldSnapshot {
 
 /** One settled result of the owner's: its credited summary and, for an expedition, the id of the destination it went to. */
 export type LiveNotification = { summary: ActivitySummary; expeditionId?: string };
+/**
+ * Patch 1.9 Task 29: one of the owner's rests that replaced a planned activity, as its owner-only `activities` row: the slot, what was
+ * `requested` (`{ kind: 'expedition', expeditionId: 'outpost' }`), `fallback` (true: not enough stamina; false with a Training: the daily
+ * limit), whether it has `settled` (then completed at its slot's end with a Rest's summary, else active) and the gladiator's `name`.
+ */
+export type LiveRest = { activityId: string; slotIndex: number; requested: Record<string, unknown>; fallback: boolean; settled: boolean; name: string };
 export type LiveData = {
   /** The public world: its revision, its actors and (by default) the server's time, which then runs in real time. */
   world: WorldSnapshot;
@@ -94,6 +100,8 @@ export type LiveData = {
    * from `expeditionId`. Only a signed-in reader sees them; none by default.
    */
   notifications?: readonly LiveNotification[];
+  /** Patch 1.9 Task 29: the owner's rests that replaced a planned activity (owner-only `activities` rows); none by default. */
+  rests?: readonly LiveRest[];
   /**
    * The owner's settled Arena and tournament bouts My bouts lists, as timelines (their stages, which the opponents' names are read from,
    * and their owner summary), in any order. They are merged into `timelines`, and give the owner's `activities` rows the My bouts read
@@ -183,6 +191,8 @@ export type LiveTransport = {
   setRulesVersion(version: string | null | undefined): void;
   /** Replaces the owner's settled results the Notifications tab lists (a result was credited). */
   setNotifications(notifications: readonly LiveNotification[]): void;
+  /** Replaces the owner's rests that replaced a planned activity (Patch 1.9 Task 29). */
+  setRests(rests: readonly LiveRest[]): void;
   /** Replaces the owner's settled bouts My bouts lists (another account's, or a bout was credited). */
   setBouts(bouts: readonly RevealedTimeline[]): void;
   /** Replaces the account's own feedback (one was sent, read or answered). */
@@ -310,6 +320,7 @@ export async function routeLiveReads(context: BrowserContext, initial: LiveData)
     setLatestPatch: latest => { data.latestPatch = latest; },
     setRulesVersion: version => { data.rulesVersion = version; },
     setNotifications: notifications => { data.notifications = notifications; },
+    setRests: rests => { data.rests = rests; },
     setBouts: bouts => { data.bouts = bouts; },
     setFeedback: feedback => { data.feedback = feedback; },
     setPublishedSlotIndex: published => { data.publishedSlotIndex = published; },
@@ -510,6 +521,15 @@ function activityRows(timelines: readonly RevealedTimeline[], owner: OwnerState 
   const rows = new Map<string, Row>();
   const merge = (id: string, row: Row) => rows.set(id, { ...rows.get(id), ...row });
   for (const t of timelines) if (t.summary) merge(t.activityId, { id: t.activityId, status: 'completed', settled_at_ms: t.summary.settledAtMs, summary: t.summary });
+  // Patch 1.9 Task 29: the owner's rests that replaced a planned activity (a spec may serve the owner state itself, so these need no owner here).
+  for (const r of data.rests ?? []) {
+    const end = (r.slotIndex + 1) * SLOT_MS;
+    merge(r.activityId, { id: r.activityId, gladiator_id: owner?.gladiatorId ?? null, slot_index: r.slotIndex, starts_at_ms: r.slotIndex * SLOT_MS, resolved_kind: 'rest',
+      fallback: r.fallback, requested: r.requested, status: r.settled ? 'completed' : 'active', settled_at_ms: r.settled ? end : null,
+      summary: r.settled ? { activityId: r.activityId, resolvedKind: 'rest', result: 'completed', success: true, receiptId: randomUUID(), settledAtMs: end,
+        rewards: { money: 0, renown: 0, xp: 0, attributePoints: 0, items: [], overflowMoney: 0 }, replayExpiry: { state: 'expired' } } : null,
+      gladiators: { name: r.name, level: owner?.progression.level ?? 1, xp: owner?.progression.xp ?? 0, newer: [{ count: 0 }] } });
+  }
   if (!owner) return [...rows.values()];
   for (const n of data.notifications ?? []) {
     const slot = Math.floor((n.summary.settledAtMs - 1) / SLOT_MS);

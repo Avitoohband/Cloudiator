@@ -11,7 +11,9 @@ import type { DisplayClock } from '../../game/display-clock';
 import { useClockMode } from '../../lib/clock-setting';
 import { useOutcomeFocus } from '../shell/focus-lost';
 import { RestGainText } from './RestGainText';
-import { activityCosts, projectRest, restHint } from './rest-stamina';
+import { activityCosts, partVerdicts, projectRest, restHint } from './rest-stamina';
+import { slotMark, runningRestLines, runningRestNotice } from './stamina-text';
+import { useRunningRest } from './use-running-rest';
 import { PHASES, arenaNote, choiceHint, choiceKey, choiceOf, choicesFor, dungeonNote, lockedChoices, optionLabel, runningNotice, runningPart, savedSummary } from './schedule-text';
 import { slotTimeText } from './slot-time';
 import { trainingLimitWarning, trainingRoom } from './training-cap';
@@ -145,17 +147,32 @@ export function SchedulePanel({ owner, gateway, refresh, clock, rules = RULES_V1
    * The line under a part's select. A Rest says how much stamina it will give (Patch A item 6), projected from the draft day against the
    * shared clock (null until mounted: no number then, and the same words as when no number can be told); the other choices say what they cost.
    */
+  /**
+   * Patch 1.9 Task 29: whether each part's next occurrence of the draft day will run (`partVerdicts`, the same walk as the Rest's number; all
+   * unknown until mounted), marked on its card under the hint line.
+   */
+  const verdicts = useMemo(() => partVerdicts({ nowMs: slot === null ? Number.NaN : slotStart, owner, day: draft, costs, rules, tournamentOptIn: owner.tournamentOptIn }),
+    [slot, slotStart, owner, draft, costs, rules]);
+  /** Patch 1.9 Task 29: the part running now when it rests instead of its plan (the owner's own activity row says what was planned and why). */
+  const rested = useRunningRest(gateway, owner, slot);
+  const truth = rested && running ? {
+    lines: runningRestLines({ planned: rested.planned, destination: rested.destination, reason: rested.reason, had: owner.stamina.current,
+      needed: costs ? costs[rested.planned] ?? null : null }, rules),
+    notice: runningRestNotice({ phase: running.phase, planned: rested.planned, reason: rested.reason,
+      ends: slotTimeText(running.endsAtMs, nowMs, clockMode), next: slotTimeText(nextPhaseStart(running.phase, slotStart), nowMs, clockMode) }, rules),
+  } : null;
   const hintFor = (phase: Phase) => draft[phase].kind === 'rest'
     ? <RestGainText text={restHint(slot === null ? null : projectRest({ phase, nowMs: slotStart, owner, day: draft, costs, rules, tournamentOptIn: owner.tournamentOptIn }))} />
     : choiceHint(draft[phase], clockMode, rules, room);
   return <div className="planning-form">
     <h2>Repeating schedule</h2>
     <p className="muted">Edits apply to the next occurrence that has not started. Your current activity continues.</p>
-    {running && <p role="note" className="schedule-running">{runningNotice(running, nextPhaseStart(running.phase, slotStart), nowMs, clockMode)}</p>}
+    {running && <p role="note" className="schedule-running">{truth ? truth.notice : runningNotice(running, nextPhaseStart(running.phase, slotStart), nowMs, clockMode)}</p>}
     <div className="schedule-grid">{PHASES.map((phase, index) => {
       const isRunning = running?.phase === phase;
       const arena = arenaNote(phase, rules), dungeon = dungeonNote(phase, rules);
-      const arenaLine = `${panelId}-${phase}-note`, dungeonLine = `${panelId}-${phase}-dungeon`, hintLine = `${panelId}-${phase}-hint`;
+      const arenaLine = `${panelId}-${phase}-note`, dungeonLine = `${panelId}-${phase}-dungeon`, hintLine = `${panelId}-${phase}-hint`, markLine = `${panelId}-${phase}-mark`;
+      const mark = slotMark(verdicts[phase], draft[phase], rules);
       const marked = refused && changed.includes(phase);
       const options = [
         ...choicesFor(phase, level, rules).map(choice => ({ choice, shut: false })),
@@ -165,18 +182,24 @@ export function SchedulePanel({ owner, gateway, refresh, clock, rules = RULES_V1
       options.sort((a, b) => Number(a.choice.kind === 'dungeon') - Number(b.choice.kind === 'dungeon'));
       return <article className={`schedule-slot slot-${index}`} key={phase} data-running={isRunning ? '' : undefined}>
         <div className="slot-head"><h3>{phase}</h3>{isRunning && <span className="running-badge">Running now</span>}</div>
+        {isRunning && truth && <div className="running-truth" data-testid="running-truth">
+          <p className="running-what">{truth.lines.what}<span className="running-instead">{truth.lines.instead}</span></p>
+          <p className="running-planned">{truth.lines.planned}</p>
+        </div>}
         <label htmlFor={`schedule-${phase}`}>{phase} activity</label>
         <select id={`schedule-${phase}`} value={choiceKey(draft[phase])} disabled={busy} onChange={event => {
           const choice = choiceOf(event.target.value);
           if (choice) edit(phase, choice);
         }}
           aria-invalid={marked ? true : undefined}
-          aria-describedby={[arena ? arenaLine : '', dungeon ? dungeonLine : '', hintLine, marked && outcomeShown ? outcomeShown : ''].filter(Boolean).join(' ')}>
+          aria-describedby={[arena ? arenaLine : '', dungeon ? dungeonLine : '', hintLine, mark ? markLine : '', marked && outcomeShown ? outcomeShown : ''].filter(Boolean).join(' ')}>
           {options.map(({ choice, shut }) => <option key={choiceKey(choice)} value={choiceKey(choice)} disabled={shut}>{optionLabel(choice)}</option>)}
         </select>
         {arena && <p id={arenaLine} className="slot-note">{arena}</p>}
         {dungeon && <p id={dungeonLine} className="slot-note">{dungeon}</p>}
         <p id={hintLine} className="slot-hint">{hintFor(phase)}</p>
+        {mark?.tone === 'warn' && <p id={markLine} className="slot-warn" data-testid={`stamina-mark-${phase}`}>{mark.text}<small>{mark.hint}</small></p>}
+        {mark?.tone === 'quiet' && <p id={markLine} className="slot-after" data-testid={`stamina-mark-${phase}`}>{mark.text}</p>}
         {estimate(phase)}
       </article>;
     })}</div>

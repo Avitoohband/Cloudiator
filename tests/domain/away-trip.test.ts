@@ -100,7 +100,9 @@ describe('the away button while the trip runs', () => {
     expect(awayText(s, false)).toEqual({ name: 'Aster', title: ' is on the Woodland Path', sub: 'Minute 30 of 80 · next fight at minute 40', action: '● Watch live' });
     expect(awayText(s, true)).toEqual({ name: 'Aster', title: ' · Woodland Path', sub: 'Minute 30 of 80', action: '● Live' });
     expect(awayText(awayState({ ...base, nowMs: start + 65 * MIN })!, false).sub).toBe('Minute 65 of 80 · back at minute 80');
-    expect(awayText(awayState({ ...base, nowMs: start + 45 * MIN, defeated: true })!, false).sub).toBe('Minute 45 of 80 · back at minute 80');
+    // Patch 1.9 Task 29: after a lost fight the gladiator rests at the safe return point until the slot ends (the approved mockup's words).
+    expect(awayText(awayState({ ...base, nowMs: start + 65 * MIN, defeated: true })!, false).sub).toBe('Minute 65 of 80 · resting at the safe return point after a defeat');
+    expect(awayText(awayState({ ...base, nowMs: start + 65 * MIN, defeated: true })!, true).sub).toBe('Minute 65 · resting after a defeat');
     expect(awayText(awayState({ ...base, destination: null, nowMs: start + 30 * MIN })!, false).title).toBe(' is on an expedition');
     expect(awayText(awayState({ ...base, destination: null, nowMs: start + 30 * MIN })!, true).title).toBe(' · on an expedition');
   });

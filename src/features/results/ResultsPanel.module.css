@@ -151,3 +151,9 @@
   line-height: 19px;
   text-align: center;
 }
+
+/* Patch 1.9 Task 29: the owner's own rest that replaced a planned activity, marked as the approved mockup's amber edge. */
+.row[data-rested] {
+  padding-left: 8px;
+  box-shadow: inset 3px 0 0 #f2a63b;
+}

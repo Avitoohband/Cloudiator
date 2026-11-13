@@ -49,6 +49,16 @@ main[tabindex="-1"]:focus { outline: none; }
 .schedule-slot p.slot-note { color: var(--gold); }
 .schedule-slot p.slot-hint b { color: var(--gold); }
 .schedule-slot p:last-child { margin-bottom: 0; }
+/* Patch 1.9 Task 29 (approved mockup 2026-11-13): a part that will rest instead (amber), the quiet stamina after one that runs, and the
+   running card that says what really runs. */
+.schedule-slot p.slot-warn { margin: .5rem 0 .3rem; padding: .45rem .6rem; border: 1px solid #c9893a; border-left: 4px solid #f2a63b; border-radius: 6px; background: rgba(130, 80, 15, .35); color: #ffe2a6; font-size: .8rem; font-weight: 700; overflow-wrap: anywhere; }
+.schedule-slot p.slot-warn small { display: block; margin-top: .2rem; font-weight: 500; color: #f6d9a0; font-size: .72rem; }
+.schedule-slot p.slot-after { margin: .4rem 0 0; color: #a3abbf; font-size: .75rem; }
+.schedule-slot .running-truth { margin: .8rem 0 .4rem; }
+.schedule-slot .running-truth p { margin: 0; }
+.schedule-slot .running-truth .running-what { font-size: 1rem; font-weight: 800; color: var(--ink); }
+.schedule-slot .running-truth .running-instead { display: block; font-size: .8rem; font-weight: 600; color: #ffe2a6; margin-top: .15rem; }
+.schedule-slot .running-truth .running-planned { margin-top: .3rem; color: #aab3c6; font-size: .75rem; }
 .schedule-running { padding: .7rem .9rem; margin: 1rem 0 0; font-size: .85rem; color: var(--ink); background: #23304a; border: 1px solid #5b7bb5; border-left-width: 3px; }
 .schedule-unsaved { margin: 1rem 0 0; font-size: .85rem; color: var(--gold); }
 /* Patch 1.6: the generic daily Training limit, a note before Save (the approved mockup's amber box), never an error. */

@@ -161,6 +161,13 @@
   font-size: 0.85rem;
 }
 
+/* Patch 1.9 Task 29: "On an expedition · resting at the safe return point after a defeat", above the detail (approved mockup). */
+.phase .phaseStatus {
+  color: #f6d9a0;
+  font-weight: 700;
+  font-size: 0.8rem;
+}
+
 .health {
   display: grid;
   gap: 0.25rem;

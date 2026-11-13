@@ -84,6 +84,10 @@ Open any gladiator's card and press 📜 History (or See all next to History in 
 
 Tournament fights stand out: they are gold rows with a trophy, the round (Final, Semifinal, Quarterfinal) and the tournament's name, and a tournament fight's replay has a gold header with its rounds marked and a gold frame around the arena.
 
+## Stamina warnings (stamina and schedule topics)
+
+The Schedule tells you when a planned activity will not run. A part your gladiator will not have the stamina for shows "Not enough stamina: your gladiator will rest instead", with what it needs and what it will have: add a Rest before it or pick a cheaper activity. A third Training of a game day shows "Training limit: this becomes Rest (2 a game day)". Parts that will run show the stamina left after them. When the next part will not run, a Stamina notice in camp says so, with Open schedule; dismiss it and it stays away until the next part. While your gladiator rests instead of its plan, the Schedule says so on the running part and shows what was planned. Afterwards, Notifications and your own Results line say it rested instead and why; other players only see that it rested. After a lost expedition fight, the expedition view and the away button say your gladiator is resting at the safe return point until the slot ends.
+
 ## Also
 
 - Renown now uses a gold laurel icon, in the corner chip too. Update any Wiki text or picture that shows the old icon.

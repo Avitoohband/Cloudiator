@@ -16,7 +16,7 @@
 //   other titles are notices of their own, merged with the results by time (`TitleNotices`, `title-notices.ts`). They count in the summary
 //   line and in the badge (the server's `newNotifications`), and the tab is marked seen up to the newest of its results and notices.
 import { useEffect, useId, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
-import type { GameMessage, Inbox, MessageBlock, OwnFeedback } from '@contracts/reads';
+import type { GameMessage, GameNotification, Inbox, MessageBlock, OwnFeedback } from '@contracts/reads';
 import { PATCH } from '../../lib/patch';
 import { NOTIFICATIONS_PAGE } from '../../lib/api/reads';
 import { notificationEntries, notificationsSummary, resultTitleRows, titleNotices, type TitleNotice } from '../titles/title-notices';
@@ -31,6 +31,9 @@ import { MyFeedback } from './MyFeedback';
 import { useMinuteNow } from '../schedule/use-minute-now';
 import { LookDisclaimer } from './LookDisclaimer';
 import { levelUpLine, notificationLines, watchLabel } from './notifications';
+import { restedNoteLines } from '../schedule/stamina-text';
+import type { RestedActivity } from '../../lib/api/reads';
+import { RULES_V2 } from '@domain/rules-v2';
 import { NoticeCard, TitleLines, useNoticeWear, type NoticeTitles } from './TitleNotices';
 import { useLoaded, useLoadedList } from './useLoadedList';
 import styles from './messages.module.css';
@@ -76,6 +79,12 @@ function PatchNumber({ patch, onOpen }: { patch: string; onOpen(): void }) {
 }
 
 const NO_NOTICES: readonly TitleNotice[] = [];
+const NO_RESTS: readonly RestedActivity[] = [];
+/** A settled rest that replaced a planned activity, as a row of the Notifications list. */
+type RestedRow = RestedActivity & { settledAtMs: number; rested: true };
+const restedRows = (rests: readonly RestedActivity[]): RestedRow[] =>
+  rests.flatMap(rest => (rest.settledAtMs === null ? [] : [{ ...rest, settledAtMs: rest.settledAtMs, rested: true as const }]));
+const isRested = (row: GameNotification | RestedRow): row is RestedRow => 'rested' in row;
 
 export function MessagesPanel({ id, inbox, load, loadNotifications, loadPatches, read, seeNotifications, changeLook, onClose, history, initialTab, watch, latestPatch = null,
   titles, feedback }: MessagingActions & {
@@ -131,7 +140,11 @@ export function MessagesPanel({ id, inbox, load, loadNotifications, loadPatches,
   // Patch 1.7: the owner's title notices, merged with the results read (a notice older than a full page of results is left out).
   const held = titles?.held;
   const notices = useMemo(() => (held ? titleNotices(held) : NO_NOTICES), [held]);
-  const entries = useMemo(() => (noteItems ? notificationEntries(noteItems, notices, NOTIFICATIONS_PAGE) : []), [noteItems, notices]);
+  // Patch 1.9 Task 29: the owner's rests that replaced a planned activity ("Aster rested instead of …"), read with the results and listed among
+  // them by time. The server's badge does not count them (accepted), so they never move the server's mark; their gold dots are this panel's.
+  const restedItems = notes.value?.rested ?? NO_RESTS;
+  const noteRows = useMemo(() => (noteItems ? [...noteItems, ...restedRows(restedItems)].sort((a, b) => b.settledAtMs - a.settledAtMs) : null), [noteItems, restedItems]);
+  const entries = useMemo(() => (noteRows ? notificationEntries(noteRows, notices, NOTIFICATIONS_PAGE) : []), [noteRows, notices]);
   const listedNotices = useMemo(() => entries.flatMap(entry => (entry.kind === 'notice' ? [entry.notice] : [])), [entries]);
   const wear = useNoticeWear(titles);
 
@@ -304,7 +317,11 @@ export function MessagesPanel({ id, inbox, load, loadNotifications, loadPatches,
     notesRetry.current?.focus();
   }, [notesError]);
   const markNotes = async () => {
-    if (notesMarking || mark === null) return;
+    if (notesMarking) return;
+    if (mark === null) {
+      if (restMark !== null) { setSeenAtOpen(previous => Math.max(previous, restMark)); say('Notifications marked as read.'); }
+      return;
+    }
     setNotesError(false);
     if (mark > inbox.notificationsSeenMs && mark > seenUpTo.current) {
       const before = seenUpTo.current;
@@ -319,7 +336,7 @@ export function MessagesPanel({ id, inbox, load, loadNotifications, loadPatches,
       }
       setNotesMarking(false);
     }
-    setSeenAtOpen(previous => Math.max(previous, mark));
+    setSeenAtOpen(previous => Math.max(previous, mark, restMark ?? 0));
     say('Notifications marked as read.');
     window.setTimeout(() => root.current?.querySelector<HTMLElement>('[role="tab"][aria-selected="true"]')?.focus(), 0);
   };
@@ -343,7 +360,10 @@ export function MessagesPanel({ id, inbox, load, loadNotifications, loadPatches,
 
   const tabId = (t: Tab) => `${ids}-tab-${t}`;
   const messageCount = messages.items?.length ?? 0;
-  const freshNotes = freshNotifications(noteItems ?? [], listedNotices, seenAtOpen);
+  const freshRests = restedRows(restedItems).filter(rest => rest.settledAtMs > seenAtOpen);
+  const freshNotes = freshNotifications(noteItems ?? [], listedNotices, seenAtOpen) + freshRests.length;
+  /** The newest rest listed: Mark all as read clears its dot too (this panel's own mark; the server's badge never counted it). */
+  const restMark = freshRests.length ? Math.max(...freshRests.map(rest => rest.settledAtMs)) : null;
   // "Choose a title": the panel closes (the focus back on the Messages button) and the picker opens on My gladiator, with the focus in it.
   const chooseTitle = () => { onClose(); titles?.choose(); };
 
@@ -442,7 +462,7 @@ export function MessagesPanel({ id, inbox, load, loadNotifications, loadPatches,
                 {notes.failed && <Failed what="Notifications" retry={notes.reload} />}
                 {entries.length === 0 ? <p className={styles.state}>No results yet. What your training and expeditions earn shows here.</p> : <>
                   <div className={styles.summary}>
-                    <span className={styles.summaryText}>{notificationsSummary(noteItems.length, listedNotices.length, freshNotes)}</span>
+                    <span className={styles.summaryText}>{notificationsSummary(noteRows?.length ?? 0, listedNotices.length, freshNotes)}</span>
                     <button type="button" className={styles.markAll} data-mark-notes disabled={!notesMarking && freshNotes === 0} aria-disabled={notesMarking ? true : undefined}
                       aria-busy={notesMarking ? true : undefined} onClick={markNotes}>
                       {notesMarking ? <><span className={styles.spin} aria-hidden="true" />Marking…</> : <><TickAll />Mark all as read</>}
@@ -457,6 +477,21 @@ export function MessagesPanel({ id, inbox, load, loadNotifications, loadPatches,
                       if (entry.kind === 'notice') {
                         return titles && <NoticeCard key={`notice:${entry.notice.key}`} notice={entry.notice} fresh={entry.notice.atMs > seenAtOpen} titles={titles} wear={wear}
                           onChoose={chooseTitle} />;
+                      }
+                      if (isRested(entry.result)) {
+                        const rest = entry.result, fresh = rest.settledAtMs > seenAtOpen;
+                        const { title, lines } = restedNoteLines(rest, rest.name, RULES_V2);
+                        return <li key={rest.activityId} className={styles.card} data-notification data-rested="" data-unread={fresh ? '' : undefined}>
+                          <span className={styles.rowTop}>
+                            <span className={styles.rowTitle}>
+                              {fresh && <span className={styles.dot} data-unread-dot aria-hidden="true" />}
+                              {fresh && <span className={styles.sr}>New: </span>}
+                              <span className={fresh ? styles.titleNew : styles.title} data-notification-title>{title}</span>
+                            </span>
+                            <span className={styles.date}>{messageDate(rest.settledAtMs)}</span>
+                          </span>
+                          <ul className={styles.lines}>{lines.map((line, n) => <li key={n}>{line}</li>)}</ul>
+                        </li>;
                       }
                       const note = entry.result;
                       const { title, lines, levelUp } = notificationLines(note);

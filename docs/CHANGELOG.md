@@ -32,7 +32,7 @@ Project folders under `D:\Avi\Projects\Animation\Cloudiator\`.
 
 - Open Game Info from camp to read the Wiki and the Future Updates plans. Pick a Wiki topic from one short scrolling list: combat, attributes, stamina, Training, the Arena, dungeons and more.
 - Open Inventory and shops to browse your inventory in a square grid of pixel-art items. Select a tile to check its details, wear it, or manage it.
-- In My gladiator, hover, focus, or tap worn gear and replacements to see stats, attribute bonuses, and weight.
+- In My gladiator, hover, focus or tap worn gear and replacements to see stats, attribute bonuses and weight, and any attribute or stat to see what it does.
 - Shops are an icon grid with the same detail card as your inventory. Search and sort both. The Marketplace is a list with big item icons, every detail on the row and the seller in front.
 - A new Settings menu (⚙) pins the menu to the left, bottom or right on desktop, and sets when names and titles show over the camp: Off, When zoomed in, or Always. It is remembered in this browser.
 - Wear or replace gear straight from the Worn equipment slots in My gladiator.
@@ -40,7 +40,6 @@ Project folders under `D:\Avi\Projects\Animation\Cloudiator\`.
 - Identical items show as one stack with a count. Sell lets you choose how many.
 - Mark messages and notifications as read, one by one or all at once.
 - An XP bar shows your progress and whether your next expedition can level you up.
-- My gladiator explains each attribute and stat when you hover, focus or tap it.
 - Click or tap a camp NPC to hear a line from them, and again for the next. The Weaponsmith's and Armorer's stalls open the shops.
 - Resting gladiators lie straight on their beds, with an eye cover and a floating ZzZ, and take off their armor while they sleep.
 - My gladiator and gladiator cards show the extra damage of a critical hit, and how much renown armor and weapons add in the Arena.
@@ -50,6 +49,7 @@ Project folders under `D:\Avi\Projects\Animation\Cloudiator\`.
 - Phones scroll a tapped item's card into view, plus small fixes to the inventory, shops, messages, Settings and the Wiki list.
 - A Feedback button: send a bug report or an idea from the game, and read the team's answer.
 - Buy back any of the last 10 pieces of gear you sold to a merchant, until the next game day, for the gold you got.
+- The schedule warns when your gladiator will not have the stamina for a planned activity, and says when he rested instead.
 
 ## 1.8.1 — Clearer gladiator stats (2026-11-11)
 

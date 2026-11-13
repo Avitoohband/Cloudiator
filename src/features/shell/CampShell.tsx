@@ -66,6 +66,8 @@ import { useBannerPlace } from '../arrivals/useBannerPlace';
 import { ProfileLayer, type CompareProp } from '../character/ProfileCard';
 import { ownBuild } from '../character/profile-card';
 import { SchedulePanel } from '../schedule/SchedulePanel';
+import { activityCosts, partVerdicts } from '../schedule/rest-stamina';
+import { nextSlotNotice } from '../schedule/stamina-text';
 import { useMinuteNow } from '../schedule/use-minute-now';
 import { InventoryPanel } from '../inventory/InventoryPanel';
 import { MarketPanel } from '../market/MarketPanel';
@@ -95,6 +97,7 @@ import type { FeedbackActions } from '../messages/feedback';
 import { DEFAULT_MENU_PREFS, useLabelPrefs, useMenuPrefs } from './menu-prefs';
 import { MenuSurface } from './MenuSurface';
 import { PatchNotice, reloadPage } from './PatchNotice';
+import { StaminaNotice } from './StaminaNotice';
 import { modalOpen, useModalOpen } from './modal';
 import { PerfOverlay, perfPhaseOf } from './PerfOverlay';
 import { menusFor, originMenu, type MenuId } from './menus';
@@ -207,7 +210,8 @@ function ResultsMenu({ fixture, samples, previewFailed, reads, viewerId, clock, 
   const sample = (view: Exclude<SceneView, { kind: 'bout' }>): Exclude<SceneView, { kind: 'bout' }> => ({ ...view, from: 'results' });
   return <>
     {reads ? <ResultsPanel reads={reads} viewerId={viewerId} clock={clock} onWatch={onWatch} bouts={bouts} view={choice.view} onView={view => onChoose({ view })}
-      filter={choice.filter} onFilter={filter => onChoose({ filter })} onWatchBout={onWatchBout} loadRewards={reads.notifications} />
+      filter={choice.filter} onFilter={filter => onChoose({ filter })} onWatchBout={onWatchBout} loadRewards={reads.notifications}
+      loadRested={reads.rested ? ids => reads.rested!(ids) : undefined} />
       : <p role="status">{previewFailed ? 'The fixture preview could not be loaded.' : 'Loading local preview…'}</p>}
     {fixture && samples.replays.length > 0 && <nav className="sample-replays" aria-label="Sample replays">
       <p className="eyebrow">SAMPLE REPLAYS</p>
@@ -475,7 +479,11 @@ export function CampShell({ fixture, previewAs, previewResting = false, previewB
       },
     },
     load: () => reads.messages(),
-    loadNotifications: () => reads.notifications(),
+    // Patch 1.9 Task 29: with the owner's rests that replaced a planned activity (a gateway without that read, or a failed one, lists none).
+    loadNotifications: async () => {
+      const [read, rested] = await Promise.all([reads.notifications(), reads.rested ? reads.rested().catch(() => []) : Promise.resolve([])]);
+      return { ...read, rested };
+    },
     loadPatches: beforeSortKey => reads.patches(beforeSortKey),
     read: async messageId => {
       const result = await reads.command({ kind: 'read-message', operationId: crypto.randomUUID(), messageId });
@@ -594,6 +602,18 @@ export function CampShell({ fixture, previewAs, previewResting = false, previewB
   const patchNotice = noticeFor({ latest: game.latestPatch, build: PATCH, blocked: scene !== null || modal || joining.creating || lookOpen || titleOpen,
     later: patchLater });
 
+  // Patch 1.9 Task 29: "Not enough stamina for your next Expedition (starts in 18 min)…". The player's own saved day, walked from the slot the
+  // clock is in (`partVerdicts`, the Schedule's walk); shown when the NEXT slot's activity will not run, once per slot (a dismissal lasts for
+  // that slot), never while a scene or a practice fight covers the camp. It clears itself when the slot starts or the plan is fixed.
+  const [staminaDismissed, setStaminaDismissed] = useState<ReadonlySet<number>>(() => new Set());
+  const ownCosts = useMemo(() => (owner && viewer === 'player' ? activityCosts(owner, game.rules) : null), [owner, viewer, game.rules]);
+  const staminaNotice = useMemo(() => {
+    if (!owner || viewer !== 'player' || !ownCosts) return null;
+    const verdicts = partVerdicts({ nowMs, owner, day: owner.schedule, costs: ownCosts, rules: game.rules, tournamentOptIn: owner.tournamentOptIn });
+    return nextSlotNotice({ verdicts, day: owner.schedule, nowMs, dismissed: staminaDismissed, rules: game.rules });
+  }, [owner, viewer, ownCosts, nowMs, staminaDismissed, game.rules]);
+  const staminaShown = staminaNotice && scene === null && !practising ? staminaNotice : null;
+
   const press = useRef<{ x: number; y: number } | null>(null);
   const sceneUnavailable = game.sceneStatus === 'unavailable';
   // `?perf=1` measures per phase: a new one when the camp gets ready and at each scene open or close (Task 24.1b).
@@ -663,6 +683,8 @@ export function CampShell({ fixture, previewAs, previewResting = false, previewB
         {arrivalSlot}
         <div className={styles.noticeList}>
           <PatchNotice number={patchNotice} compact={compact} onReload={reloadPage} onLater={() => setPatchLater(patchNotice)} />
+          <StaminaNotice text={staminaShown?.text ?? null} onOpen={() => show('schedule')}
+            onDismiss={() => { if (staminaShown) setStaminaDismissed(dismissed => new Set([...dismissed, staminaShown.slot])); }} />
           {/* A rejected stored session (`unauthenticated`) is signed out locally, not a lost connection (13.5 review); a
               signed-out visitor has no session to sign out, so for them a refusal is a lost connection (final review Minor 2). */}
           {!fixture && (game.syncError === 'unavailable' || (game.syncError === 'unauthenticated' && game.session.status === 'signed-out'))

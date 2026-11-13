@@ -24,7 +24,7 @@ import { RestGainText } from '../schedule/RestGainText';
 import { restingGain, restingGainText } from '../schedule/rest-stamina';
 import { slotTimeText } from '../schedule/slot-time';
 import { TitleButton } from '../titles/TitlePicker';
-import { activityStatus } from './activity-status';
+import { activityStatus, settledActivity } from './activity-status';
 import { ClassCard } from './ClassCard';
 import { attributeHelp, attributeRows, cardStats, contextLines, ownBuild, pointsTotal, statHelp, statRows } from './profile-card';
 import { useStatHints } from './stat-hints';
@@ -165,7 +165,8 @@ function OwnerSummary({ owner, slotIndex, clock, fixture, stale, resting, onRetr
       <ClassCard classId={owner.currentBuild.classId} />
       <div className={styles.activity}>
         <span className="eyebrow">{fixture ? 'SAMPLE ACTIVITY' : 'CURRENT ACTIVITY'}</span>
-        {activity && <p>{activity.label}</p>}
+        {/* Patch 1.9 Task 29 (A3): the next slot's activity is named once its slot is processed, never while the server prepares it. */}
+        {settledActivity(owner) && <p>{activity!.label}</p>}
         <p className={styles.status} role="status">{status.label}{ends ? ` · ends ${ends}` : ''}</p>
         {gain && <p className={styles.gain} data-testid="rest-gain"><RestGainText text={gain} /></p>}
       </div>

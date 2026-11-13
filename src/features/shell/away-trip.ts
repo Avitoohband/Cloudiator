@@ -26,7 +26,7 @@ const DUNGEON_FIGHT_MINUTES = [16, 32, 48, 64] as const;
 type FightMinute = typeof FIGHT_MINUTES[number] | typeof DUNGEON_FIGHT_MINUTES[number];
 
 export type AwayState =
-  | { kind: 'running'; activityId: string; name: string; destination: string | null; minute: number; nextFight: FightMinute | null; dungeon?: true }
+  | { kind: 'running'; activityId: string; name: string; destination: string | null; minute: number; nextFight: FightMinute | null; dungeon?: true; defeated?: true }
   | { kind: 'back'; activityId: string; name: string; destination: string | null; result: 'success' | 'defeat' | 'processing'; rewards: { money: number; xp: number } | null;
       dungeon?: true; terminal?: ActivitySummary['dungeon'] }
   | { kind: 'bout'; activityId: string; name: string; opponent: string; won: boolean; rewards: { renown: number; ratingDelta: number | null } | null };
@@ -88,7 +88,8 @@ export function awayState(input: {
       const minute = Math.floor((nowMs - current.startsAtMs) / MINUTE_MS);
       const fights = isDungeon ? DUNGEON_FIGHT_MINUTES : FIGHT_MINUTES;
       const nextFight = defeated ? null : fights.find(fight => fight > minute) ?? null;
-      return { kind: 'running', activityId: current.id, name: owner.name, destination, minute, nextFight, ...location };
+      // Patch 1.9 Task 29: after a lost fight on an expedition the gladiator rests at the safe return point until the slot ends.
+      return { kind: 'running', activityId: current.id, name: owner.name, destination, minute, nextFight, ...location, ...(defeated && !isDungeon ? { defeated: true as const } : {}) };
     }
     if (current.endsAtMs <= nowMs && nowMs < current.endsAtMs + SLOT_MS) {
       if (closed.has(current.id)) return null;
@@ -127,7 +128,8 @@ export function awayText(state: AwayState, compact: boolean): AwayText {
       return {
         name: state.name,
         title,
-        sub: compact ? minute : `${minute} · ${state.nextFight === null ? `back at minute ${TRIP_MINUTES}` : `next fight at minute ${state.nextFight}`}`,
+        sub: state.defeated ? compact ? `Minute ${state.minute} · resting after a defeat` : `${minute} · resting at the safe return point after a defeat`
+          : compact ? minute : `${minute} · ${state.nextFight === null ? `back at minute ${TRIP_MINUTES}` : `next fight at minute ${state.nextFight}`}`,
         action: compact ? '● Live' : '● Watch live',
       };
     }

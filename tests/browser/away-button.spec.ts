@@ -244,15 +244,15 @@ test.describe('the away button on the camp', () => {
     if (wide) await expect(awayMain(page)).toContainText('Minute 40 of 80 · next fight at minute 60');
     await page.waitForTimeout(700);
     expect(timelineReads()).toBe(first);
-    // Minute 45: after the fight's minute the timeline is read once more, and it shows the lost fight: no next fight, back at minute 80.
+    // Minute 45: after the fight's minute the timeline is read once more, and it shows the lost fight: no next fight; Patch 1.9 Task 29: the
+    // gladiator rests at the safe return point after the defeat (the approved mockup's words).
     serverNow = start + 45 * MIN;
     await hold(page, start + 45 * MIN);
-    if (wide) await expect(awayMain(page)).toContainText('Minute 45 of 80 · back at minute 80');
-    else await expect(awayMain(page)).toContainText('Minute 45 of 80');
+    await expect(awayMain(page)).toContainText(wide ? 'Minute 45 of 80 · resting at the safe return point after a defeat' : 'Minute 45 · resting after a defeat');
     await expect.poll(timelineReads).toBe(first + 1);
     // And it stays so for the rest of the trip.
     await hold(page, start + 65 * MIN);
-    if (wide) await expect(awayMain(page)).toContainText('Minute 65 of 80 · back at minute 80');
+    await expect(awayMain(page)).toContainText(wide ? 'Minute 65 of 80 · resting at the safe return point after a defeat' : 'Minute 65 · resting after a defeat');
     await page.waitForTimeout(500);
     expect(timelineReads()).toBeLessThanOrEqual(first + 2);
   });
@@ -540,7 +540,7 @@ test.describe('away reads across a signed-in owner lifetime', () => {
     const at = startOf('outpost') + 45 * MIN;
     const transport = await live(context, { key: 'outpost', state: 'running', at });
     await openCamp(page, at);
-    await expect(awayMain(page)).toContainText('Minute 45 of 80 · back at minute 80');
+    await expect(awayMain(page)).toContainText('Minute 45 of 80 · resting at the safe return point after a defeat');
     const session = await page.evaluate(() => JSON.parse(localStorage.getItem('sb-127-auth-token')!));
     await page.evaluate(() => {
       localStorage.removeItem('sb-127-auth-token');

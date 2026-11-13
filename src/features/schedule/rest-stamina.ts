@@ -69,28 +69,78 @@ function trainingsSoFar(running: number, owner: Pick<OwnerState, 'currentActivit
 }
 
 /**
- * The ways one part may go from `walk`, as the boundary resolves it under `rules` (whose daily Training `limit` is null in v1):
+ * What one part does on one way of the walk (Patch 1.9 Task 29): it runs (a Rest included), it becomes a Rest for lack of stamina (its
+ * cost `needs` is more than the `has` left), or a v2 Training request past the day's limit becomes a Rest (`limit`).
+ */
+export type PartOutcome = { kind: 'runs' } | { kind: 'stamina'; needs: number; has: number } | { kind: 'limit' };
+type Step = { walk: Walk; outcome: PartOutcome };
+
+/**
+ * The ways one part may go from `walk`, as the boundary resolves it under `rules` (whose daily Training `limit` is null in v1), each with
+ * what the part did on it:
  * - Rest refills to the maximum; so does a v2 Training request past the day's limit (an ordinary Rest, which costs no Training stamina
  *   and is not counted), and any part whose cost is more than what is left ("Resting (not enough stamina)", not counted either).
  * - A Training that runs costs its stamina and counts, at the point cap too (the cap only changes the points it gives).
  * - On a tournament evening an Arena that is not opted out (`optIn` false) may be a formed bracket, which costs `costs.tournament`
  *   (v2's free entry; v1's equals Arena's, so both ways agree), or regular Arena at its cost: the walk keeps both.
  */
-function step(walk: Walk, choice: ActivityChoice, slot: number, input: { costs: ActivityCosts; maximum: number; limit: number | null; rules: Rules; optIn: boolean | undefined }): Walk[] {
+function step(walk: Walk, choice: ActivityChoice, slot: number, input: { costs: ActivityCosts; maximum: number; limit: number | null; rules: Rules; optIn: boolean | undefined }): Step[] {
   const { costs, maximum, limit, rules, optIn } = input;
   const rest = { stamina: maximum, trainings: walk.trainings };
-  const paid = (cost: number, counts = false): Walk => (cost > walk.stamina ? rest : { stamina: walk.stamina - cost, trainings: walk.trainings + (counts ? 1 : 0) });
+  const paid = (cost: number, counts = false): Step => (cost > walk.stamina ? { walk: rest, outcome: { kind: 'stamina', needs: cost, has: walk.stamina } }
+    : { walk: { stamina: walk.stamina - cost, trainings: walk.trainings + (counts ? 1 : 0) }, outcome: { kind: 'runs' } });
   switch (choice.kind) {
-    case 'rest': return [rest];
-    case 'training': return [limit !== null && walk.trainings >= limit ? rest : paid(costs.training, true)];
+    case 'rest': return [{ walk: rest, outcome: { kind: 'runs' } }];
+    case 'training': return [limit !== null && walk.trainings >= limit ? { walk: rest, outcome: { kind: 'limit' } } : paid(costs.training, true)];
     case 'expedition': return [paid(costs.expedition)];
     case 'dungeon': return costs.dungeon === undefined ? [] : [paid(costs.dungeon)];
     case 'arena': {
       const regular = paid(costs.arena);
       if (optIn === false || !isTournamentSlot(slotAt(slot * SLOT_MS), rules)) return [regular];
-      return [regular, costs.tournament > walk.stamina ? regular : { stamina: walk.stamina - costs.tournament, trainings: walk.trainings }];
+      return [regular, costs.tournament > walk.stamina ? regular : { walk: { stamina: walk.stamina - costs.tournament, trainings: walk.trainings }, outcome: { kind: 'runs' } }];
     }
   }
+}
+
+type WalkInput = {
+  nowMs: number; owner: Pick<OwnerState, 'stamina' | 'currentActivity' | 'pendingBuild' | 'processedSlotIndex'> & Partial<Pick<OwnerState, 'restingUntilSlot'>>;
+  day: Schedule; costs: ActivityCosts | null; rules?: Rules; tournamentOptIn?: boolean;
+};
+type Started = { running: number; walks: Walk[]; costs: ActivityCosts; maximum: number; limit: number | null };
+
+/**
+ * Where every walk starts (`projectRest` and `partVerdicts`): the slot the clock is in, whose activity is already paid, and the ways the day
+ * may have gone so far. Null where nothing can be told truthfully (see `projectRest`): no costs, a time or stamina that is not a usable
+ * number, the slot the clock is in not processed yet or the clock behind the processed slot, or the gladiator resting at home.
+ */
+function walkStart({ nowMs, owner, costs, rules = RULES_V1 }: WalkInput): Started | null {
+  if (!costs || !known(owner) || !usable(nowMs)) return null;
+  let running: number;
+  try { running = slotAt(Math.floor(nowMs)).index; } catch { return null; }
+  // The clock moves into a slot at its cutoff, but the server debits that slot's activity (and refills a Rest) only when it processes the
+  // boundary, one to two and a half minutes later, setting `processedSlotIndex` in the same transaction. Until the owner read says so, its
+  // stamina is not the running part's paid stamina, and no exact number can be told (`activityStatus`'s `behind` test).
+  if (owner.processedSlotIndex < running) return null;
+  // A clock behind the server's processed slot (held, or not yet synced): the stamina read already holds the debit of a slot the walk
+  // would charge again (Patch 1.6, spec "Rest projections").
+  if (owner.processedSlotIndex > running) return null;
+  // Resting at home (the idle rest, Task 23.8): no activity runs, and the slots until it is back are not the draft's.
+  if (owner.currentActivity === null || (owner.restingUntilSlot ?? null) !== null) return null;
+  const { maximum } = owner.stamina;
+  const limit = trainingDailyLimit(rules);
+  const start = owner.currentActivity.kind === 'rest' ? maximum : owner.stamina.current;
+  const walks = (limit === null ? [0] : trainingsSoFar(running, owner, limit)).map(trainings => ({ stamina: start, trainings }));
+  return { running, walks, costs, maximum, limit };
+}
+
+/** One step of every way at once (slot `index`), the ways that end alike merged; `outcomes` is what the part did on each way. */
+function advance(walks: Walk[], index: number, input: WalkInput, started: Started): { walks: Walk[]; outcomes: PartOutcome[] } {
+  const { day, rules = RULES_V1, tournamentOptIn } = input;
+  const { costs, maximum, limit } = started;
+  // A new game day (its morning) starts the day's count again.
+  const from = index % PHASES.length === 0 ? walks.map(walk => ({ ...walk, trainings: 0 })) : walks;
+  const steps = from.flatMap(walk => step(walk, day[PHASES[index % PHASES.length]], index, { costs, maximum, limit, rules, optIn: tournamentOptIn }));
+  return { walks: [...new Map(steps.map(({ walk }) => [`${walk.stamina}:${walk.trainings}`, walk] as const)).values()], outcomes: steps.map(({ outcome }) => outcome) };
 }
 
 /**
@@ -110,39 +160,47 @@ function step(walk: Walk, choice: ActivityChoice, slot: number, input: { costs: 
  *   the processed slot (the walk would charge a part the server has already paid, Patch 1.6), the gladiator rests at home (an idle rest:
  *   no current activity, or `restingUntilSlot` set; its slots are not the draft's), or the ways the walk may go disagree.
  */
-export function projectRest(input: {
-  phase: Phase; nowMs: number; owner: Pick<OwnerState, 'stamina' | 'currentActivity' | 'pendingBuild' | 'processedSlotIndex'> & Partial<Pick<OwnerState, 'restingUntilSlot'>>;
-  day: Schedule; costs: ActivityCosts | null; rules?: Rules; tournamentOptIn?: boolean;
-}): RestGain {
-  const { phase, nowMs, owner, day, costs, rules = RULES_V1, tournamentOptIn } = input;
-  if (!costs || !known(owner) || !usable(nowMs)) return null;
-  let running: number, target: number;
-  try {
-    running = slotAt(Math.floor(nowMs)).index;
-    target = nextPhaseStart(phase, Math.floor(nowMs)) / SLOT_MS;
-  } catch { return null; }
+export function projectRest(input: WalkInput & { phase: Phase }): RestGain {
+  const started = walkStart(input);
+  if (!started) return null;
+  let target: number;
+  try { target = nextPhaseStart(input.phase, Math.floor(input.nowMs)) / SLOT_MS; } catch { return null; }
+  const { owner } = input;
   if (owner.pendingBuild && owner.pendingBuild.effectiveSlotIndex <= target) return null;
-  // The clock moves into a slot at its cutoff, but the server debits that slot's activity (and refills a Rest) only when it processes the
-  // boundary, one to two and a half minutes later, setting `processedSlotIndex` in the same transaction. Until the owner read says so, its
-  // stamina is not the running part's paid stamina, and no exact number can be told (`activityStatus`'s `behind` test).
-  if (owner.processedSlotIndex < running) return null;
-  // A clock behind the server's processed slot (held, or not yet synced): the stamina read already holds the debit of a slot the walk
-  // would charge again (Patch 1.6, spec "Rest projections").
-  if (owner.processedSlotIndex > running) return null;
-  // Resting at home (the idle rest, Task 23.8): no activity runs, and the slots until it is back are not the draft's.
-  if (owner.currentActivity === null || (owner.restingUntilSlot ?? null) !== null) return null;
-  const { maximum } = owner.stamina;
-  const limit = trainingDailyLimit(rules);
-  const start = owner.currentActivity.kind === 'rest' ? maximum : owner.stamina.current;
-  let walks: Walk[] = (limit === null ? [0] : trainingsSoFar(running, owner, limit)).map(trainings => ({ stamina: start, trainings }));
-  for (let index = running + 1; index < target; index++) {
-    // A new game day (its morning) starts the day's count again.
-    if (index % PHASES.length === 0) walks = walks.map(walk => ({ ...walk, trainings: 0 }));
-    const next = walks.flatMap(walk => step(walk, day[PHASES[index % PHASES.length]], index, { costs, maximum, limit, rules, optIn: tournamentOptIn }));
-    walks = [...new Map(next.map(walk => [`${walk.stamina}:${walk.trainings}`, walk] as const)).values()];
-  }
+  let walks = started.walks;
+  for (let index = started.running + 1; index < target; index++) walks = advance(walks, index, input, started).walks;
   const found = new Set(walks.map(walk => walk.stamina));
-  return found.size === 1 ? { before: walks[0].stamina, maximum } : null;
+  return found.size === 1 ? { before: walks[0].stamina, maximum: started.maximum } : null;
+}
+
+/**
+ * Patch 1.9 Task 29: whether each part's next occurrence will run, from the same walk as `projectRest` (the draft `day` from the slot the
+ * clock is in, as the boundary resolves it under `rules`):
+ * - `runs`, with the stamina `after` it (a Rest's is the maximum);
+ * - `stamina`: it becomes a Rest because its cost (`needs`) is more than the stamina it will find (`has`);
+ * - `limit`: a v2 Training past the day's two actual Trainings becomes a Rest;
+ * - null (unknown) wherever `projectRest` gives no number: no costs, the slot not processed yet or the clock behind it, resting at home,
+ *   a pending build that takes effect at or before the part (its costs are the new build's), a dungeon whose cost is not known, and
+ *   wherever the ways the walk may go disagree on what the part does (or on the stamina after it).
+ * Pure: never throws.
+ */
+export type PartVerdict = { kind: 'runs'; after: number } | { kind: 'stamina'; needs: number; has: number } | { kind: 'limit' } | null;
+export function partVerdicts(input: WalkInput): Record<Phase, PartVerdict> {
+  const verdicts: Record<Phase, PartVerdict> = { morning: null, afternoon: null, evening: null };
+  const started = walkStart(input);
+  if (!started) return verdicts;
+  const { owner } = input;
+  let walks = started.walks;
+  for (let index = started.running + 1; index <= started.running + PHASES.length; index++) {
+    const next = advance(walks, index, input, started);
+    walks = next.walks;
+    if (next.outcomes.length === 0 || (owner.pendingBuild && owner.pendingBuild.effectiveSlotIndex <= index)) continue;
+    if (new Set(next.outcomes.map(outcome => JSON.stringify(outcome))).size !== 1) continue;
+    const outcome = next.outcomes[0], phase = PHASES[index % PHASES.length];
+    if (outcome.kind !== 'runs') verdicts[phase] = outcome;
+    else if (new Set(walks.map(walk => walk.stamina)).size === 1) verdicts[phase] = { kind: 'runs', after: walks[0].stamina };
+  }
+  return verdicts;
 }
 
 /**

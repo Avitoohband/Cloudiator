@@ -18,7 +18,9 @@
 import { useCallback, useEffect, useId, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
 import type { PublicActivitySummary } from '@contracts/events';
 import type { GameNotification, ResultRow } from '@contracts/reads';
-import type { GameGateway } from '../../lib/api/gateway';
+import type { GameGateway, RestedActivity } from '../../lib/api/gateway';
+import { RULES_V2 } from '@domain/rules-v2';
+import { restedResultText } from '../schedule/stamina-text';
 import type { BoutFilter, MyBout } from '../../lib/api/reads';
 import type { DisplayClock } from '../../game/display-clock';
 import { useClockMode } from '../../lib/clock-setting';
@@ -90,8 +92,13 @@ function useServerTime(clock: DisplayClock, expiries: readonly ReplayExpiry[]): 
 }
 
 /** Pure view of the loaded results. */
-export function ResultsView({ model, viewerId, serverNowMs, onMore, onRetry, onWatch, loadingMore = false, moreFailed = false, timeZone }: {
+export function ResultsView({ model, viewerId, serverNowMs, onMore, onRetry, onWatch, loadingMore = false, moreFailed = false, timeZone, rested }: {
   model: ResultsModel;
+  /**
+   * Patch 1.9 Task 29: the viewer's own rests that replaced a planned activity, by activity id: its own row then says so ("Aster rested instead
+   * of Expedition: not enough stamina"). Another player's rest always reads "finished resting": the reason is the owner's only.
+   */
+  rested?: ReadonlyMap<string, RestedActivity>;
   /** The viewer's own gladiator, whose rows say "You"; null for a visitor. */
   viewerId: string | null;
   /** The server's time (the shared display clock), which decides whether each replay is kept; null until it is known (no replay offered). */
@@ -116,9 +123,11 @@ export function ResultsView({ model, viewerId, serverNowMs, onMore, onRetry, onW
         : status === 'loading' && rows.length === 0 ? <p className="muted" role="status">Loading recent results…</p>
           : rows.length === 0 ? <p className="muted" role="status">No results yet.</p>
             : <ul className={styles.list} aria-label="Recent results">{rows.map(row => {
-              const line = resultLine(row, serverNowMs);
+              const own = row.gladiatorId === viewerId && viewerId !== null && row.summary.resolvedKind === 'rest'
+                ? rested?.get(row.summary.activityId.toLowerCase()) ?? null : null;
+              const line = own ? { text: restedResultText(row.name, own, RULES_V2), replay: false } : resultLine(row, serverNowMs);
               return (
-                <li key={row.summary.activityId} className={styles.row}>
+                <li key={row.summary.activityId} className={styles.row} data-rested={own ? '' : undefined}>
                   <div className={styles.what}>
                     <p className={styles.line}>{line.text}{row.gladiatorId === viewerId && <span className={styles.you}>You</span>}</p>
                     <p className={styles.when}>{[resultKind(row), resultTime(row.summary.settledAtMs, clockMode, timeZone)].filter(Boolean).join(' · ')}</p>
@@ -136,8 +145,10 @@ export function ResultsView({ model, viewerId, serverNowMs, onMore, onRetry, onW
 }
 
 /** Everyone's results (today's list): the first page when it mounts, then More. */
-function EveryoneResults({ reads, viewerId, clock, onWatch }: {
+function EveryoneResults({ reads, viewerId, clock, onWatch, loadRested }: {
   reads: ResultsReader; viewerId: string | null; clock: DisplayClock; onWatch: WatchResult;
+  /** Patch 1.9 Task 29: the owner's own rests that replaced a planned activity, by id (owner only; absent for a visitor). */
+  loadRested?: GameGateway['rested'];
 }) {
   const [list, setList] = useState<ResultsList | null>(null);
   const [status, setStatus] = useState<ResultsModel['status']>('loading');
@@ -177,9 +188,32 @@ function EveryoneResults({ reads, viewerId, clock, onWatch }: {
   const rows = list?.rows ?? NO_ROWS;
   const expiries = useMemo(() => rows.map(row => row.summary.replayExpiry), [rows]);
   const serverNowMs = useServerTime(clock, expiries);
+  const rested = useOwnRests(rows, viewerId, loadRested);
   const model: ResultsModel = { rows, nextCursor: list?.nextCursor ?? null, status };
   return <ResultsView model={model} viewerId={viewerId} serverNowMs={serverNowMs} onMore={() => void more()} onRetry={() => setAttempt(n => n + 1)}
-    onWatch={onWatch} loadingMore={loadingMore} moreFailed={moreFailed} />;
+    onWatch={onWatch} loadingMore={loadingMore} moreFailed={moreFailed} rested={rested} />;
+}
+
+const NO_RESTS: ReadonlyMap<string, RestedActivity> = new Map();
+/**
+ * Patch 1.9 Task 29: the viewer's own Rest rows of the list, asked once each (at most 50 at a time) through `load`, as a map by activity id of
+ * those that replaced a planned activity. A failed read leaves those rows as they were ("finished resting"), and asks no more.
+ */
+function useOwnRests(rows: readonly ResultRow[], viewerId: string | null, load: GameGateway['rested'] | undefined): ReadonlyMap<string, RestedActivity> {
+  const [found, setFound] = useState<ReadonlyMap<string, RestedActivity>>(NO_RESTS);
+  const asked = useRef(new Set<string>());
+  useEffect(() => {
+    if (!load || !viewerId) return;
+    const ids = rows.filter(row => row.gladiatorId === viewerId && row.summary.resolvedKind === 'rest').map(row => row.summary.activityId.toLowerCase())
+      .filter(id => !asked.current.has(id)).slice(0, 50);
+    if (ids.length === 0) return;
+    for (const id of ids) asked.current.add(id);
+    load(ids).then(rests => {
+      if (rests.length === 0) return;
+      setFound(previous => new Map([...previous, ...rests.map(rest => [rest.activityId.toLowerCase(), rest] as const)]));
+    }, () => undefined);
+  }, [rows, viewerId, load]);
+  return found;
 }
 
 const TABS: readonly { id: ResultsTab; label: string }[] = [{ id: 'mine', label: 'My bouts' }, { id: 'everyone', label: 'Everyone' }];
@@ -237,9 +271,10 @@ export function ResultsTabs({ view, onView, unwatched, children, rewards = false
 }
 
 /** A player's Results: the tabs, My bouts (with the chip) or Everyone, and the count of bouts not watched. */
-function PlayerResults({ reads, viewerId, clock, onWatch, bouts, view, onView, filter, onFilter, onWatchBout, loadRewards }: {
+function PlayerResults({ reads, viewerId, clock, onWatch, bouts, view, onView, filter, onFilter, onWatchBout, loadRewards, loadRested }: {
   reads: ResultsReader; viewerId: string | null; clock: DisplayClock; onWatch: WatchResult;
   loadRewards?: GameGateway['notifications'];
+  loadRested?: GameGateway['rested'];
   bouts: BoutsStore; view: ResultsTab; onView(view: ResultsTab): void; filter: BoutFilter; onFilter(filter: BoutFilter): void;
   onWatchBout(bout: MyBout, filter: BoutFilter): void;
 }) {
@@ -254,15 +289,17 @@ function PlayerResults({ reads, viewerId, clock, onWatch, bouts, view, onView, f
       ? <MyBouts store={bouts} filter={filter} onFilter={onFilter} nowMs={nowMs} onOpen={bout => onWatchBout(bout, filter)} />
       : view === 'rewards' && loadRewards
         ? <DungeonRewards key={viewerId} load={loadRewards} clock={clock} onWatch={id => onWatch(id, 'dungeon', 'rewards')} />
-        : <EveryoneResults reads={reads} viewerId={viewerId} clock={clock} onWatch={onWatch} />}
+        : <EveryoneResults reads={reads} viewerId={viewerId} clock={clock} onWatch={onWatch} loadRested={loadRested} />}
   </ResultsTabs>;
 }
 
 const ignore = () => {};
 
 export function ResultsPanel({ reads, viewerId, clock, onWatch, bouts = null, view = 'mine', onView = ignore, filter = 'all', onFilter = ignore,
-  onWatchBout = ignore, loadRewards }: {
+  onWatchBout = ignore, loadRewards, loadRested }: {
   reads: ResultsReader;
+  /** Patch 1.9 Task 29: the owner's own rests that replaced a planned activity (owner only). */
+  loadRested?: GameGateway['rested'];
   viewerId: string | null;
   /** The shared display clock: whether each replay is kept is decided by the server's time. */
   clock: DisplayClock;
@@ -283,5 +320,5 @@ export function ResultsPanel({ reads, viewerId, clock, onWatch, bouts = null, vi
   const ownerRead = viewerId ? loadRewards : undefined;
   return <PlayerResults reads={reads} viewerId={viewerId} clock={clock} onWatch={onWatch} bouts={bouts}
     view={view === 'rewards' && !ownerRead ? 'everyone' : view} onView={onView}
-    filter={filter} onFilter={onFilter} onWatchBout={onWatchBout} loadRewards={ownerRead} />;
+    filter={filter} onFilter={onFilter} onWatchBout={onWatchBout} loadRewards={ownerRead} loadRested={viewerId ? loadRested : undefined} />;
 }

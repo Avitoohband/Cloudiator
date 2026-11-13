@@ -194,6 +194,12 @@
       "patch": "1.9"
     },
     {
+      "id": "stamina-notices",
+      "title": "Stamina warnings",
+      "body": "The Schedule will warn when your gladiator will not have the stamina for a planned activity, or when a third Training in a game day becomes a Rest, and show the stamina left after each part. A notice in camp warns before the next part. If your gladiator rests instead of its plan, the Schedule, your notifications and your own results will say so and why.",
+      "patch": "1.9"
+    },
+    {
       "id": "more-content",
       "title": "Higher levels and more content",
       "body": "New expeditions at levels 15, 20, 25, and 30, dungeons at levels 17, 22, and 27, drop-only gear for levels 15 to 30 with more new weapons and armor, and much more.",

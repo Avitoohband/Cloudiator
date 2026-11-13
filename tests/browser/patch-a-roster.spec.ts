@@ -3,7 +3,7 @@
 // in the filter. Zero matches keep the "No gladiator matches" line and no count.
 import { expect, test } from './fixtures';
 import { contrastIssues, noHorizontalScroll } from './a11y-helpers';
-import { openMenu, touchLayout } from './shell-helpers';
+import { openMenu, touchLayout, pageTo } from './shell-helpers';
 
 const production = process.env.PLAYWRIGHT_STATIC === 'true';
 
@@ -81,12 +81,15 @@ test.describe('Patch A: the players count', () => {
     await page.waitForFunction(() => window.__cloudiatorCamp?.state()?.ready === true, null, { timeout: 45_000 });
     const roster = await openMenu(page, 'Gladiators');
     const rowOf = (name: string) => roster.getByRole('listitem').filter({ has: page.getByRole('button', { name: `Profile: ${name}`, exact: true }) });
-    await expect(rowOf('Atticus')).toContainText('Atticus Pathfinder');
+    await pageTo(roster, rowOf('Aster').filter({ hasText: '(you)' }));
     await expect(rowOf('Aster').filter({ hasText: '(you)' })).toContainText('Aster (you) Founder');
+    await pageTo(roster, rowOf('Atticus'));
+    await expect(rowOf('Atticus')).toContainText('Atticus Pathfinder');
     // The title is its own italic element, and it is the only title in Ilaria's row.
     const title = rowOf('Atticus').locator('em');
     await expect(title).toHaveText('Pathfinder');
     expect(await title.evaluate(el => getComputedStyle(el).fontStyle)).toBe('italic');
+    await pageTo(roster, rowOf('Ilaria'));
     await expect(rowOf('Ilaria').locator('em')).toHaveCount(0);
     await expect(rowOf('Ilaria')).not.toContainText(/Pathfinder|Founder|Tiro/);
     // The list shows the title's name only; the card's "Champion · Season 1 Silver" is the card's own words.
@@ -102,6 +105,7 @@ test.describe('Patch A: the players count', () => {
     await page.setViewportSize({ width: 360, height: 740 });
     const phone = await openMenu(page, 'Gladiators');
     const lionRow = phone.getByRole('listitem').filter({ has: page.getByRole('button', { name: 'Profile: Octavia', exact: true }) }).first();
+    await pageTo(phone, lionRow);
     await lionRow.scrollIntoViewIfNeeded();
     const lion = lionRow.locator('em');
     await expect(lion).toHaveText('Lion of the Arena');

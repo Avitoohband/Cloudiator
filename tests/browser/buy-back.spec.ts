@@ -113,14 +113,16 @@ type Prop = { frame: string; x: number; y: number };
 const stallProps = (JSON.parse(readFileSync('public/assets/camp/map.json', 'utf8')) as { props: Prop[] }).props;
 /**
  * Clicks (or taps) a merchant's stall on its awning while the Inventory and shops menu stays open: the camera puts the awning on a point of
- * the camp the menu does not cover (right of the panel on a desktop, above the sheet on a phone).
+ * the camp the menu does not cover (right of the panel on a desktop, above the tall sheet on a phone).
  */
 async function clickStallBeside(page: Page, frame: 'stall-weapons' | 'stall-armor') {
   await page.waitForFunction(() => window.__cloudiatorCamp?.state()?.ready === true, null, { timeout: 45_000 });
   const prop = stallProps.find(p => p.frame === frame)!;
   const box = (await page.locator('canvas').boundingBox())!;
   const target = (await page.evaluate(() => matchMedia('(hover: none), (max-width: 480px)').matches))
-    ? { x: box.x + box.width / 2, y: box.y + 150 } : { x: box.x + box.width - 260, y: box.y + box.height / 2 };
+    // Patch 1.9 Task 30: the Inventory and shops sheet opens tall (top 96 px from the window's top), so on a phone the open camp is the
+    // strip above it, beside the chip row's left end.
+    ? { x: box.x + 24, y: box.y + 84 } : { x: box.x + box.width - 260, y: box.y + box.height / 2 };
   const awning = (() => { const a = worldToScreen(prop.x, prop.y); return { x: a.x + 14, y: a.y - 23 }; })();
   const zoom = 2;
   // The camera centre (world px) that puts the awning on `target`, as a tile for centerOn.

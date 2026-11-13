@@ -10,7 +10,7 @@ import { contrastIssues, focusDrops, watchFocus } from './a11y-helpers';
 import { SLOT_MS, SUPABASE_URL, isPresence, routeLiveReads, seedSession, testUser } from './live-routes';
 import { reviewShot360 } from './review-shots';
 import { expectTimeOnOneLine, slotTime as slotTimeAt } from './slot-time';
-import { expectOwnerShown, joinButton, openMenu } from './shell-helpers';
+import { expectOwnerShown, joinButton, openMenu, pageTo } from './shell-helpers';
 
 const production = process.env.PLAYWRIGHT_STATIC === 'true';
 const HOUR = 3_600_000;
@@ -51,6 +51,7 @@ test.describe('a gladiator resting at home in the fixture preview', () => {
 
     const roster = await settled(await openMenu(page, 'Gladiators'));
     const row = rosterRow(page, roster, 'Otho');
+    await pageTo(roster, row);
     await expect(row).toContainText(OTHO);
     await expect(row).not.toContainText('Not in the camp right now.');
     for (const name of ['Find Otho', 'Follow Otho']) {
@@ -122,9 +123,12 @@ test.describe('a gladiator resting at home in the fixture preview', () => {
     const roster = await settled(await openMenu(page, 'Gladiators'));
     // (The demo crowd has another Aster: the owner's row is the one marked "(you)".)
     const mineRow = rosterRow(page, roster, 'Aster').filter({ hasText: '(you)' });
+    await pageTo(roster, mineRow);
     await expect(mineRow).toContainText(line);
     await expect(mineRow).not.toContainText(ASTER);
+    await pageTo(roster, rosterRow(page, roster, 'Otho'));
     await expect(rosterRow(page, roster, 'Otho')).toContainText(OTHO);
+    await pageTo(roster, mineRow);
     for (const name of ['Find my gladiator', 'Follow my gladiator']) {
       const button = roster.getByRole('button', { name, exact: true });
       await expect(button).toBeDisabled();

@@ -5,7 +5,7 @@ import type { OwnerState, PublicActor, WorldSnapshot } from '../../supabase/func
 import { ownerFixture, worldFixture } from '../fixtures/domain';
 import { noHorizontalScroll } from './a11y-helpers';
 import { emptyWorld, routeLiveReads, seedSession } from './live-routes';
-import { creationDialog, expectOwnerShown, openMenu, quietArrivals, touchLayout } from './shell-helpers';
+import { creationDialog, expectOwnerShown, openMenu, quietArrivals, touchLayout, pageTo } from './shell-helpers';
 
 // Patch 1.9 Task 23c (Avi, 2026-11-12: "add an option to compare stats with my gladiator and other gladiators in the camp"; the approved mockup
 // `.superpowers/design/2026-11-12-compare-stats/`): "⇄ Compare with mine" in another gladiator's card, after Follow, for a player with a gladiator.
@@ -30,6 +30,7 @@ async function openCamp(page: Page, url = '/game/?mode=fixture') {
 async function openCard(page: Page, name: string): Promise<Locator> {
   const roster = await openMenu(page, 'Gladiators');
   const row = roster.getByRole('button', { name: `Profile: ${name}`, exact: true }).first();
+  await pageTo(roster, row);
   await row.scrollIntoViewIfNeeded();
   await row.click();
   await expect(profileCard(page, name)).toBeVisible();

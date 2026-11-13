@@ -101,7 +101,8 @@
   font: 600 12px system-ui, sans-serif;
   color: var(--ink);
   background: #262433;
-  border: 1px solid var(--glass-line, #ffffff21);
+  /* A form field's edge: at least 3:1 (WCAG 1.4.11, release.spec.ts). */
+  border: 1px solid var(--field-line, #7a86a0);
   border-radius: 6px;
   cursor: pointer;
 }

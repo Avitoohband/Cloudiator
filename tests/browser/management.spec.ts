@@ -7,7 +7,7 @@ import type { OwnerState, PublicActor, ResultRow } from '../../supabase/function
 import { ARENA_GLADIATORS } from '../fixtures/arena-ids';
 import { ownerFixture } from '../fixtures/domain';
 import { SLOT_MS, SUPABASE_URL, emptyWorld, isPresence, routeLiveReads, seedSession } from './live-routes';
-import { closeMenu, cornerChip, everyoneResults, expectOwnerShown, menuDialog, openMenu, quietArrivals, railMenus, touchLayout } from './shell-helpers';
+import { closeMenu, cornerChip, everyoneResults, expectOwnerShown, menuDialog, openMenu, quietArrivals, railMenus, touchLayout, pageTo } from './shell-helpers';
 
 // Task 13.7: the Results list, the profile card a click on a gladiator opens (and its keyboard paths: the Gladiators
 // list and the standings), the merchants' stalls as shortcuts into Inventory and shops, and the owner's pending build through a
@@ -118,6 +118,7 @@ test.describe('profile cards and merchants in the fixture preview', () => {
     // The keyboard path: a row of the Gladiators list opens the same card, which takes the focus; Escape gives it back.
     const gladiators = await openMenu(page, 'Gladiators');
     const row = gladiators.getByRole('button', { name: 'Profile: Bellator', exact: true });
+    await pageTo(gladiators, row);
     await row.focus();
     await page.keyboard.press('Enter');
     const bellator = profileCard(page, 'Bellator');
@@ -168,6 +169,7 @@ test.describe('profile cards and merchants in the fixture preview', () => {
     await expect(own).toBeHidden();
     // Another gladiator's card has no shortcuts; an Arena entrant's offers its bout.
     const gladiators = await openMenu(page, 'Gladiators');
+    await pageTo(gladiators, gladiators.getByRole('button', { name: 'Profile: Bellator', exact: true }));
     await gladiators.getByRole('button', { name: 'Profile: Bellator', exact: true }).click();
     const other = profileCard(page, 'Bellator');
     await expect(other).toBeVisible();

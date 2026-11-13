@@ -1,7 +1,7 @@
 import { expect, test, type Page, type TestInfo } from './fixtures';
 import { contrastIssues, expectNamedControls, noHorizontalScroll } from './a11y-helpers';
 import { reviewShot } from './review-shots';
-import { openMenu, quietArrivals, touchLayout } from './shell-helpers';
+import { openMenu, quietArrivals, touchLayout, pageTo } from './shell-helpers';
 
 // Task 11c (Patch A spec, "A richer profile card"; Avi approved the mockup, 2026-10-29): the card a gladiator's name opens, filled in
 // sections: the look, the class chips, the attributes, the stats, the gear and the record. The fixture preview's profiles carry sample
@@ -21,6 +21,7 @@ async function openCamp(page: Page) {
 async function openFromList(page: Page, name: string) {
   const roster = await openMenu(page, 'Gladiators');
   const row = roster.getByRole('button', { name: `Profile: ${name}`, exact: true }).first();
+  await pageTo(roster, row);
   await row.scrollIntoViewIfNeeded();
   await row.click();
   await expect(card(page, name)).toBeVisible();
@@ -135,6 +136,7 @@ test.describe('the richer profile card', () => {
     await openCamp(page);
     const roster = await openMenu(page, 'Gladiators');
     const own = roster.getByRole('button', { name: 'Profile: Aster', exact: true }).filter({ hasText: '(you)' });
+    await pageTo(roster, own.or(roster.getByRole('button', { name: 'Profile: Aster', exact: true })).first());
     await (own.or(roster.getByRole('button', { name: 'Profile: Aster', exact: true }))).first().click();
     const aster = card(page, 'Aster');
     await expect(aster).toContainText('YOUR GLADIATOR');

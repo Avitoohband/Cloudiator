@@ -14,7 +14,7 @@ import { REPLAY_FIXTURES } from '../fixtures/replay-ids';
 import { a11yShot, contrastIssues, expectNamedControls, focusDrops, focusedElement, noHorizontalScroll, watchFocus } from './a11y-helpers';
 import { SUPABASE_URL, emptyWorld, isPresence, routeLiveReads, seedSession, testUser } from './live-routes';
 import { reviewShot, reviewShot360 } from './review-shots';
-import { chipToggle, cornerChip, creationDialog, everyoneResults, expectOwnerShown, joinButton, menuDialog, openMenu, quietArrivals, railMenus, revealRail, touchLayout } from './shell-helpers';
+import { chipToggle, cornerChip, creationDialog, everyoneResults, expectOwnerShown, joinButton, menuDialog, openMenu, quietArrivals, railMenus, revealRail, touchLayout, pageTo } from './shell-helpers';
 
 // Task 23.5: the release browser spec. The game is usable by keyboard and screen reader (every control named, the focus
 // never left on <body>, validation messages linked to their fields), readable (WCAG contrast), calm with reduced motion,
@@ -732,6 +732,7 @@ test.describe('release accessibility in the fixture preview', () => {
     // A profile card.
     const roster = await openMenu(page, 'Gladiators');
     // An Arena entrant with a public profile (the crowd's gladiators have none): the card in its sections (Task 11c).
+    await pageTo(roster, roster.getByRole('button', { name: 'Profile: Lucilla', exact: true }).first());
     await roster.getByRole('button', { name: 'Profile: Lucilla', exact: true }).first().click();
     const card = page.getByRole('dialog', { name: 'Profile: Lucilla' });
     await expect(card.getByRole('heading', { name: 'Lucilla' })).toBeVisible();

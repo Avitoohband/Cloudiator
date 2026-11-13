@@ -9,7 +9,7 @@ import { ownBuild } from '../../src/features/character/profile-card';
 import { cardFighter, comparisonRows, dummyFighter, presetSetup } from '../../src/features/practice/practice';
 import { noHorizontalScroll } from './a11y-helpers';
 import { SLOT_MS, SUPABASE_URL, emptyWorld, isPresence, routeLiveReads, seedSession } from './live-routes';
-import { creationDialog, expectOwnerShown, menuDialog, openMenu, quietArrivals, touchLayout } from './shell-helpers';
+import { creationDialog, expectOwnerShown, menuDialog, openMenu, quietArrivals, touchLayout, pageTo } from './shell-helpers';
 
 // Patch 1.9 Task 18 (additions spec section 3, the approved practice mockups): a gold ⚔ Practice fight button under Stats in My gladiator
 // opens the dummy dialog; ⚔ Fight runs a local fight under the Arena's rules and plays it in the replay viewer over the camp, one history
@@ -432,6 +432,7 @@ async function openCamp(page: Page, url = '/game/?mode=fixture') {
 async function openCard(page: Page, name: string): Promise<Locator> {
   const roster = await openMenu(page, 'Gladiators');
   const row = roster.getByRole('button', { name: `Profile: ${name}`, exact: true }).first();
+  await pageTo(roster, row);
   await row.scrollIntoViewIfNeeded();
   await row.click();
   await expect(profileCard(page, name)).toBeVisible();

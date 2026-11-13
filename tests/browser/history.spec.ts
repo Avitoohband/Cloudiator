@@ -1,7 +1,7 @@
 import { mkdirSync } from 'node:fs';
 import { expect, test, type Locator, type Page, type TestInfo } from './fixtures';
 import { contrastIssues, expectNamedControls, noHorizontalScroll } from './a11y-helpers';
-import { expectOwnerShown, openMenu, quietArrivals, touchLayout } from './shell-helpers';
+import { expectOwnerShown, openMenu, quietArrivals, touchLayout, pageTo } from './shell-helpers';
 import { routeLiveReads, seedSession } from './live-routes';
 import type { RevealedTimeline } from '../../supabase/functions/_shared/contracts/events';
 import type { PublicActor, WorldSnapshot } from '../../supabase/functions/_shared/contracts/reads';
@@ -31,6 +31,7 @@ async function openCamp(page: Page) {
 async function fromList(page: Page, name: string): Promise<Locator> {
   const roster = await openMenu(page, 'Gladiators');
   const row = roster.getByRole('button', { name: `Profile: ${name}`, exact: true }).first();
+  await pageTo(roster, row);
   await row.scrollIntoViewIfNeeded();
   await row.click();
   await expect(profileCard(page, name)).toBeVisible();
@@ -244,6 +245,7 @@ test.describe('A gladiator’s history on the card (fixture)', () => {
   test('your own card: My history, with your own rewards beside your rows', async ({ page }, info) => {
     await openCamp(page);
     const roster = await openMenu(page, 'Gladiators');
+    await pageTo(roster, roster.getByRole('button', { name: 'Profile: Aster', exact: true }).first());
     await roster.getByRole('button', { name: 'Profile: Aster', exact: true }).first().click();
     const card = profileCard(page, 'Aster');
     await expect(card).toContainText('YOUR GLADIATOR');
@@ -345,6 +347,7 @@ test.describe('A gladiator’s history from the live views', () => {
 
     await card.getByRole('button', { name: 'Close profile', exact: true }).click();
     const roster = await openMenu(page, 'Gladiators');
+    await pageTo(roster, roster.getByRole('button', { name: 'Profile: Aster', exact: true }).first());
     await roster.getByRole('button', { name: 'Profile: Aster', exact: true }).first().click();
     const mine = profileCard(page, 'Aster');
     await mine.getByRole('button', { name: 'History', exact: true }).click();

@@ -116,3 +116,22 @@ export async function quietArrivals(context: BrowserContext): Promise<void> {
     try { localStorage.setItem(key, JSON.stringify(ids)); } catch { /* No storage: nothing is remembered, and nothing to quiet. */ }
   }, { key: ARRIVALS_KEY, ids });
 }
+
+/**
+ * Patch 1.9 Task 30: the Gladiators list (and later every long list) shows one page at a time. Turns `menu`'s pages from the first
+ * until `target` is on the page shown (a row on another page is not in the page at all), and leaves it there. Nothing happens when
+ * it is already shown or the list has one page.
+ */
+export async function pageTo(menu: Locator, target: Locator): Promise<void> {
+  if (await target.count()) return;
+  const bar = menu.getByRole('navigation', { name: 'Pages' });
+  if (!(await bar.count())) return;
+  const first = bar.getByRole('button', { name: 'Go to page 1', exact: true });
+  if ((await first.getAttribute('aria-current')) !== 'page') await first.click();
+  const next = bar.getByRole('button', { name: 'Next page', exact: true });
+  while (!(await target.count()) && (await next.getAttribute('aria-disabled')) !== 'true') {
+    const label = await bar.locator('b').first().textContent();
+    await next.click();
+    await expect(bar.locator('b').first()).not.toHaveText(label ?? '');
+  }
+}

@@ -1,24 +1,27 @@
 import type { Actor } from './auth.ts';
 import { jsonResponse, preflightResponse, readCommandBody } from './http.ts';
-import { validFeedbackAnswer } from '../domain/feedback.ts';
+import { validFeedbackAnswer, validFeedbackSuggestion } from '../domain/feedback.ts';
 
 type Tab = 'wiki' | 'future';
 type RequestBody = { action: 'read'; tab: Tab } | { action: 'publish'; tab: Tab; expectedVersion: number } |
   { action: 'save'; tab: Tab; expectedVersion: number; document: Record<string, unknown> };
 /**
- * Patch 1.9 (M34): the owner's feedback actions, for the signed-in Game Info editors only (public.review_feedback checks the
- * allowlist); the MCP credential may never use them. `list` answers {ok, items, newCount}, `mark-read` {ok, id, status} and
- * `answer` (1 to 2,000 characters once trimmed) {ok, id, status: 'answered', messageId}.
+ * Patch 1.9 (M34, M36): the feedback actions. `list` answers {ok, items, newCount} and `mark-read` {ok, id, status}, for a signed-in
+ * Game Info editor (public.review_feedback checks the allowlist) and for the MCP credential (Claude). Only the editor sends:
+ * `answer` (1 to 2,000 characters once trimmed; `fromSuggestion: true` when it sends Claude's suggestion, as shown or edited)
+ * answers {ok, id, status: 'answered', messageId}. Only the MCP credential suggests: `suggest` (1 to 2,000 characters once trimmed)
+ * saves a suggested answer the editor may send later, and answers {ok, id, status, suggestedAtMs}; it reaches no player.
  */
 export type FeedbackRequest = { tab: 'feedback'; action: 'list'; filter: 'new' | 'answered' | 'all' } | { tab: 'feedback'; action: 'mark-read'; id: number }
-  | { tab: 'feedback'; action: 'answer'; id: number; text: string };
+  | { tab: 'feedback'; action: 'answer'; id: number; text: string; fromSuggestion?: true } | { tab: 'feedback'; action: 'suggest'; id: number; text: string };
 
 type Dependencies = {
   allowedOrigins: readonly string[];
   verifyOwner(request: Request): Promise<Actor>;
   verifyMcp(authorization: string): Promise<boolean>;
   edit(actorId: string | null, mcp: boolean, input: RequestBody): Promise<unknown>;
-  feedback(actorId: string, input: FeedbackRequest): Promise<unknown>;
+  /** The verified editor's account with mcp false, or no account with mcp true for the MCP credential. */
+  feedback(actorId: string | null, mcp: boolean, input: FeedbackRequest): Promise<unknown>;
 };
 
 const object = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -30,7 +33,11 @@ function parseFeedback(input: Record<string, unknown>): FeedbackRequest | null {
   const size = Object.keys(input).length;
   if (action === 'list' && size === 3 && (filter === 'new' || filter === 'answered' || filter === 'all')) return { tab: 'feedback', action, filter };
   if (action === 'mark-read' && size === 3 && whole(id, 1)) return { tab: 'feedback', action, id };
-  if (action === 'answer' && size === 4 && whole(id, 1) && validFeedbackAnswer(text)) return { tab: 'feedback', action, id, text };
+  if (action === 'answer' && whole(id, 1) && validFeedbackAnswer(text)) {
+    if (size === 4) return { tab: 'feedback', action, id, text };
+    if (size === 5 && input.fromSuggestion === true) return { tab: 'feedback', action, id, text, fromSuggestion: true };
+  }
+  if (action === 'suggest' && size === 4 && whole(id, 1) && validFeedbackSuggestion(text)) return { tab: 'feedback', action, id, text };
   return null;
 }
 
@@ -70,6 +77,10 @@ function feedbackAnswer(input: FeedbackRequest, result: unknown) {
   if (input.action === 'list') return Array.isArray(result.items) && whole(result.newCount) ? { ok: true, items: result.items, newCount: result.newCount } : null;
   if (!whole(result.id, 1)) return null;
   if (input.action === 'mark-read') return result.status === 'read' || result.status === 'answered' ? { ok: true, id: result.id, status: result.status } : null;
+  if (input.action === 'suggest') {
+    return (result.status === 'new' || result.status === 'read') && whole(result.suggestedAtMs)
+      ? { ok: true, id: result.id, status: result.status, suggestedAtMs: result.suggestedAtMs } : null;
+  }
   return result.status === 'answered' && whole(result.messageId, 1) ? { ok: true, id: result.id, status: 'answered', messageId: result.messageId } : null;
 }
 
@@ -88,8 +99,11 @@ export function createGameInfoHandler(deps: Dependencies) {
     if (!authorization) return fail('forbidden');
 
     const mcp = origin === null && await deps.verifyMcp(authorization);
-    // The MCP credential may read and save drafts only: never publish, never any feedback action.
-    if (mcp && (input.tab === 'feedback' || input.action === 'publish')) return fail('forbidden');
+    // Each caller keeps to its own actions. The MCP credential (Claude) reads and saves drafts, lists feedback, marks it read and
+    // suggests answers: it never publishes and never sends an answer (M36: only Avi sends, approving or editing a suggestion).
+    // The editor never suggests. SQL checks the same again.
+    if (mcp && (input.action === 'publish' || (input.tab === 'feedback' && input.action === 'answer'))) return fail('forbidden');
+    if (!mcp && input.tab === 'feedback' && input.action === 'suggest') return fail('forbidden');
     let actorId: string | null = null;
     if (!mcp) {
       try { actorId = (await deps.verifyOwner(request)).userId; } catch { return fail('forbidden'); }
@@ -97,7 +111,7 @@ export function createGameInfoHandler(deps: Dependencies) {
 
     try {
       if (input.tab === 'feedback') {
-        const result = await deps.feedback(actorId!, input);
+        const result = await deps.feedback(actorId, mcp, input);
         const answer = feedbackAnswer(input, result);
         if (answer) return jsonResponse(answer, 200, origin);
         if (object(result) && result.ok === false && typeof result.code === 'string' && Object.hasOwn(errorStatus, result.code)) {

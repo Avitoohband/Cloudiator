@@ -43,6 +43,6 @@ verify_jwt = false
 [functions.game-worker]
 verify_jwt = false
 
-# This handler verifies Google owner sessions or a scoped draft-only MCP credential.
+# This handler verifies Google owner sessions or a scoped MCP credential (drafts and feedback suggestions; it never publishes or sends).
 [functions.game-info]
 verify_jwt = false

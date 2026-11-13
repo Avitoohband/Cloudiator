@@ -85,7 +85,13 @@ export type OwnFeedback = { id: number; category: FeedbackCategory; text: string
  * `answeredAtMs` are null until it is answered.
  */
 export type OwnerFeedbackItem = { id: number; category: FeedbackCategory; text: string; details: FeedbackDetails | null; status: FeedbackStatus;
-  createdAtMs: number; gladiatorName: string | null; answer: string | null; answeredAtMs: number | null };
+  createdAtMs: number; gladiatorName: string | null; answer: string | null; answeredAtMs: number | null;
+  /** M36: who wrote the answer the player got (null until answered). */
+  answeredVia: FeedbackAnsweredVia | null;
+  /** M36: Claude's suggested answer (saved through the Game Info MCP) and its time, or null; never on an answered item. */
+  suggestion: string | null; suggestedAtMs: number | null };
+/** Patch 1.9 (M36): the editor's own words, or Claude's suggestion that the editor sent (as shown or edited). */
+export type FeedbackAnsweredVia = 'owner' | 'claude-approved';
 /** Patch 1.9: the editors' list, newest first, at most 100 items, and how many are new in all (the Feedback tab's badge). */
 export type OwnerFeedbackList = { items: OwnerFeedbackItem[]; newCount: number };
 /** Where an earned title came from: the release back-fill, a result, a season award, a shop, a market buy, an NPC sale, creation or the Game Master's hand (patch 1.7.1). */

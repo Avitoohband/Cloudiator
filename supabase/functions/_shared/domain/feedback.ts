@@ -42,3 +42,5 @@ export function validFeedbackDetails(value: unknown): value is FeedbackDetails {
 /** An owner's answer the server accepts: a storable string of 1 to 2,000 characters once trimmed. */
 export const validFeedbackAnswer = (value: unknown): value is string =>
   storable(value) && trimmedLength(value) >= FEEDBACK.answerMinimum && trimmedLength(value) <= FEEDBACK.answerMaximum;
+/** M36: a suggested answer Claude may save through the Game Info MCP, with the same limits as the answer it may become. */
+export const validFeedbackSuggestion = validFeedbackAnswer;

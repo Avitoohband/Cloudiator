@@ -159,7 +159,11 @@ const SERVICE_ROLE = [
   'column public.feedback.answer: UPDATE',
   'column public.feedback.answer_message_id: UPDATE',
   'column public.feedback.answered_at_ms: UPDATE',
+  // Patch 1.9 (M36): who wrote the sent answer ('owner' or 'claude-approved'), and the suggestion Claude saves through the MCP credential.
+  'column public.feedback.answered_via: UPDATE',
   'column public.feedback.status: UPDATE',
+  'column public.feedback.suggested_answer: UPDATE',
+  'column public.feedback.suggested_at_ms: UPDATE',
   'column public.game_messages.body: INSERT',
   'column public.game_messages.kind: INSERT',
   'column public.game_messages.preview: INSERT',
@@ -300,8 +304,9 @@ const SERVICE_ROLE = [
   'function public.read_message(uuid, bigint): EXECUTE',
   'function public.refresh_projections(): EXECUTE',
   'function public.renew_job(uuid, uuid): EXECUTE',
-  // Patch 1.9 (M34): the Game Info editors' feedback actions, behind the game-info Edge function (the allowlist is SQL's check).
-  'function public.review_feedback(uuid, jsonb): EXECUTE',
+  // Patch 1.9 (M34, M36): the feedback actions behind the game-info Edge function: an editor's (the allowlist is SQL's check) or the
+  // MCP credential's (list, mark read, suggest; never answer). M36 replaced M34's (uuid, jsonb) with the caller kind, as edit_game_info.
+  'function public.review_feedback(uuid, boolean, jsonb): EXECUTE',
   // Notifications (M25): marking the player's own results seen, backend only and without a receipt, like read_message.
   'function public.see_notifications(uuid, bigint): EXECUTE',
   'function public.sell_item(uuid, uuid, jsonb): EXECUTE',
@@ -653,6 +658,24 @@ describe('release access matrix', () => {
     expect(await sql`select t.tgname, t.tgenabled::text as enabled, pg_get_triggerdef(t.oid) as definition from pg_trigger t
       where t.tgrelid='public.game_messages'::regclass and not t.tgisinternal and t.tgname='guard_team_reply'`).toEqual([{ tgname: 'guard_team_reply',
       enabled: 'O', definition: 'CREATE TRIGGER guard_team_reply BEFORE INSERT ON public.game_messages FOR EACH ROW EXECUTE FUNCTION private.guard_team_reply()' }]);
+  });
+
+  it('keeps a suggested answer and who answered the backend\'s, with one feedback entry point (M36)', async () => {
+    const rows = await audit();
+    // No client role reads or writes the three new columns (the player's six readable columns are pinned above); the backend
+    // updates them (its table-wide SELECT covers reading them).
+    const M36_COLUMNS = ['answered_via', 'suggested_answer', 'suggested_at_ms'];
+    expect(lines(rows.filter(r => M36_COLUMNS.some(c => r.object === `public.feedback.${c}`)))).toEqual(M36_COLUMNS
+      .map(c => `column public.feedback.${c} service_role UPDATE`));
+    for (const role of ['anon', 'authenticated']) {
+      for (const column of M36_COLUMNS) {
+        expect((await sql`select has_column_privilege(${role}::name, 'public.feedback', ${column}::text, 'SELECT') as ok`)[0].ok, `${role} ${column}`).toBe(false);
+      }
+    }
+    // One review_feedback, the caller kind its second argument (as edit_game_info): the backend's alone, invoker, empty search path.
+    expect(await sql`select p.oid::regprocedure::text as fn, p.prosecdef as definer, p.proconfig as config, p.proacl::text as acl from pg_proc p
+      where p.proname='review_feedback'`).toEqual([{ fn: 'review_feedback(uuid,boolean,jsonb)', definer: false, config: ['search_path=""'],
+      acl: '{postgres=X/postgres,service_role=X/postgres}' }]);
   });
 
   it('defines no SECURITY DEFINER function and pins search_path on every function', async () => {

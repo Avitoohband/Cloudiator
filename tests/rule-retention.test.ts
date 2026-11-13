@@ -56,6 +56,8 @@ const REVIEWED_UPDATES = new Map<string, RegExp[]>([
     /^update public\.game_info_reads set document = document - 'videos' where tab = 'wiki'$/,
     /^update private\.game_info_drafts set document = document - 'videos' where tab = 'wiki'$/,
   ]],
+  // M36 (patch 1.9): every feedback item answered before M36 was answered by an editor (no in-progress state).
+  ['20261113064712_feedback_mcp.sql', [/^update public\.feedback set answered_via='owner' where status='answered' and answered_via is null$/]],
 ]);
 const name = (raw: string) => raw.replace(/"/g, '').toLowerCase();
 

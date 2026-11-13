@@ -57,12 +57,14 @@ async function reapply(source: string) {
 /**
  * SQL21's reviewed replay chain restores the later definitions it restates. SQL26 creates and seeds separate Game Info
  * objects and is not reapplicable. Keep that authored content intact while testing the historical economy backfill.
- * Patch 1.9: SQL28 (M34) restates SQL21's inventory_command, SQL22's titles_on_ledger and SQL24's owner_state, so it closes the
+ * Patch 1.9: SQL28 (M34) restates SQL21's inventory_command, SQL22's titles_on_ledger and SQL24's owner_state, so it joins the
  * chain (it is reapplicable: its tables and indexes are created if absent, its constraints and policies dropped and added).
+ * Re-committing SQL28 also brings back M34's review_feedback(uuid,jsonb) and revokes the backend's column grants on feedback, so
+ * SQL30 (M36) closes the chain: it drops that function again, restores M36's review_feedback and re-grants the new columns.
  */
 async function reapplyEconomy() {
   const folder = new URL('../../supabase/sql/', import.meta.url);
-  const later = ['22-titles.sql', '23-awards.sql', '24-dungeons.sql', '25-bot-label.sql', '28-feedback-buyback.sql'];
+  const later = ['22-titles.sql', '23-awards.sql', '24-dungeons.sql', '25-bot-label.sql', '28-feedback-buyback.sql', '30-feedback-mcp.sql'];
   for (const name of ['21-economy.sql', ...later]) await reapply(readFileSync(new URL(name, folder), 'utf8'));
 }
 

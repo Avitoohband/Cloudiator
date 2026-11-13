@@ -371,23 +371,32 @@ test('the fixture preview shows no feedback entry', async ({ page }) => {
 // ---- The owner's Feedback tab in Game Info (Avi only: the Game Info editors). ----
 
 type Owned = OwnerFeedbackItem & { who: string };
-async function owner(page: Page, editor: boolean) {
+/** M36: Claude's suggestions in the fixture (saved through the Game Info MCP; only the owner sends them). */
+const SUGGESTED = { 4: 'Thank you for the report. The Arena record is fixed in the next patch.', 2: 'Thank you. Heavy armor gets a look in the 2.0 balance work.' } as const;
+async function owner(page: Page, editor: boolean, options: { suggestions?: boolean } = {}) {
   const context = page.context();
   await quietArrivals(context);
   await seedSession(context);
   await routeLiveReads(context, { world: worldFixture, owner: ownerFixture });
   const now = Date.now();
   const detail = (screen: string, device: string, window: string, minutesAgo: number): FeedbackDetails => ({ patch: '1.9', screen, device, window, sentAtMs: now - minutesAgo * MIN });
+  const none = { answeredVia: null, suggestion: null, suggestedAtMs: null };
   const items: Owned[] = [
     { id: 4, category: 'bug', text: 'The Arena result says I lost but my record still shows a win. Screenshot is not possible on my phone.', details: detail('Arena', 'Chrome 131 on Android (phone)', '360 x 780', 5),
-      status: 'new', createdAtMs: now - 5 * MIN, gladiatorName: 'Cassia', answer: null, answeredAtMs: null, who: 'Cassia' },
+      status: 'new', createdAtMs: now - 5 * MIN, gladiatorName: 'Cassia', answer: null, answeredAtMs: null, ...none, who: 'Cassia' },
     { id: 3, category: 'idea', text: 'A way to rename the gladiator would be great. I picked the name in a hurry.', details: detail('My gladiator', 'Firefox 132 on Windows (desktop)', '1920 x 1080', 50),
-      status: 'new', createdAtMs: now - 50 * MIN, gladiatorName: 'Varro', answer: null, answeredAtMs: null, who: 'Varro' },
+      status: 'new', createdAtMs: now - 50 * MIN, gladiatorName: 'Varro', answer: null, answeredAtMs: null, ...none, who: 'Varro' },
     { id: 2, category: 'balance', text: 'Heavy armor is too heavy for the level 5 expedition.', details: null, status: 'read', createdAtMs: now - 200 * MIN, gladiatorName: null,
-      answer: null, answeredAtMs: null, who: '' },
+      answer: null, answeredAtMs: null, ...none, who: '' },
     { id: 1, category: 'other', text: 'Thanks for the game, my kids and I play it together.', details: null, status: 'answered', createdAtMs: now - 26 * 60 * MIN, gladiatorName: 'Aster',
-      answer: 'Thank you, this made our day. Enjoy!', answeredAtMs: now - 25 * 60 * MIN, who: 'Aster' },
+      answer: 'Thank you, this made our day. Enjoy!', answeredAtMs: now - 25 * 60 * MIN, ...none, answeredVia: 'owner', who: 'Aster' },
   ];
+  if (options.suggestions) {
+    for (const item of items) {
+      const suggestion = SUGGESTED[item.id as keyof typeof SUGGESTED];
+      if (suggestion) Object.assign(item, { suggestion, suggestedAtMs: now - MIN });
+    }
+  }
   const actions: Record<string, unknown>[] = [];
   const cors = { 'access-control-allow-origin': '*', 'access-control-allow-headers': 'authorization, apikey, content-type, x-client-info' };
   await context.route(`${SUPABASE_URL}/functions/v1/game-info`, async route => {
@@ -409,7 +418,10 @@ async function owner(page: Page, editor: boolean) {
       return answer(200, { ok: true, id: item.id, status: item.status });
     }
     if (item.status === 'answered') return answer(409, { ok: false, code: 'conflict' });
+    // M36: an answer from Claude's suggestion (as is or edited) is recorded as an approved suggestion, and the suggestion is cleared.
+    if (body.fromSuggestion === true && item.suggestion === null) return answer(409, { ok: false, code: 'conflict' });
     item.status = 'answered'; item.answer = String(body.text).trim(); item.answeredAtMs = Date.now();
+    item.answeredVia = body.fromSuggestion === true ? 'claude-approved' : 'owner'; item.suggestion = null; item.suggestedAtMs = null;
     return answer(200, { ok: true, id: item.id, status: 'answered', messageId: 77 });
   });
   await page.goto('/game/');
@@ -480,4 +492,71 @@ test('the owner reads New, Answered and All, marks one read and answers one', as
   await expect(read.getByRole('button', { name: 'Answer', exact: true })).toBeVisible();
   await expect(read).toContainText('No gladiator');
   expect(actions.filter(a => a.action === 'list').map(a => a.filter)).toEqual(expect.arrayContaining(['new', 'answered', 'all']));
+});
+
+test('Claude’s suggestion: the owner approves it as is or edits it first, and the answer then says it was approved', async ({ page }, info) => {
+  const { panel, actions } = await owner(page, true, { suggestions: true });
+  const tab = panel.getByRole('tab', { name: /^Feedback/ });
+  await tab.click();
+  const items = panel.locator('[data-feedback-item]');
+  await expect(items).toHaveCount(2);
+  const bug = items.filter({ hasText: 'The Arena result says I lost' }), idea = items.filter({ hasText: 'A way to rename the gladiator' });
+  // A suggestion shows under the player's text, with Approve and send and Edit; the owner may still write their own (Answer).
+  const suggestion = bug.locator('[data-feedback-suggestion]');
+  await expect(suggestion).toContainText(`Suggested by Claude${SUGGESTED[4]}`);
+  await expect(bug.getByRole('button')).toHaveText(['Approve and send', 'Edit', 'Answer', 'Mark read']);
+  // An item without a suggestion is as before.
+  await expect(idea.locator('[data-feedback-suggestion]')).toHaveCount(0);
+  await expect(idea.getByRole('button')).toHaveText(['Answer', 'Mark read']);
+  expect(await noHorizontalScroll(page)).toBe(true);
+  expect(await contrastIssues(panel)).toEqual([]);
+  await shot(page, info, 'owner-feedback-suggestion');
+
+  // Approve and send: the suggestion's text goes to that player as it is, marked as from the suggestion.
+  await bug.getByRole('button', { name: 'Approve and send', exact: true }).click();
+  await expect(items).toHaveCount(1);
+  await expect(tab).toHaveAccessibleName('Feedback, 1 new');
+  expect(actions).toContainEqual({ tab: 'feedback', action: 'answer', id: 4, text: SUGGESTED[4], fromSuggestion: true });
+
+  // All: the approved answer says so; an answer the owner wrote says only Answered.
+  const show = panel.getByRole('group', { name: 'Show' });
+  await show.getByRole('button', { name: 'All', exact: true }).click();
+  await expect(items).toHaveCount(4);
+  const approved = items.filter({ hasText: 'The Arena result says I lost' });
+  await expect(approved).toContainText(/Bug\s*Answered \(approved suggestion\)\s*gladiator Cassia/);
+  await expect(approved.locator('[data-feedback-answer]')).toContainText(`Your answer${SUGGESTED[4]}`);
+  await expect(approved.locator('[data-feedback-suggestion]')).toHaveCount(0);
+  const thanked = items.filter({ hasText: 'Thanks for the game' });
+  await expect(thanked).toContainText(/Other\s*Answered\s*gladiator Aster/);
+  await expect(thanked).not.toContainText('approved suggestion');
+
+  // Answer on an item with a suggestion opens an empty box (the owner's own words); Cancel closes it.
+  const balance = items.filter({ hasText: 'Heavy armor is too heavy' });
+  await expect(balance.locator('[data-feedback-suggestion]')).toContainText(SUGGESTED[2]);
+  await balance.getByRole('button', { name: 'Answer', exact: true }).click();
+  const box = balance.getByRole('textbox', { name: 'Answer to this player (they get a message)' });
+  await expect(box).toHaveValue('');
+  await expect(balance).toContainText('0 / 1,000');
+  await balance.getByRole('button', { name: 'Cancel', exact: true }).click();
+  // Edit fills the box with the suggestion (focused, up to the server's 2,000); the edited text is sent as an approved suggestion.
+  await balance.getByRole('button', { name: 'Edit', exact: true }).click();
+  await expect(box).toBeFocused();
+  await expect(box).toHaveValue(SUGGESTED[2]);
+  await expect(balance).toContainText('Sends your edit of Claude’s suggestion and marks it Answered.');
+  await expect(balance).toContainText(`${SUGGESTED[2].length} / 2,000`);
+  const edited = 'Thank you. Heavy armor gets a look in the 2.0 balance work, and the expedition limits with it.';
+  await box.fill(edited);
+  expect(await contrastIssues(panel)).toEqual([]);
+  await shot(page, info, 'owner-feedback-suggestion-edit');
+  await balance.getByRole('button', { name: 'Send answer', exact: true }).click();
+  await expect(balance).toContainText(/Balance\s*Answered \(approved suggestion\)/);
+  await expect(balance.locator('[data-feedback-answer]')).toContainText(`Your answer${edited}`);
+  expect(actions).toContainEqual({ tab: 'feedback', action: 'answer', id: 2, text: edited, fromSuggestion: true });
+  // Nothing else was sent.
+  expect(actions.filter(a => a.action === 'answer')).toHaveLength(2);
+  // The longer status pill wraps with its row at 360 px: no horizontal page scroll.
+  await page.setViewportSize({ width: 360, height: 780 });
+  await expect(approved).toContainText('Answered (approved suggestion)');
+  expect(await noHorizontalScroll(page)).toBe(true);
+  await shot(page, info, 'owner-feedback-approved-360');
 });

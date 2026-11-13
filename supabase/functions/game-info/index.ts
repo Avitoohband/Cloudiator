@@ -24,9 +24,10 @@ Deno.serve(createGameInfoHandler({
     if (error) throw Error('Game Info store unavailable');
     return data;
   },
-  // Patch 1.9 (M34): the editors' feedback tab, for a verified Google account only (the handler never passes the MCP credential).
-  async feedback(actorId, input) {
-    const { data, error } = await database.rpc('review_feedback', { actor_id: actorId, input });
+  // Patch 1.9 (M34, M36): the feedback actions, for a verified editor (mcp false) or the MCP credential (no account, mcp true:
+  // list, mark read and suggest only; the handler and SQL refuse its answers).
+  async feedback(actorId, mcp, input) {
+    const { data, error } = await database.rpc('review_feedback', { actor_id: actorId, mcp, input });
     if (error) throw Error('Feedback store unavailable');
     return data;
   },

@@ -254,6 +254,10 @@
 .panel .feedbackDetails { padding: 7px 10px; border-radius: 8px; background: #1d1a2b; color: #b9b9d0; font-size: 12.5px; line-height: 1.55; }
 .feedbackDetails b { color: #e6e2f2; font-weight: 600; }
 .feedbackItem [data-feedback-answer] { margin-top: 8px; }
+/* M36: Claude's suggested answer, waiting for the owner (blue, dashed: not sent yet), beside the green box of a sent answer. */
+.suggestion { margin-top: 8px; padding: 9px 11px; border: 1px dashed #4d6fa8; border-radius: 8px; background: #151d33; color: #dbe6fa; font-size: 13.5px; }
+.suggestion b { display: block; margin-bottom: 3px; color: #b7cef2; font-size: 11px; letter-spacing: .08em; text-transform: uppercase; }
+.panel .suggestion p { white-space: pre-wrap; user-select: text; }
 .feedbackAnswer { margin-top: 9px; }
 .feedbackAnswer label { display: block; margin-bottom: 5px; font-weight: 600; }
 .feedbackAnswer textarea {

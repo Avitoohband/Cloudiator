@@ -104,7 +104,7 @@ import { StaminaNotice } from './StaminaNotice';
 import { dismissSlot, readDismissedSlots, type NoticeKind } from './stamina-dismissals';
 import { modalOpen, useModalOpen } from './modal';
 import { PerfOverlay, perfPhaseOf } from './PerfOverlay';
-import { menusFor, originMenu, type MenuId } from './menus';
+import { PAGED_MENUS, menusFor, originMenu, type MenuId } from './menus';
 import { COMPACT_QUERY, railReducer, railVisible, type RailEvent, type RailState } from './rail-reveal';
 import { SceneOverlay } from './SceneOverlay';
 import {
@@ -735,7 +735,7 @@ export function CampShell({ fixture, previewAs, previewResting = false, previewB
       </div>
       {away.state && scene === null && !practising && <AwayButton state={away.state} onOpen={openFromAway} onClose={away.close} />}
       {menus.map(menu => (menu.id === open || menu.id === 'arena') && (
-        <MenuSurface key={menu.id} menu={menu} open={menu.id === open} covered={covering && menu.id === open} onClose={() => close(menu.id)}>{content(menu.id)}</MenuSurface>
+        <MenuSurface key={menu.id} menu={menu} open={menu.id === open} covered={covering && menu.id === open} paged={PAGED_MENUS.has(menu.id)} onClose={() => close(menu.id)}>{content(menu.id)}</MenuSurface>
       ))}
       {card && <ProfileLayer key={card.n} target={card} world={world} reads={reads} ownerId={ownerId} ownPlace={ownPlace} roster={roster} sceneStatus={game.sceneStatus}
         nowMs={nowMs}

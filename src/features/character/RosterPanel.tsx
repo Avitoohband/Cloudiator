@@ -11,7 +11,14 @@
 // Find and Follow my gladiator are off. Names render as React text.
 // Patch A item 2: while anyone is new (in orientation, not resting), "NEW IN CAMP" lists the newcomers first, each name followed by
 // a NEW pill, then "EVERYONE" lists the rest; a newcomer is listed once, and the filter applies to both parts.
-import { useId, useState } from 'react';
+// Patch 1.9 Task 30 (menus with Back and Next): the list shows 7 rows a page (or the Show choice), the filter and the count stay on
+// top, and the bar sits at the menu's bottom edge. A page that spans two parts shows each part's title over its rows. Typing in the
+// filter goes back to page 1 and keeps the focus in the field. "Find my gladiator" turns to the owner's row (`goToIndex`) before
+// handing the view back to the camp, as today.
+import { useId, useState, type RefObject } from 'react';
+import { Pager } from '../paging/Pager';
+import { PanelFooter } from '../paging/PanelFooter';
+import { usePagedList } from '../paging/usePagedList';
 import type { PublicActor, WorldSnapshot } from '@contracts/reads';
 import type { SceneBridge } from '../../game/bridge';
 import { useClockMode } from '../../lib/clock-setting';
@@ -72,6 +79,19 @@ export function RosterPanel({ world, ownerId, ownPlace = null, roster, sceneStat
   const fresh = newcomers(humans);
   const freshIds = new Set(fresh.map(a => a.gladiatorId));
   const rest = humans.filter(a => !freshIds.has(a.gladiatorId));
+  // One paged sequence: the newcomers, everyone else, then the bots; each row keeps its part.
+  type Part = 'new' | 'rest' | 'bots';
+  const ordered: { actor: PublicActor; part: Part }[] = [
+    ...fresh.map(actor => ({ actor, part: 'new' as const })), ...rest.map(actor => ({ actor, part: 'rest' as const })),
+    ...bots.map(actor => ({ actor, part: 'bots' as const })),
+  ];
+  const paged = usePagedList(ordered, { list: 'gladiators', resetKey: query });
+  const onPage = (part: Part) => paged.rows.filter(entry => entry.part === part).map(entry => entry.actor);
+  const findMine = (gladiatorId: string) => {
+    const index = ordered.findIndex(entry => entry.actor.gladiatorId === gladiatorId);
+    if (index >= 0) paged.goToIndex(index);
+    find(gladiatorId);
+  };
   const row = (actor: PublicActor, isNew: boolean) => {
     // Neither drawn in the camp nor away (13.5 review): the row says why its buttons are off. A resting gladiator is
     // never drawn, whatever the roster last said; its row says where it is instead, once.
@@ -86,7 +106,7 @@ export function RosterPanel({ world, ownerId, ownPlace = null, roster, sceneStat
     const worn = titleName(actor.title);
     const describedBy = reason ? reasonId : absent ? `${absentId}-${actor.gladiatorId}` : undefined;
     return (
-      <li key={actor.gladiatorId} className={styles.row}>
+      <li key={actor.gladiatorId} className={styles.row} data-page-row="" tabIndex={-1}>
         <p className={styles.who}>
           <button type="button" className={styles.nameButton} aria-label={`Profile: ${actor.name}`} onClick={() => onProfile(actor.gladiatorId)}>{actor.name}</button>
           {actor.gladiatorId === ownerId ? ' (you)' : ''}
@@ -121,7 +141,7 @@ export function RosterPanel({ world, ownerId, ownPlace = null, roster, sceneStat
       {reason && <p id={reasonId} className={styles.reason}>{reason}</p>}
       {ownerId && <>
         <div className={styles.findMine} role="group" aria-label="Your gladiator">
-          <button type="button" disabled={mineDisabled} aria-describedby={mineDescribedBy} onClick={() => find(ownerId)}>Find my gladiator</button>
+          <button type="button" disabled={mineDisabled} aria-describedby={mineDescribedBy} onClick={() => findMine(ownerId)}>Find my gladiator</button>
           <button type="button" disabled={mineDisabled} aria-describedby={mineDescribedBy} aria-pressed={following === ownerId && !mineDisabled}
             onClick={() => follow(ownerId)}>Follow my gladiator</button>
         </div>
@@ -140,17 +160,20 @@ export function RosterPanel({ world, ownerId, ownPlace = null, roster, sceneStat
         </p>
       )}
       {actors.length === 0 ? <p className="muted">{world ? `No gladiator matches “${filter.trim()}”.` : 'The world is still loading.'}</p> : <>
-        {fresh.length > 0 && <>
-          <p className={`eyebrow ${styles.partTitle}`}>NEW IN CAMP</p>
-          <ul className={styles.list} aria-label="New in camp">{fresh.map(actor => row(actor, true))}</ul>
-        </>}
-        {fresh.length > 0 && rest.length > 0 && <p className={`eyebrow ${styles.partTitle}`}>EVERYONE</p>}
-        {rest.length > 0 && <ul className={styles.list} aria-label="Gladiators">{rest.map(actor => row(actor, false))}</ul>}
-        {bots.length > 0 && <>
-          <p className={`eyebrow ${styles.partTitle}`}>Ludus Nimbus · {bots.length} {bots.length === 1 ? 'bot' : 'bots'} · Unranked</p>
-          <p className="muted">Gladiators run by the game. Players get first pick of dungeon seats.</p>
-          <ul className={styles.list} aria-label="Ludus Nimbus">{bots.map(actor => row(actor, false))}</ul>
-        </>}
+        <div ref={paged.listRef as RefObject<HTMLDivElement | null>} data-page-list="">
+          {onPage('new').length > 0 && <>
+            <p className={`eyebrow ${styles.partTitle}`}>NEW IN CAMP</p>
+            <ul className={styles.list} aria-label="New in camp">{onPage('new').map(actor => row(actor, true))}</ul>
+          </>}
+          {fresh.length > 0 && onPage('rest').length > 0 && <p className={`eyebrow ${styles.partTitle}`}>EVERYONE</p>}
+          {onPage('rest').length > 0 && <ul className={styles.list} aria-label="Gladiators">{onPage('rest').map(actor => row(actor, false))}</ul>}
+          {onPage('bots').length > 0 && <>
+            <p className={`eyebrow ${styles.partTitle}`}>Ludus Nimbus · {bots.length} {bots.length === 1 ? 'bot' : 'bots'} · Unranked</p>
+            <p className="muted">Gladiators run by the game. Players get first pick of dungeon seats.</p>
+            <ul className={styles.list} aria-label="Ludus Nimbus">{onPage('bots').map(actor => row(actor, false))}</ul>
+          </>}
+        </div>
+        <PanelFooter><Pager list={paged} show /></PanelFooter>
       </>}
     </section>
   );

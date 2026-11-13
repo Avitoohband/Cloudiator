@@ -19,6 +19,12 @@ export const MENUS: readonly MenuDef[] = [
   { id: 'settings', icon: '⚙', label: 'Settings', visitor: true },
 ];
 
+/**
+ * The menus of pages (Patch 1.9 Task 30, menus with Back and Next): their phone sheet opens tall (Avi's choice 2). Schedule and
+ * Settings are forms and keep today's sheet.
+ */
+export const PAGED_MENUS: ReadonlySet<MenuId> = new Set<MenuId>(['gladiators', 'arena', 'tournaments', 'results', 'market', 'inventory', 'gladiator']);
+
 /** A player's menus: all nine. Every other viewer (a visitor, no gladiator yet, loading, unavailable): the seven public ones. */
 export function menusFor(viewer: Viewer): MenuDef[] {
   return MENUS.filter(menu => viewer === 'player' || menu.visitor);

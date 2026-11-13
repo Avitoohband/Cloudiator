@@ -34,6 +34,10 @@ Press the tick on a message to mark it read, or Mark all to clear every message.
 
 On desktop, open Settings (⚙) to pin the menu and choose whether it sits on the left, on the right, or along the bottom. Your choice is saved in this browser only, so another device can differ.
 
+## Menus (interface topic)
+
+Long menus show one page at a time instead of a long scroll. The bar at the bottom of the menu says which page you are on ("Page 2 of 8"); use ‹ Back and Next ›, or press PageDown and PageUp. Each circle under it is a page: click or tap one to jump there, and point at it (or tap it) to see which page it is. On a phone you can also press and hold a circle, then slide along the row to move through the pages. Show sets how many rows a page holds: Fit (what fits the menu), 10, 25 or 50; it is saved in this browser. Typing in a filter goes back to page 1. My gladiator and Inventory and shops open as named sections, moved through the same way (← and → work too).
+
 ## Names and titles (camp and interface topics)
 
 In Settings, under Names and titles, choose when names and titles show over the camp: Off, When zoomed in, or Always. When zoomed in shows gladiators' names from zoom 1.4 and NPC names and titles from zoom 2, and your selected gladiator's always. Always shows them at any zoom, even zoomed out. Where names overlap, the nearer one stays and the ones behind fade; point at a gladiator to bring its name back. Your choice is saved in this browser and works on phones too.

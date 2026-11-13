@@ -264,11 +264,21 @@
 }
 
 .body {
+  flex: 1 1 auto;
   min-height: 0;
   overflow-y: auto;
   overflow-x: hidden;
   overscroll-behavior: contain;
   padding: 12px 14px 16px;
+}
+
+/* Patch 1.9 Task 30: a paged list's bar, at the panel's own bottom edge outside the part that scrolls (empty for other menus). */
+.foot {
+  flex: none;
+}
+
+.foot:empty {
+  display: none;
 }
 
 /* Existing panels laid out for a wide page, kept to one column in a 380 px panel. */
@@ -1067,6 +1077,11 @@
 
   .body {
     touch-action: pan-y;
+  }
+
+  /* Patch 1.9 Task 30: a menu of pages opens tall (Avi's choice 2), clear of the chip row above it. */
+  .surface[data-paged] {
+    height: max(62%, calc(100% - 96px));
   }
 
   .chipButton,

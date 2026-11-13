@@ -66,8 +66,12 @@ keep an old release's images for its open tabs again, restore a `retained.mjs` l
   graphs, lights and routes.
 - `generators/effects.mjs`: combat effects and 16×16 icons.
 - `generators/closeups.mjs`: the side-on close-up battle backdrops (Task 14): the arena (sand floor, curved
-  podium wall with banners and braziers, crowd stands, a calm editor's box behind the fighters) and one per
-  expedition (woodland clearing, ruined outpost, mountain snowfield). Each is 320×128 art pixels, shown at 3×.
+  podium wall with banners and braziers, crowd stands, a calm editor's box behind the fighters), the tournament
+  arena (Task 28) and one per expedition (woodland clearing, ruined outpost, mountain snowfield). Each is 320×128
+  art pixels, shown at 3×. The tournament arena is variant C, "League Stands", which Avi chose on 2026-11-13 from the
+  art preview in `.superpowers/design/2026-11-13-tournament-scene/`: the arena's wall and floor line, stands split into
+  Bronze, Silver, Gold and Champion sections (each crowd, awning panel and tall banner in its league's colour), a striped
+  VIP box with the trophy, six gold braziers, and raked sand with a ring painted in the league colours and the league seal.
 - `provenance.json`: generated. It gives the hash, generator and license for every shipped file.
 
 ## Rules the tests enforce
@@ -108,6 +112,12 @@ keep an old release's images for its open tabs again, restore a `retained.mjs` l
   in `manifest.depthRule`. It is tested against every wide prop and, pixel by pixel, against the
   arena ring.
 
+- **Close-up backdrops.** Every backdrop is 320×128, fully opaque, anchored at the floor centre (160, `groundY`), and
+  differs from every other backdrop in more than half its pixels. Add a new theme at the end of `CLOSEUP_THEMES`, so every
+  shipped frame keeps its place and its pixels in the atlas (prove it: the other frames' pixels and every other output's
+  hash are unchanged). The tournament arena keeps the arena's wall arc and floor line (its floor starts on the arena's row
+  in every column), stays sand under the fighters' feet and shadows, and its stands read as four league colour blocks.
+
 ## Runtime notes for Tasks 12, 14 and 15
 
 - Draw one body with its clothes: `body` and `cloth`, or `body-female` and `cloth-female` for a female
@@ -127,6 +137,8 @@ keep an old release's images for its open tabs again, restore a `retained.mjs` l
 - Close-up replays (Task 14): draw a `manifest.closeups` backdrop, the fighters and the effects at the same
   integer `closeups.scale` (3), so every art pixel sits on one grid. Fighters stand on row `groundY` at
   `fighterX` (left faces se; right is mirrored to face sw). `src/game/battle-stage.ts` derives every pose,
-  effect and damage label from the revealed battle log.
+  effect and damage label from the revealed battle log. `backdropFor` picks the backdrop: an encounter uses its
+  creature's expedition, a tournament bout (a bracket's, or a tournament run's) `tournament`, and every other bout
+  (Arena, NPC, practice) `arena`.
 - Lighting, sky tint and torch glow come from the scene (Task 12). Animated props reference the
   `prop-<atlas>-torch` and `prop-<atlas>-campfire` animations.

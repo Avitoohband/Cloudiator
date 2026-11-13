@@ -31,7 +31,7 @@ manifest's projection, anchors and depth rule, including wide-prop slices.
 | `effects.png`, `icons.png` | Eight combat effects and 37 interface icons. |
 | `map-camp.png` | Living camp with sample gladiators at their stations, NPCs at stalls and gate. |
 | `map-woodland.png`, `map-outpost.png`, `map-mountain.png` | Expedition routes with three encounters each, showing the creature assigned to each encounter. |
-| `closeups.png` | Task 14 close-up battle view at the in-game 3× scale: the arena (a sword strike landing, hit burst on the defender), woodland (an evade from a wolf's lunge), outpost (a shield guard against a raider) and mountain (victory over a fallen troll, with circling stars). |
+| `closeups.png` | Task 14 close-up battle view at the in-game 3× scale: the arena (a sword strike landing, hit burst on the defender), the tournament arena (Task 28: a sword strike against a spearman's guard), woodland (an evade from a wolf's lunge), outpost (a shield guard against a raider) and mountain (victory over a fallen troll, with circling stars). |
 | `depth-probe-camp.png` | A gladiator on every walkable tile directly in front of and behind each wide prop, and on every walkable tile on either side of the arena ring. Front ones draw over the prop or wall, back ones under it. |
 
 The live gallery (`public/assets/gallery.html`) plays every loop at the real frame durations,
@@ -225,6 +225,32 @@ Avi approved the five looks on 2026-10-30, with the porter's arm redrawn; the re
 | Palette, borders, anchors | The existing whole-atlas tests cover the new frames: palette colours only, alpha 0 or 255, a clear 1 px border and the second row and column empty. |
 | Review sheet | `npcs.png` was regenerated; no other sheet changed. The camp map sheets draw only the station NPCs, so they are unchanged. |
 | Build | `node assets/source/build-assets.mjs --check` passes. The NPC image's content name changed and its previous version was removed. |
+
+## Tournament arena (Task 28, 2026-11-13)
+
+Avi asked on 2026-11-13: "for the tournaments, change the scene as well, the battle ground and the crowd". Tournament fights
+should look fancier and be easy to tell apart from Arena bouts. He chose variant C, "League Stands", from the art preview in
+`.superpowers/design/2026-11-13-tournament-scene/` (variant-c.png, variant-c-backdrop.png, variant-c-fight.png, compare-sheet.png).
+`closeups.mjs` paints it as the fifth close-up, `tournament`: the stands split by stair aisles into Bronze, Silver, the VIP box,
+Gold and Champion sections (72% of each crowd in its league's colour, 14% waving league hand flags), awnings alternating canvas
+with each section's colour, league bunting, four tall league banners (1, 2 or 3 rank chevrons, the Champion's crown), six gold
+braziers, a VIP box with a crimson-and-gold striped canopy, the trophy and two crowned guests, the arena's stone wall with its
+gold coping, and raked sand with a ring painted in the four league colours and the four-league seal in front of the fighters.
+The replay viewer draws it for a bracket's bouts and a tournament run's bouts (`backdropFor`); Arena bouts, practice fights,
+expeditions and dungeons keep their backdrops.
+
+| Check | Result |
+| --- | --- |
+| Approved art | The generator's frame is pixel-identical to the approved `variant-c-backdrop.png` (0 differing pixels). |
+| Same stage | 320 × 128 at 3×, anchored at (160, 104), the arena's wall arc and floor line: in every column the floor starts on the arena's row (test). Sand under both fighters' feet and shadows (test). The fighters, their feet and shadows are placed exactly as in an Arena bout (browser test: equal stage layout). |
+| League colours | Each stand section's crowd wears its own league's colour 5 to 30 times more than any other league's (the test asks for more than 3; the arena scores 0.1 to 1.2). The ring shows all four league colours with a gold line; the seal runs Bronze to Champion. |
+| Distinct | Differs from the arena in 60.6% of its pixels, from the expedition close-ups in 96% to 99% (the test asks for more than 50%). |
+| Atlas | `battle/closeups.png` grows from 320 × 512 to 320 × 640 (20,075 to 29,033 bytes). The four shipped frames keep their places and are pixel-identical; every other file under `public/assets` is byte-identical. |
+| Review sheet | `closeups.png` gained the tournament panel; no other sheet changed. |
+| Build | `node assets/source/build-assets.mjs --check` passes. The close-up image's content name changed and its previous version was removed. |
+
+Observation: on a phone the stage crops to the fighters, so the league sections are mostly out of view; the VIP box with
+its guests, the gold-edged ring, the seal and the banner edges still tell it apart from the Arena at a glance.
 
 ## Known limitations
 

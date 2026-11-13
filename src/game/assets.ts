@@ -33,7 +33,8 @@ export type PropMeta = {
 };
 export type FrameRect = { x: number; y: number; w: number; h: number; anchorX: number; anchorY: number; meta?: PropMeta };
 export type AtlasKind = 'actor' | 'tiles' | 'props' | 'environment' | 'effects' | 'icons' | 'backdrop';
-export type CloseupTheme = 'arena' | 'woodland' | 'outpost' | 'mountain';
+/** A close-up backdrop: the Arena, the tournament arena (Task 28) or an expedition. */
+export type CloseupTheme = 'arena' | 'tournament' | 'woodland' | 'outpost' | 'mountain';
 export type AtlasDef = { key: string; image: string; data: string; width: number; height: number; kind: AtlasKind; frames: Record<string, FrameRect> };
 export type AnimationDef = { atlas: string; frames: string[]; durationsMs: number[]; loop: boolean };
 export type DirectionalAnimation = { se: string; ne?: string };

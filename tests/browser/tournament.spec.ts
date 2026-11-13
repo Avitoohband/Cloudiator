@@ -1,7 +1,9 @@
 import { mkdirSync, readFileSync } from 'node:fs';
 import { expect, test, type Page } from './fixtures';
+import type { BattleLog } from '../../supabase/functions/_shared/contracts/events';
 import type { PublicActor, TournamentView } from '../../supabase/functions/_shared/contracts/reads';
 import { ARENA_GLADIATORS } from '../fixtures/arena-ids';
+import { REPLAY_FIXTURES } from '../fixtures/replay-ids';
 import { ownerFixture, worldFixture } from '../fixtures/domain';
 import { recordMeasurement } from '../fixtures/measurements';
 import { TOURNAMENT_KEYS, TOURNAMENTS, tournamentAsOf, type TournamentKey } from '../fixtures/tournament-ids';
@@ -30,6 +32,7 @@ const V2_PRIZES = 'Gold prizes by league, for 1st · 2nd · semifinal: Bronze 40
 const V2_ENTRY = 'Tournament entry costs 0 stamina. Choose Arena and opt in before the cutoff; a bracket needs at least two entrants in your league. '
   + 'If no bracket forms, regular Arena still costs 25 stamina and needs enough stamina.';
 const SHOTS = '.superpowers/sdd/2026-10-30-economy-1-6/task-9-shots';
+const TASK_28_SHOTS = '.superpowers/sdd/2026-11-12-1.9-additions/task-28-shots';
 test.describe('final review regressions', () => {
   test.skip(production, 'These regressions require the development fixture or routed transport.');
 for (const future of [false, true]) test(`final R1 refreshes live bracket publication for ${future ? 'addressed future bout with delayed publication' : 'playing quarterfinal without restarting it'}`, async ({ page, context }) => {
@@ -203,6 +206,52 @@ test.describe('tournament registration and brackets', () => {
     await page.waitForFunction(() => window.__cloudiatorReplay?.state().chapter === 5);
     await page.getByRole('button', { name: 'Back to Tournaments', exact: true }).click();
     await expect(page.getByRole('heading', { name: 'Tournaments', level: 2 })).toBeVisible();
+  });
+
+  // Task 28 (Avi, 2026-11-13: "for the tournaments, change the scene as well, the battle ground and the crowd"; variant C,
+  // "League Stands"): a bracket bout plays in the tournament arena, and an Arena bout opened the same way keeps the Arena, on the
+  // same stage (size, floor row and feet).
+  test('plays a bracket bout in the tournament arena and an Arena bout in the Arena, on the same stage', { tag: '@render' }, async ({ page }, testInfo) => {
+    const replay = page.getByRole('dialog', { name: 'Replay', exact: true });
+    const firstBlow = (log: BattleLog) => log.events.find(e => e.kind === 'attack')!.elapsedMs + 150;
+    const staged = async (at: number, shot: string) => {
+      await page.waitForFunction(() => window.__cloudiatorBattle?.debug()?.ready === true, null, { timeout: 45_000 });
+      await page.evaluate(ms => { window.__cloudiatorReplay!.pause(); window.__cloudiatorReplay!.seek(ms); }, at);
+      await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(() => requestAnimationFrame(resolve)))));
+      const d = (await page.evaluate(() => window.__cloudiatorBattle!.debug()))!;
+      expect(d.positionMs).toBe(at);
+      mkdirSync(TASK_28_SHOTS, { recursive: true });
+      await replay.getByRole('img', { name: /^Close-up of / }).screenshot({ path: `${TASK_28_SHOTS}/${shot}-stage-${testInfo.project.name}.png` });
+      await page.screenshot({ path: `${TASK_28_SHOTS}/${shot}-page-${testInfo.project.name}.png` });
+      return d;
+    };
+    await openTournaments(page);
+    await page.getByRole('button', { name: TOURNAMENTS.completed.label, exact: true }).click();
+    await card(page).getByRole('button', { name: 'Watch replay of Severus vs Varro' }).click();
+    await expect(replay).toContainText('TOURNAMENT · BRONZE · FINAL');
+    const final = VIEWS.completed.bouts.find(b => b.round === 3)!.revealedResult!.battleLog!;
+    const tournament = await staged(firstBlow(final), 'tournament');
+    expect(tournament.backdrop).toBe('tournament');
+    expect(tournament.fighters.map(f => f.name)).toEqual(final.participants.map(p => p.name));
+    // Another chapter of the bracket (a semifinal) is a tournament bout too.
+    await replay.getByRole('button', { name: 'Previous bout', exact: true }).click();
+    await page.waitForFunction(() => window.__cloudiatorReplay?.state().chapter === 5);
+    await page.waitForFunction(() => window.__cloudiatorBattle?.debug()?.ready === true, null, { timeout: 45_000 });
+    expect((await page.evaluate(() => window.__cloudiatorBattle!.debug()))!.backdrop).toBe('tournament');
+    await page.getByRole('button', { name: 'Back to Tournaments', exact: true }).click();
+    await expect(replay).toHaveCount(0);
+
+    // An Arena bout, opened in the same full-screen viewer, keeps the Arena.
+    const pvp = JSON.parse(readFileSync('tests/fixtures/battles/pvp.json', 'utf8')) as BattleLog;
+    await page.evaluate(activityId => window.__cloudiatorCamp!.emit('view-replay', { activityId }), REPLAY_FIXTURES.pvp.activityId);
+    await expect(replay).toBeVisible();
+    await expect(replay.getByRole('heading', { name: `${pvp.participants[0].name} vs ${pvp.participants[1].name}` })).toBeVisible();
+    const arena = await staged(firstBlow(pvp), 'arena');
+    expect(arena.backdrop).toBe('arena');
+    expect(arena.fighters.map(f => f.name)).toEqual(pvp.participants.map(p => p.name));
+    // The same stage: the backdrop's size and place, and the fighters' feet on its floor row at the same 3x scale.
+    expect(arena.layout).toEqual(tournament.layout);
+    expect(arena.fighters.map(f => [f.scaleX, f.scaleY])).toEqual(tournament.fighters.map(f => [f.scaleX, f.scaleY]));
   });
 
   test('reveals each round on the display clock, shows the owner’s loss and spectating, and opens a completed bout full screen', { tag: '@render' }, async ({ page, baseURL }, testInfo) => {

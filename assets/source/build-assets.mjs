@@ -183,7 +183,7 @@ const manifest = {
   closeups: {
     atlas: 'closeups', width: CLOSEUP.width, height: CLOSEUP.height, scale: CLOSEUP.scale, groundY: CLOSEUP.groundY, fighterX: CLOSEUP.fighterX,
     backdrops: Object.fromEntries(CLOSEUP_THEMES.map(theme => [theme, theme])),
-    notes: 'Fighters stand on floor row groundY at fighterX (left faces se, right faces sw). Draw the backdrop, fighters and effects at the same integer scale so art pixels share one grid.',
+    notes: 'Fighters stand on floor row groundY at fighterX (left faces se, right faces sw). Draw the backdrop, fighters and effects at the same integer scale so art pixels share one grid. Backdrops: an encounter uses the expedition of its creature, a tournament bout uses tournament, and every other bout uses arena; all share the floor row and the stand positions.',
   },
   icons: icons.icons,
   maps: [

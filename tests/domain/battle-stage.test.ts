@@ -178,6 +178,17 @@ describe('fighter looks', () => {
     expect(backdropFor(FIXTURE_BATTLE_LOGS.npc, manifest)).toBe('arena');
     expect(backdropFor(FIXTURE_BATTLE_LOGS['expedition-2'], manifest)).toBe('woodland');
   });
+
+  it('stages tournament bouts, and only them, in the tournament arena (Task 28)', () => {
+    expect(manifest.closeups.backdrops.tournament).toBe('tournament');
+    expect(backdropFor(FIXTURE_BATTLE_LOGS.pvp, manifest, { tournament: true })).toBe('tournament');
+    expect(backdropFor(FIXTURE_BATTLE_LOGS.tie, manifest, { tournament: true })).toBe('tournament');
+    // Arena bouts (ranked, unranked, against an NPC) and practice fights pass no flag, or false.
+    expect(backdropFor(FIXTURE_BATTLE_LOGS.pvp, manifest, { tournament: false })).toBe('arena');
+    expect(backdropFor(FIXTURE_BATTLE_LOGS.npc, manifest, {})).toBe('arena');
+    // A creature's expedition still wins.
+    expect(backdropFor(FIXTURE_BATTLE_LOGS['expedition-2'], manifest, { tournament: true })).toBe('woodland');
+  });
 });
 
 describe('stage layout', () => {

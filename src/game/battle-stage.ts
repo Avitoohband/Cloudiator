@@ -89,10 +89,13 @@ export function fighterLook(p: RevealedCombatant, manifest: AssetManifest, looks
   };
 }
 
-/** Arena bouts use the arena close-up; an encounter uses its creature's expedition. */
-export function backdropFor(log: BattleLog, manifest: AssetManifest): CloseupTheme {
+/**
+ * An encounter uses its creature's expedition close-up; a tournament bout (a bracket's, or a tournament run's) the tournament arena
+ * (Task 28); every other bout (Arena, NPC, practice) the arena.
+ */
+export function backdropFor(log: BattleLog, manifest: AssetManifest, { tournament = false }: { tournament?: boolean } = {}): CloseupTheme {
   for (const p of log.participants) { const c = creatureFor(p, manifest.actors.creatures); if (c) return c.expedition; }
-  return 'arena';
+  return tournament ? 'tournament' : 'arena';
 }
 
 // ------------------------------------------------------------------ layout

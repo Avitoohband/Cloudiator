@@ -178,3 +178,65 @@ export function sinceText(joinedAtMs: number, nowMs: number, timeZone?: string):
   if (!date || days === null) return '';
   return `${date} · ${days <= 0 ? 'today' : days === 1 ? '1 day' : `${days} days`}`;
 }
+
+// ---- Patch 1.9 Task 23c: Compare stats with mine ----------------------------------------------------------------------------------------
+// Both sides go through the same `cardStats` and `statRows` (yours from `ownBuild(owner)`), so every figure is the one each card shows; nothing
+// new is read or sent. The marks sit on YOUR cell: the arrow says better or worse, the number is your value minus theirs.
+
+/** One side of a comparison: the gladiator's name and level, and the class and published build the card computes from. */
+export type CompareSide = { name: string; level: number; classId: ClassId; build: PublicBuild };
+/** A mark on your cell: better or worse for you, `same`, or a neutral difference (Level) that is context, not a better stat. */
+export type CompareMark = { tone: 'better' | 'worse' | 'same' | 'neutral'; text: string; label: string | null };
+export type CompareRow = { label: string; hint: keyof typeof statHelp | null; you: string; them: string; youArena: string | null; themArena: string | null; mark: CompareMark | null };
+export type CompareAttribute = { label: string; attribute: keyof Attributes; you: number; them: number; mark: CompareMark | null };
+export type Comparison = { youStance: string; themStance: string; rows: CompareRow[]; attributes: CompareAttribute[]; youPoints: number; themPoints: number; overloads: string[] };
+
+/**
+ * The mark for `you` against `them` rounded to `places` decimals: `better` says which direction is better for you (`high`, `low`, or null for
+ * a neutral row). Equal values say "same" (nothing on a neutral row). The difference is your value minus theirs, with a real minus sign.
+ */
+export function compareMark(you: number, them: number, better: 'high' | 'low' | null, places: number, unit: string): CompareMark | null {
+  const diff = Math.round((you - them) * 10 ** places) / 10 ** places;
+  if (diff === 0) return better ? { tone: 'same', text: 'same', label: 'same' } : null;
+  // Seconds keep their hundredths ("0.20 s", as the cells say them); every other figure drops trailing zeros (an Armor difference of 9 is "9").
+  const size = unit.trim() === 's' ? Math.abs(diff).toFixed(places) : decimals(Math.abs(diff), places);
+  const text = `${diff > 0 ? '+' : '−'}${size}${unit}`;
+  if (!better) return { tone: 'neutral', text: `(${text})`, label: null };
+  const good = better === 'high' ? diff > 0 : diff < 0;
+  return { tone: good ? 'better' : 'worse', text: `${good ? '▲' : '▼'} ${text}`,
+    label: `${good ? 'better' : 'worse'} by ${decimals(Math.abs(diff), 2)}${unit.trim() === 's' ? ' seconds' : ''}` };
+}
+
+const STAT_MARKS: Record<keyof typeof statHelp, { value(stats: CardStats): number; better: 'high' | 'low'; places: number; unit: string }> = {
+  Health: { value: stats => stats.health, better: 'high', places: 0, unit: '' },
+  Damage: { value: stats => stats.hit, better: 'high', places: 0, unit: '' },
+  // The card's own hundredths of a second, so the difference is of the numbers the two cells show.
+  'Attack speed': { value: stats => Math.round(stats.intervalMs / 10) / 100, better: 'low', places: 2, unit: ' s' },
+  Armor: { value: stats => stats.armor, better: 'high', places: 1, unit: '' },
+  Critical: { value: stats => Math.round(stats.critical * 100), better: 'high', places: 0, unit: '%' },
+  'Critical damage': { value: stats => Math.round((stats.criticalDamage - 1) * 1000) / 10, better: 'high', places: 0, unit: '%' },
+};
+
+/** "Aster is overloaded: load 9 of 8, fighting at 90%", or null when the side carries within its capacity. */
+const overloadOf = (name: string, stats: CardStats): string | null => overloadLine(stats)?.replace(/^Overloaded/, `${name} is overloaded`) ?? null;
+
+/** Your gladiator against another's: the table's rows with your marks, the attribute rows, and an overload sentence per overloaded side; null when the rules refuse either build. */
+export function compareStats(you: CompareSide, them: CompareSide): Comparison | null {
+  const yours = cardStats(you.classId, you.build), theirs = cardStats(them.classId, them.build);
+  if (!yours || !theirs) return null;
+  const yourRows = statRows(yours), theirRows = statRows(theirs);
+  const rows: CompareRow[] = [{ label: 'Level', hint: null, you: String(you.level), them: String(them.level), youArena: null, themArena: null,
+    mark: compareMark(you.level, them.level, null, 0, '') }];
+  if (you.build.stance !== them.build.stance) rows.push({ label: 'Stance', hint: null, you: title(you.build.stance), them: title(them.build.stance), youArena: null, themArena: null, mark: null });
+  yourRows.forEach(([label, value, arena], index) => {
+    const [, other, otherArena] = theirRows[index];
+    const { value: figure, better, places, unit } = STAT_MARKS[label];
+    rows.push({ label, hint: label, you: value, them: other, youArena: arena ?? null, themArena: otherArena ?? null,
+      mark: compareMark(figure(yours), figure(theirs), better, places, unit) });
+  });
+  const attributes = ATTRIBUTE_KEYS.map(attribute => ({ attribute, label: title(attribute), you: you.build.allocations[attribute], them: them.build.allocations[attribute],
+    mark: compareMark(you.build.allocations[attribute], them.build.allocations[attribute], 'high', 0, '') }));
+  return { youStance: title(you.build.stance), themStance: title(them.build.stance), rows, attributes,
+    youPoints: pointsTotal(you.build.allocations), themPoints: pointsTotal(them.build.allocations),
+    overloads: [overloadOf(you.name, yours), overloadOf(them.name, theirs)].filter((line): line is string => line !== null) };
+}

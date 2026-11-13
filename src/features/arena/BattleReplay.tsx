@@ -602,7 +602,7 @@ function BattlePlayer({ battle, summary, keptUntil, bridge: external, level, vie
       </header>
       <div className={styles.arena}>
         {settledLooks
-          ? <BattleViewport log={log} looks={settledLooks} position={position} reducedMotion={reduced} bridge={bridge} label={closeUp} />
+          ? <BattleViewport log={log} looks={settledLooks} position={position} reducedMotion={reduced} bridge={bridge} label={closeUp} tournament={tournament} />
           : <BattleViewportWaiting label={closeUp} />}
         {/* The result card on the arena: at the end (after the victory poses) or on ⚑ Result; it never moves on by itself (Avi). */}
         {ended && <div className={styles.endCard} data-end-card="">

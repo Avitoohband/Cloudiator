@@ -461,7 +461,9 @@ test.describe('Spar a copy from a gladiator\'s card (fixture)', () => {
     await expect(spar).toHaveText('⚔ Spar a copy');
     await expect(spar).toBeEnabled();
     const actions = await actionTexts(lucilla);
-    expect(actions.indexOf('⚔ Spar a copy')).toBe(actions.indexOf('Follow') + 1);
+    // Patch 1.9 Task 23c: ⇄ Compare with mine sits between Follow and ⚔ Spar a copy.
+    expect(actions.indexOf('⇄ Compare with mine')).toBe(actions.indexOf('Follow') + 1);
+    expect(actions.indexOf('⚔ Spar a copy')).toBe(actions.indexOf('⇄ Compare with mine') + 1);
     const health = Number(await stats.getByRole('definition').first().textContent());
     const actor = (await page.evaluate(() => window.__cloudiatorCamp!.world()!.actors.find(a => a.name === 'Lucilla')))!;
     await shot(page, info.project.name === 'mobile' ? 'task-19-card-phone' : 'task-19-card-desktop');

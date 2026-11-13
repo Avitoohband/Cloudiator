@@ -1,12 +1,13 @@
-// Close-up battle backdrops (reference panel A's side-on fight view): the arena, and one per
-// expedition for encounter replays. Each is a 320x128 painting drawn at an integer 3x scale behind
+// Close-up battle backdrops (reference panel A's side-on fight view): the arena, the tournament arena (Task 28), and one
+// per expedition for encounter replays. Each is a 320x128 painting drawn at an integer 3x scale behind
 // two fighters who stand on the floor at `CLOSEUP.groundY`, either side of the centre.
 // The middle (where fighters stand) is kept calm so the fighters stay readable.
 import { Mask, PixelCanvas } from '../tools/canvas.mjs';
 import { createRandom, hashSeed } from '../tools/random.mjs';
 
 export const CLOSEUP = { width: 320, height: 128, groundY: 104, fighterX: [142, 178], scale: 3 };
-export const CLOSEUP_THEMES = ['arena', 'woodland', 'outpost', 'mountain'];
+// New themes go at the end, so every shipped frame keeps its place (and its pixels) in the atlas.
+export const CLOSEUP_THEMES = ['arena', 'woodland', 'outpost', 'mountain', 'tournament'];
 
 const W = CLOSEUP.width;
 const H = CLOSEUP.height;
@@ -148,16 +149,45 @@ function royalBox(c, top) {
   }
 }
 
-function renderArena() {
-  const c = new PixelCanvas(W, H);
-  const base = x => arc(x, 78, 90);
-  const top = x => base(x) - 22;
-  // Stands: dark stepped seating behind the crowd, under a striped awning.
+/** The arena's podium wall (the tournament's too): its base curves up to row 78 in the middle, 90 at the edges; 22 rows tall. */
+const wallBase = x => arc(x, 78, 90);
+const wallTop = x => wallBase(x) - 22;
+/** Stands: dark stepped seating above the podium wall. */
+function stands(c) {
   fill(c, (x, y) => {
-    if (y > top(x)) return null;
-    const step = (top(x) - y) % 11;
+    if (y > wallTop(x)) return null;
+    const step = (wallTop(x) - y) % 11;
     return step === 0 ? 'stone3' : step === 1 ? 'stone4' : 'stone5';
   });
+}
+/** The podium wall: staggered stone blocks following the arc, a gold-trimmed coping and a dark plinth. */
+function podiumWall(c) {
+  for (let x = 0; x < W; x += 1) {
+    for (let y = wallTop(x); y <= wallBase(x); y += 1) {
+      const local = y - wallTop(x);
+      let col;
+      if (local === 0) col = 'outline';
+      else if (local <= 2) col = local === 1 ? 'stone1' : 'stone2';
+      else if (local === 3) col = 'gold2';
+      else if (local === 4) col = 'stone4';
+      else if (local >= 20) col = local === 22 ? 'outline' : 'stone4';
+      else {
+        const row = Math.floor((local - 5) / 5);
+        const ry = (local - 5) % 5;
+        const bx = (x + (row % 2) * 7) % 14;
+        col = ry === 4 || bx === 13 ? 'stone4' : ry === 0 || bx === 0 ? 'stone1' : bx > 10 || ry === 3 ? 'stone3' : 'stone2';
+      }
+      c.set(x, y, col);
+    }
+  }
+}
+
+function renderArena() {
+  const c = new PixelCanvas(W, H);
+  const base = wallBase;
+  const top = wallTop;
+  // Stands: dark stepped seating behind the crowd, under a striped awning.
+  stands(c);
   const r = createRandom(hashSeed('closeup-arena-crowd'));
   for (let row = 0; row < 6; row += 1) {
     for (let x = 3 + (row % 2) * 3; x < W - 2; x += 6 + (r.chance(0.2) ? 1 : 0)) {
@@ -175,24 +205,7 @@ function renderArena() {
     for (let y = 0; y < depth; y += 1) c.set(x, y, y === 0 ? 'wood3' : y === depth - 1 ? 'outline' : x % 16 === 0 ? panel[1] : panel[0]);
   }
   // The podium wall: staggered stone blocks following the arc, a gold-trimmed coping and a dark plinth.
-  for (let x = 0; x < W; x += 1) {
-    for (let y = top(x); y <= base(x); y += 1) {
-      const local = y - top(x);
-      let col;
-      if (local === 0) col = 'outline';
-      else if (local <= 2) col = local === 1 ? 'stone1' : 'stone2';
-      else if (local === 3) col = 'gold2';
-      else if (local === 4) col = 'stone4';
-      else if (local >= 20) col = local === 22 ? 'outline' : 'stone4';
-      else {
-        const row = Math.floor((local - 5) / 5);
-        const ry = (local - 5) % 5;
-        const bx = (x + (row % 2) * 7) % 14;
-        col = ry === 4 || bx === 13 ? 'stone4' : ry === 0 || bx === 0 ? 'stone1' : bx > 10 || ry === 3 ? 'stone3' : 'stone2';
-      }
-      c.set(x, y, col);
-    }
-  }
+  podiumWall(c);
   // Banners away from the middle, alternating team colours; braziers between them.
   const TEAL = ['teal1', 'teal2', 'teal3'];
   const CRIMSON = ['crimson1', 'crimson2', 'crimson3'];
@@ -203,6 +216,254 @@ function renderArena() {
   const ring = new Mask(W, H).ellipse(CX, CLOSEUP.groundY + 2, 96, 13);
   ring.subtract(new Mask(W, H).ellipse(CX, CLOSEUP.groundY + 2, 95, 12)).forEach((x, y) => { if ((x >> 2) % 2 === 0) c.set(x, y, 'sand3'); });
   pebbles(c, x => base(x) + 1, hashSeed('closeup-arena-pebbles'), ['stone2', 'stone3', 'sand4'], 26);
+  return c;
+}
+
+// ------------------------------------------------------------------ tournament (Task 28)
+// Tournament bouts get a fancier arena, told apart from an Arena bout at a glance. Avi chose variant C, "League Stands", on
+// 2026-11-13 from the art preview in .superpowers/design/2026-11-13-tournament-scene/ ("for the tournaments, change the scene as
+// well, the battle ground and the crowd"). It keeps the arena's podium wall and floor line, so the fighters, their feet and their
+// shadows stand exactly as in an Arena bout. The stands are split by stair aisles into four league sections (Bronze, Silver, the
+// box, Gold, Champion), each crowd, awning panel and tall banner in its league's colour, with league bunting and six gold braziers.
+// Behind the fighters a striped VIP box holds the trophy, dark and calm low down. The raked sand carries a ring painted in the
+// four league colours and the four-league seal in front of the fighters.
+const mask = () => new Mask(W, H);
+
+/** League colours as [light, mid, dark] palette entries. */
+const LEAGUES = {
+  bronze: ['leather1', 'leather2', 'leather3'],
+  silver: ['steel1', 'steel2', 'steel3'],
+  gold: ['gold1', 'gold2', 'gold3'],
+  champion: ['violet1', 'violet2', 'shadow'],
+};
+const LEAGUE_IDS = ['bronze', 'silver', 'gold', 'champion'];
+/** A spectator's [lit, shaded] cloth in a league's colour. */
+const LEAGUE_CLOTH = { bronze: ['leather1', 'leather2'], silver: ['steel2', 'steel3'], gold: ['gold2', 'gold3'], champion: ['violet1', 'violet2'] };
+/** The stands' sections, left to right: Bronze, Silver, (the box), Gold, Champion. */
+const sectionOf = x => (x < 64 ? 'bronze' : x < CX ? 'silver' : x < 258 ? 'gold' : 'champion');
+/** How the crowd cheers: 14% wave a league hand flag, 16% raise both arms, 24% one arm. */
+const CHEERS = { flag: 0.14, both: 0.16, one: 0.24 };
+
+/** A spectator like the arena's, in the given cloth, cheering: a league hand flag, both arms up or one arm up. */
+function fan(c, x, b, r, far, [cloth, clothDark]) {
+  const skin = r.pick(SKINS);
+  const body = mask().rect(x - 2, b - 5, 5, 5).add(x - 2, b - 6).add(x + 2, b - 6);
+  c.stamp(body, (px, py) => (far || px >= x + 2 || py >= b - 2 ? clothDark : cloth));
+  c.stamp(mask().rect(x - 1, b - 9, 3, 3), skin);
+  const hair = r.pick(HAIRS);
+  if (r.chance(0.75)) for (let k = -1; k <= 1; k += 1) c.set(x + k, b - 10, hair);
+  const side = r.chance(0.5) ? -1 : 1;
+  const arm = s => { for (let k = 7; k <= 9; k += 1) c.set(x + 3 * s, b - k, skin); c.set(x + 3 * s, b - 10, 'outline'); };
+  const roll = r.next();
+  if (roll < CHEERS.flag) {
+    arm(side);
+    const [fl, fm, fd] = LEAGUES[r.pick(LEAGUE_IDS)];
+    const fx = side > 0 ? x + 4 : x - 7;
+    c.stamp(mask().rect(fx, b - 16, 4, 3), (px, py) => (py === b - 16 ? fl : py === b - 14 ? fd : fm));
+    for (let k = 10; k <= 16; k += 1) c.set(x + 3 * side, b - k, 'wood3');
+  } else if (roll < CHEERS.flag + CHEERS.both) { arm(-1); arm(1); }
+  else if (roll < CHEERS.flag + CHEERS.both + CHEERS.one) arm(side);
+}
+
+/** Six rows of fans on the stepped stands, drawn back to front so raised flags overlap the row behind; 72% wear their section's colour. */
+function leagueCrowd(c) {
+  const r = createRandom(hashSeed('tournament-c-crowd'));
+  for (let row = 5; row >= 0; row -= 1) {
+    for (let x = 2 + (row % 2) * 2; x < W - 1; x += 5 + (r.chance(0.15) ? 1 : 0)) {
+      const b = wallTop(x) - 1 - row * 11;
+      if (b - 10 < 7) continue;
+      if (r.chance(0.02)) continue;
+      const fx = x + r.int(-1, 1);
+      fan(c, fx, b, r, row >= 3, r.chance(0.72) ? LEAGUE_CLOTH[sectionOf(x)] : r.pick(CLOTHS));
+    }
+  }
+}
+
+/** A tall league banner: cloth in the league colour, a gold hem, rank chevrons (1 Bronze, 2 Silver, 3 Gold) or the Champion's crown. */
+function leagueBanner(c, x, y0, league, len) {
+  const [light, mid, dark] = LEAGUES[league];
+  const cloth = mask().polygon([[x - 6, y0], [x + 8, y0], [x + 8, y0 + len], [x + 1, y0 + len - 4], [x - 6, y0 + len]]);
+  c.stamp(cloth, (px, py) => (py === y0 + len - 7 || py === y0 + 1 ? 'gold2' : px === x - 6 || py === y0 ? light : px >= x + 6 ? dark : mid));
+  const ey = y0 + 5;
+  if (league === 'champion') {
+    const crown = mask().rect(x - 3, ey + 3, 8, 3).add(x - 3, ey + 2).add(x - 3, ey + 1).add(x, ey + 2).add(x + 1, ey + 2).add(x, ey + 1).add(x + 1, ey + 1)
+      .add(x + 4, ey + 2).add(x + 4, ey + 1).add(x - 2, ey + 2).add(x + 3, ey + 2);
+    c.stamp(crown, (px, py) => (py === ey + 4 && (px === x || px === x + 1) ? 'crimson1' : py <= ey + 2 ? 'gold1' : py === ey + 5 ? 'gold3' : 'gold2'));
+  } else {
+    const chevron = mask();
+    for (let k = 0; k < { bronze: 1, silver: 2, gold: 3 }[league]; k += 1) {
+      for (let dx = -3; dx <= 4; dx += 1) {
+        const yy = ey + k * 4 + (dx <= 0 ? -dx : dx - 1);
+        chevron.add(x + dx, yy).add(x + dx, yy + 1);
+      }
+    }
+    c.stamp(chevron, 'canvas1');
+  }
+  // Hanging rod with gold finials.
+  for (let k = -7; k <= 9; k += 1) c.set(x + k, y0 - 1, 'wood3');
+  c.set(x - 8, y0 - 1, 'gold2'); c.set(x + 10, y0 - 1, 'gold2');
+  c.set(x - 8, y0, 'gold3'); c.set(x + 10, y0, 'gold3');
+}
+
+/** A sagging rope of little pennants, cycling the league colours. */
+function bunting(c, x0, y0, x1, y1, sag, phase = 0) {
+  const yAt = x => { const t = (x - x0) / (x1 - x0); return Math.round(y0 + (y1 - y0) * t + sag * 4 * t * (1 - t)); };
+  for (let x = x0; x <= x1; x += 1) c.set(x, yAt(x), 'outline');
+  let k = phase;
+  for (let x = x0 + 3; x <= x1 - 3; x += 8) {
+    const y = yAt(x);
+    const [l, mid, d] = LEAGUES[LEAGUE_IDS[k % LEAGUE_IDS.length]];
+    k += 1;
+    c.stamp(mask().rect(x - 2, y + 1, 5, 2).rect(x - 1, y + 3, 3, 1).add(x, y + 4), (px, py) => (py === y + 1 ? l : px >= x + 1 && py > y + 1 ? d : mid));
+  }
+}
+
+/** A tall brazier on the wall: a stone pedestal, a gold bowl and a big flame. */
+function goldBrazier(c, x, y) {
+  const tall = 8;
+  c.stamp(mask().rect(x - 1, y - tall, 3, tall), shade('stone1', 'stone2', 'stone3'));
+  c.stamp(mask().rect(x - 2, y - 2, 5, 2), shade('stone1', 'stone2', 'stone3'));
+  const bowlY = y - tall;
+  c.stamp(mask().polygon([[x - 6, bowlY - 4], [x + 7, bowlY - 4], [x + 4, bowlY + 1], [x - 3, bowlY + 1]]), (px, py) => (py === bowlY - 4 ? 'gold1' : py >= bowlY ? 'gold3' : 'gold2'));
+  c.stamp(mask().polygon([[x - 5, bowlY - 4], [x - 2, bowlY - 12], [x, bowlY - 8], [x + 1, bowlY - 14], [x + 3, bowlY - 9], [x + 4, bowlY - 11], [x + 6, bowlY - 4]]),
+    (px, py) => (py > bowlY - 7 ? 'fire3' : py > bowlY - 10 ? 'fire2' : 'fire1'), 'fire4');
+}
+
+/**
+ * The VIP box behind the fighters: a peaked canopy striped crimson and gold, crimson side drapes tied back with gold, the trophy
+ * between laurel branches and two crowned guests. Low down it stays dark and calm; the short drape over the balustrade ends above
+ * the fighters' heads.
+ */
+function vipBox(c) {
+  const left = 122;
+  const right = 198;
+  const roof = 12;
+  for (let x = left; x <= right; x += 1) {
+    for (let y = roof; y < wallTop(x) - 6; y += 1) c.set(x, y, (x + y) % 9 === 0 && y > 20 ? 'stone5' : 'shadow');
+  }
+  // The trophy on the back wall, between laurel branches.
+  c.stamp(mask().polygon([[154, 19], [167, 19], [165, 26], [156, 26]]), shade('gold1', 'gold2', 'gold3'));
+  for (const hx of [152, 168]) c.stamp(mask().rect(hx, 20, 1, 4), 'gold2');
+  c.stamp(mask().rect(159, 27, 3, 3), shade('gold1', 'gold2', 'gold3'));
+  c.stamp(mask().rect(156, 30, 9, 2), shade('gold1', 'gold2', 'gold3'));
+  for (const side of [-1, 1]) for (let k = 0; k < 6; k += 1) {
+    const lx = Math.round(CX + 0.5 + side * (12 + k));
+    c.set(lx, 30 - k, k % 2 ? 'grass2' : 'grass3'); c.set(lx, 29 - k, k % 2 ? 'grass3' : 'grass1');
+  }
+  // Side drapes, tied back with gold.
+  const [dl, dm, dd] = ['crimson1', 'crimson2', 'crimson3'];
+  for (const [x0, dir] of [[left, 1], [right, -1]]) {
+    const bottom = wallTop(x0) - 7;
+    const tie = roof + 18;
+    for (let y = roof; y <= bottom; y += 1) {
+      const w = y < tie ? 7 - Math.round(((y - roof) / (tie - roof)) * 4) : y === tie ? 2 : 3 + Math.round(((y - tie) / (bottom - tie)) * 3);
+      for (let k = 0; k < w; k += 1) c.set(x0 + dir * k, y, y === tie ? 'gold2' : k === w - 1 ? 'outline' : (k + (y >> 1)) % 3 === 0 ? dd : k < 2 ? dl : dm);
+    }
+  }
+  // Two crowned guests behind the balustrade, either side of the trophy.
+  for (const [gx, robe] of [[136, ['crimson2', 'crimson3']], [185, ['violet1', 'violet2']]]) {
+    const by = wallTop(gx) - 6;
+    c.stamp(mask().rect(gx - 3, by - 6, 7, 6).add(gx - 2, by - 7).add(gx + 2, by - 7), (px, py) => (px === gx ? 'gold2' : px >= gx + 2 ? robe[1] : robe[0]));
+    c.stamp(mask().rect(gx - 1, by - 10, 3, 3), gx < CX ? 'skin2' : 'dskin1');
+    c.set(gx - 1, by - 11, 'gold2'); c.set(gx, by - 11, 'gold2'); c.set(gx + 1, by - 11, 'gold2');
+    c.set(gx - 1, by - 12, 'gold1'); c.set(gx + 1, by - 12, 'gold1');
+  }
+  // Gold-capped pillars.
+  for (const px of [left - 3, right - 2]) {
+    c.stamp(mask().rect(px, roof - 1, 6, wallTop(px) - roof - 4), (x, y, mk) => (y <= roof + 1 || y === roof + 10 ? 'gold2' : shade('stone1', 'stone2', 'stone3')(x, y, mk)));
+  }
+  // The balustrade with a gold rail, and a short drape over its middle.
+  for (let x = left; x <= right; x += 1) {
+    const t = wallTop(x);
+    for (let y = t - 6; y < t; y += 1) {
+      const local = y - (t - 6);
+      c.set(x, y, local === 0 ? 'outline' : local === 1 ? 'gold1' : local === 2 ? 'gold3' : local === 5 ? 'stone4' : (x - left) % 6 === 0 ? 'stone3' : (x - left) % 6 === 5 ? 'stone4' : 'stone1');
+    }
+  }
+  for (let x = 146; x <= 175; x += 1) {
+    const t = wallTop(x);
+    const drop = 4 + ((x - 146) % 6 === 0 ? 0 : 1);
+    for (let y = t - 5; y < t - 5 + drop; y += 1) c.set(x, y, y === t - 5 + drop - 1 ? 'gold2' : (x - 146) % 6 === 0 ? dd : dm);
+  }
+  // The peaked canopy, striped, with a scalloped gold fringe and a pole on top.
+  const span = CX - left + 8;
+  for (let x = left - 8; x <= right + 8; x += 1) {
+    const ytop = roof - Math.round((roof - 2) * (1 - Math.abs(x - CX) / span));
+    const stripe = Math.floor((x - CX + 200) / 5) % 2 === 0 ? 'crimson2' : 'gold2';
+    for (let y = ytop; y <= roof; y += 1) c.set(x, y, y === ytop ? 'outline' : y === roof ? 'gold2' : stripe);
+    if ((x - left + 8) % 6 !== 0) c.set(x, roof + 1, (x - left + 8) % 6 === 3 ? 'gold3' : 'gold2');
+    if ((x - left + 8) % 6 === 3) c.set(x, roof + 2, 'gold3');
+  }
+  for (let y = -2; y <= 2; y += 1) c.set(CX, y, 'wood3');
+}
+
+/** The fighting ring on the sand, in floor units: its centre, and its half-width and half-depth. */
+const RING = { cx: CX, cy: CLOSEUP.groundY + 3, rx: 106, ry: 15.5 };
+/** Elliptical distance from the ring's centre, in floor units (x px). */
+const ringDistance = (x, y) => Math.hypot(x - RING.cx, (y - RING.cy) * (RING.rx / RING.ry));
+
+/** The four-league seal painted flat on the floor in front of the fighters: a gold-rimmed oval in four bands, Bronze to Champion. */
+function leagueSeal(c, cx, cy) {
+  const rx = 24;
+  const ry = 4.6;
+  const rim = mask().ellipse(cx, cy, rx + 3, ry + 1.4);
+  const field = mask().ellipse(cx, cy, rx, ry);
+  rim.forEach((x, y) => { if (!field.has(x, y)) c.set(x, y, y > cy ? 'gold3' : 'gold2'); });
+  field.forEach((x, y) => {
+    const u = ((x + 0.5 - (cx - rx)) / (2 * rx)) * 4;
+    const edge = Math.abs(u - Math.round(u)) < 0.06;
+    const [light, mid, dark] = LEAGUES[LEAGUE_IDS[Math.max(0, Math.min(3, Math.floor(u)))]];
+    c.set(x, y, edge ? 'gold3' : !field.has(x, y - 1) ? light : !field.has(x, y + 1) ? dark : mid);
+  });
+}
+
+/** Freshly raked sand: smooth inside the ring and raked in arcs outside it, the ring painted in league quarters, and the seal. */
+function leagueSand(c) {
+  const floorTop = x => wallBase(x) + 1;
+  floor(c, floorTop, { base: 'sand1', light: 'canvas1', dark: 'sand2', deep: 'sand3', seed: hashSeed('tournament-c-sand'), marks: [] });
+  const n = noise(hashSeed('tournament-c-rake'));
+  const band = (x, y) => Math.floor(ringDistance(x, y) / 9);
+  for (let x = 0; x < W; x += 1) for (let y = floorTop(x) + 3; y < H; y += 1) {
+    if (ringDistance(x, y) < RING.rx + 2) continue;
+    if ((band(x, y) !== band(x, y - 1) || band(x, y) !== band(x - 1, y)) && n(x, y) < 0.8) c.set(x, y, 'sand2');
+  }
+  // The ring: an outer band in four league quarters (Bronze and Silver behind the fighters, Gold and Champion in front), a gold line inside.
+  const QUARTER = { bronze: 'leather2', silver: 'steel3', gold: 'gold3', champion: 'violet2' };
+  const outer = mask().ellipse(RING.cx, RING.cy, RING.rx, RING.ry);
+  const inner = mask().ellipse(RING.cx, RING.cy, RING.rx - 3, RING.ry - 1.6);
+  const line = inner.clone().subtract(mask().ellipse(RING.cx, RING.cy, RING.rx - 5, RING.ry - 2.6));
+  outer.subtract(inner).forEach((x, y) => c.set(x, y, QUARTER[y < RING.cy ? (x < CX ? 'bronze' : 'silver') : (x < CX ? 'gold' : 'champion')]));
+  line.forEach((x, y) => c.set(x, y, 'gold2'));
+  leagueSeal(c, CX, RING.cy + 8);
+}
+
+function renderTournament() {
+  const c = new PixelCanvas(W, H);
+  stands(c);
+  leagueCrowd(c);
+  // Stair aisles between the sections.
+  for (const ax of [62, 258]) {
+    for (let y = 0; y <= wallTop(ax); y += 1) {
+      c.set(ax, y, 'stone2'); c.set(ax + 1, y, (wallTop(ax) - y) % 4 === 0 ? 'stone4' : 'stone3'); c.set(ax - 1, y, 'outline'); c.set(ax + 2, y, 'outline');
+    }
+  }
+  // Awning: canvas panels alternating with the section's league colour, scalloped, with gold tassels.
+  for (let x = 0; x < W; x += 1) {
+    const [light, mid] = LEAGUES[sectionOf(x)];
+    const panel = Math.floor(x / 16) % 2 === 0 ? ['canvas1', 'canvas2'] : [mid, light];
+    const depth = 6 + Math.round(2 * Math.sin(((x % 16) / 16) * Math.PI));
+    for (let y = 0; y < depth; y += 1) c.set(x, y, y === 0 ? 'wood3' : y === depth - 1 ? 'outline' : x % 16 === 0 ? panel[1] : panel[0]);
+    if (x % 16 === 8) c.set(x, depth, 'gold2');
+  }
+  bunting(c, -4, wallTop(0) - 2, 118, wallTop(118) - 2, 5);
+  bunting(c, 202, wallTop(202) - 2, 324, wallTop(320) - 2, 5, 1);
+  // The arena's podium wall, with its gold-trimmed coping.
+  podiumWall(c);
+  vipBox(c);
+  // Four extra-tall league banners hang in front of the sections, and six gold braziers stand on the wall.
+  for (const [x, league] of [[32, 'bronze'], [96, 'silver'], [224, 'gold'], [288, 'champion']]) leagueBanner(c, x, wallTop(x) - 22, league, 40);
+  for (const x of [8, 64, 112, 208, 256, 312]) goldBrazier(c, x, wallTop(x) + 1);
+  leagueSand(c);
   return c;
 }
 
@@ -337,7 +598,7 @@ function renderMountain() {
   return c;
 }
 
-const RENDER = { arena: renderArena, woodland: renderWoodland, outpost: renderOutpost, mountain: renderMountain };
+const RENDER = { arena: renderArena, woodland: renderWoodland, outpost: renderOutpost, mountain: renderMountain, tournament: renderTournament };
 
 /** Atlas frames, one per theme, anchored at the floor centre where the fighters stand. */
 export function renderCloseups() {

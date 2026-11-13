@@ -12,6 +12,9 @@
 // M37 (Task 25, from the Task 23b review): an approval names the time of the suggestion the owner saw (the item's, or the one Edit filled
 // the box from), and the server refuses it as a conflict when Claude has replaced the suggestion since; the list then reloads with the
 // new one. Sending one item never closes or clears the box open on another.
+// Task 27 (from the M37 review): when Claude replaced the suggestion an edit was made from, the owner's open box and edited draft stay under
+// the alert; the box then goes with the suggestion now shown, so sending the edit again (having read the new one) is not refused again.
+// An item answered meanwhile closes its box, as before.
 import { useCallback, useEffect, useId, useRef, useState } from 'react';
 import type { OwnerFeedbackItem } from '@contracts/reads';
 import { useClockMode } from '../../lib/clock-setting';
@@ -90,10 +93,12 @@ export function FeedbackReview({ onCount }: {
     const closeOwnBox = () => { if (answeringNow.current === item.id) { openBox(null); setDraft(''); } };
     if (!result.ok) {
       if (result.code === 'conflict') {
-        closeOwnBox();
         // Answered meanwhile, or (an approval) Claude replaced the suggestion: the reloaded list shows which.
         const shown = (await load(filter))?.find(other => other.id === item.id);
         const replaced = at !== null && shown !== undefined && shown.status !== 'answered' && shown.suggestion !== null;
+        // A replaced suggestion keeps this item's open box and its draft (nothing typed is lost); its next send names the new suggestion.
+        if (replaced && !approve && answeringNow.current === item.id) setSuggestionAt(shown.suggestedAtMs);
+        else closeOwnBox();
         setProblem({ id: item.id, text: replaced ? 'Claude changed this suggestion after you opened it. Read the new one, then send again.' : 'This feedback was already answered.' });
         return;
       }

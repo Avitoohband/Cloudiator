@@ -690,11 +690,34 @@ test('Approve and send keeps another item’s open answer, and a suggestion Clau
   await expect(balance.locator('[data-feedback-suggestion]')).toContainText(replaced);
   await expect(balance).toContainText(/Balance\s*Read/);
   expect(owned.find(i => i.id === 2)).toMatchObject({ status: 'read', answer: null });
+  // Task 27 (carried from the M37 review): the owner's open box and edited draft stay, under the alert, so nothing typed is lost.
+  await expect(editBox).toBeVisible();
+  await expect(editBox).toHaveValue(`${SUGGESTED[2]} Edited.`);
+  await expect(balance).toContainText('Sends your edit of Claude’s suggestion and marks it Answered.');
   expect(await noHorizontalScroll(page)).toBe(true);
   await shot(page, info, 'owner-feedback-suggestion-replaced');
-  // Approving the suggestion shown now sends it, with its own time.
+  // Having read the new suggestion, the owner sends the edit again: it goes with the time of the suggestion shown now.
   const nowAt = owned.find(i => i.id === 2)!.suggestedAtMs;
-  await balance.getByRole('button', { name: 'Approve and send', exact: true }).click();
+  await balance.getByRole('button', { name: 'Send answer', exact: true }).click();
   await expect(balance).toContainText(/Balance\s*Answered \(approved suggestion\)/);
-  expect(actions).toContainEqual({ tab: 'feedback', action: 'answer', id: 2, text: replaced, fromSuggestion: true, suggestedAtMs: nowAt });
+  expect(actions.filter(a => a.action === 'answer').at(-1)).toEqual({ tab: 'feedback', action: 'answer', id: 2, text: `${SUGGESTED[2]} Edited.`, fromSuggestion: true,
+    suggestedAtMs: nowAt });
+  await expect(editBox).toHaveCount(0);
+});
+
+// Task 27 (carried from the M37 review): an answer in the owner's own words (Answer, not Edit) that meets a conflict because the item was
+// answered meanwhile closes its box, as before: there is nothing left to send.
+test('a box whose item was answered meanwhile closes on the conflict', async ({ page }) => {
+  const { panel, items: owned } = await owner(page, true, { suggestions: true });
+  await panel.getByRole('tab', { name: /^Feedback/ }).click();
+  await panel.getByRole('group', { name: 'Show' }).getByRole('button', { name: 'All', exact: true }).click();
+  const idea = panel.locator('[data-feedback-item]').filter({ hasText: 'A way to rename the gladiator' });
+  await idea.getByRole('button', { name: 'Answer', exact: true }).click();
+  const box = idea.getByRole('textbox', { name: 'Answer to gladiator Varro (they get a message)' });
+  await box.fill('Renaming is planned for a later patch.');
+  Object.assign(owned.find(i => i.id === 3)!, { status: 'answered', answer: 'Already answered elsewhere.', answeredVia: 'owner' });
+  await idea.getByRole('button', { name: 'Send answer', exact: true }).click();
+  await expect(idea.getByRole('alert')).toHaveText('This feedback was already answered.');
+  await expect(idea).toContainText(/Idea\s*Answered/);
+  await expect(box).toHaveCount(0);
 });

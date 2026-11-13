@@ -80,51 +80,9 @@
       "patch": "2.0"
     },
     {
-      "id": "shops-grid",
-      "title": "Shops as an icon grid",
-      "body": "Shops show their goods as icons and use the same detail card as your inventory.",
-      "patch": "1.9"
-    },
-    {
-      "id": "search-sort",
-      "title": "Search and sort items",
-      "body": "Search and sort what you carry and what the shops sell.",
-      "patch": "1.9"
-    },
-    {
-      "id": "equip-from-gladiator",
-      "title": "Equip from My gladiator",
-      "body": "Choose replacement gear straight from your Worn equipment slots.",
-      "patch": "1.9"
-    },
-    {
-      "id": "gold-laurel",
-      "title": "A gold laurel for renown",
-      "body": "Renown gets a new gold laurel icon, also shown in the corner chip.",
-      "patch": "1.9"
-    },
-    {
-      "id": "item-stacks",
-      "title": "Stacked items and Sell quantity",
-      "body": "Identical items show as one stack with a count, and you choose how many to sell.",
-      "patch": "1.9"
-    },
-    {
-      "id": "mark-read",
-      "title": "Mark as read",
-      "body": "Mark messages and notifications as read, one by one or all at once.",
-      "patch": "1.9"
-    },
-    {
-      "id": "xp-bar",
-      "title": "XP bar and level-up hint",
-      "body": "See your XP progress and whether your next expedition can level you up.",
-      "patch": "1.9"
-    },
-    {
-      "id": "stat-help",
-      "title": "Help on stats and attributes",
-      "body": "Hover, focus, or tap any attribute or stat in My gladiator to see what it means. Critical hits show their extra damage, and renown armor and weapons show what they add in the Arena.",
+      "id": "inventory-shops",
+      "title": "Inventory, shops and gladiator help",
+      "body": "Shops show goods as icons with the inventory card, and you can search and sort. Identical items stack and you choose how many to sell. Choose gear from your Worn equipment slots. Renown gets a gold laurel. Mark messages and notifications as read. See your XP bar and level-up hint, and hover or tap any stat or attribute for help.",
       "patch": "1.9"
     },
     {
@@ -164,6 +122,30 @@
       "patch": "1.9"
     },
     {
+      "id": "compare-stats",
+      "title": "Compare stats with mine",
+      "body": "Press Compare with mine on another gladiator's card to see you and them side by side, with arrows for every difference and the attributes.",
+      "patch": "1.9"
+    },
+    {
+      "id": "market-list",
+      "title": "A bigger, clearer Marketplace",
+      "body": "The Marketplace is still a list, now with big item icons and every detail on the row. The seller comes first, with their class, league and level.",
+      "patch": "1.9"
+    },
+    {
+      "id": "gladiator-history",
+      "title": "Gladiator history on every card",
+      "body": "Open any gladiator's card to see their Arena, tournament and expedition history. Every kept replay can be watched by anyone. Rewards and loot of other gladiators stay private.",
+      "patch": "1.9"
+    },
+    {
+      "id": "tournament-look",
+      "title": "Tournaments look different",
+      "body": "Tournament fights get a gold header band, their own rows in history, and a fancier arena called League Stands, with stands in the four league colours and league banners.",
+      "patch": "1.9"
+    },
+    {
       "id": "daily-reward",
       "title": "Daily login reward",
       "body": "Claim a reward once per game day. Seven days in a row ends with a bigger prize, and a missed day starts the streak again.",
@@ -185,6 +167,12 @@
       "id": "arena-evenings",
       "title": "Three Arena bouts an evening",
       "body": "Each Arena entry will get three bouts in an evening, never against the same opponent twice. You will meet fresh faces first, and NPC or bot fighters fill in when there are not enough players. Rewards are shared across the three bouts, so a full evening pays more than one bout does today.",
+      "patch": "2.0"
+    },
+    {
+      "id": "league-rework",
+      "title": "More leagues, and falling back",
+      "body": "Platinum and Diamond join between Gold and Champion. Leagues can also be lost: at the end of each season the few gladiators with the lowest win rate in a league drop one league, if they fought enough bouts. A gladiator just promoted is safe for one season. New league badges and titles are coming too.",
       "patch": "2.0"
     },
     {

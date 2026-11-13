@@ -66,6 +66,10 @@ Found a bug, or have an idea? Open Messages and press Send feedback, or open Set
 
 Sold gear to a merchant by mistake? In Shops, press Buy back to see your last 10 gear sales of this game day, newest first. Each card shows when you sold it, for how much, and how long you have left. Buy it back for exactly the gold you got: the same item comes back with its level, rarity and stats. You can buy back until the next game day starts (every 4 hours). You need the gold and a free bag slot. Salvage cannot be bought back.
 
+## Marketplace list (economy topic: Shops and Marketplace)
+
+The Marketplace shows each listing as a row with a big item icon, its level, rarity and stats, when it was listed, the time left, and what an NPC merchant would pay for it. The seller is shown under each item; press View profile to see their gladiator card. Use the chips for Weapons, Armor or My listings, search by name, and sort by newest, price or level. To sell, open the Sell tab, choose an item from the grid and set your price: the card shows the market fee and what you receive. Fees, the 5-listing limit and the 7 days a listing lasts are unchanged.
+
 ## Also
 
 - Renown now uses a gold laurel icon, in the corner chip too. Update any Wiki text or picture that shows the old icon.

@@ -1,9 +1,9 @@
 /**
  * Search and sort for the Inventory and the Shops (Patch 1.9, the approved search mockup): one pure helper both panels use.
  * A query is a case-insensitive part of the name (trimmed; empty matches everything). A sort is stable, so ties keep the
- * panel's default order. Level, Price and Name ascend; Damage, Armor, Weight and Sell value descend.
+ * panel's default order. Level, Price and Name ascend; Price high-low (the Marketplace, Task 26), Damage, Armor, Weight and Sell value descend.
  */
-export type SortKey = 'newest' | 'level' | 'price' | 'name' | 'damage' | 'armor' | 'weight' | 'sell';
+export type SortKey = 'newest' | 'level' | 'price' | 'priceDesc' | 'name' | 'damage' | 'armor' | 'weight' | 'sell';
 
 /** What a cell offers the query: its name and the numbers a sort reads (null where a cell has none, as the Arena banner has no stats). */
 export type Queryable = {
@@ -15,7 +15,7 @@ export const INVENTORY_SORTS: readonly [SortKey, string][] = [['newest', 'Newest
 
 /** The key a sort reads and its direction: 1 ascends, -1 descends. */
 const SORTS: Record<Exclude<SortKey, 'newest'>, { field: keyof Queryable; direction: 1 | -1 }> = {
-  level: { field: 'level', direction: 1 }, price: { field: 'price', direction: 1 }, name: { field: 'name', direction: 1 },
+  level: { field: 'level', direction: 1 }, price: { field: 'price', direction: 1 }, priceDesc: { field: 'price', direction: -1 }, name: { field: 'name', direction: 1 },
   damage: { field: 'damage', direction: -1 }, armor: { field: 'armor', direction: -1 }, weight: { field: 'weight', direction: -1 }, sell: { field: 'sell', direction: -1 },
 };
 

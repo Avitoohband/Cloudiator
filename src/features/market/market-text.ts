@@ -7,6 +7,7 @@ import { CATALOG_V1 } from '@domain/catalog-v1';
 import { salvageSellValue } from '@domain/economy';
 import { RULES_V1 } from '@domain/rules-v1';
 import type { Rules } from '@domain/types';
+import { INVENTORY_SORTS, type Queryable, type SortKey } from '../inventory/item-query';
 
 /**
  * The sale fee, a whole percent of the price kept from the seller's credit (spec §9: 5%, rounded down), from the rules'
@@ -73,30 +74,71 @@ export function timeLeft(expiresAtMs: number, nowMs: number): string {
   return `${minutes} min left`;
 }
 
+/**
+ * Patch 1.9 (Task 26): how long ago a listing was made, in the units of its time left and never rounded up: "4 min ago",
+ * "2 h 5 min ago", "6 d 22 h ago", or "just now" under a minute (and for a listing a display clock has not reached yet).
+ */
+export function listedAgo(listedAtMs: number, nowMs: number): string {
+  const ago = nowMs - listedAtMs;
+  if (!(ago >= MINUTE)) return 'just now';
+  const days = Math.floor(ago / DAY), hours = Math.floor((ago % DAY) / HOUR), minutes = Math.floor((ago % HOUR) / MINUTE);
+  if (days > 0) return hours > 0 ? `${days} d ${hours} h ago` : `${days} d ago`;
+  if (hours > 0) return minutes > 0 ? `${hours} h ${minutes} min ago` : `${hours} h ago`;
+  return `${minutes} min ago`;
+}
+
+/**
+ * The seller band's line under the seller's name (Task 26): their class, league and level, each only when the listing carries it
+ * ("Duelist · Silver league · Level 14"), or null when it carries none (the live read before M37).
+ */
+export function sellerLine(listing: Pick<MarketListing, 'sellerClassId' | 'sellerLeague' | 'sellerLevel'>): string | null {
+  const parts = [listing.sellerClassId ? capital(listing.sellerClassId) : null, listing.sellerLeague ? `${capital(listing.sellerLeague)} league` : null,
+    typeof listing.sellerLevel === 'number' ? `Level ${listing.sellerLevel}` : null].filter(Boolean);
+  return parts.length ? parts.join(' · ') : null;
+}
+
+/** The seller avatar's letter: the first character of their name, upper case ("?" for an empty name). */
+export const sellerInitial = (name: string): string => Array.from(name.trim())[0]?.toUpperCase() ?? '?';
+
+/** Browse's Sort (Task 26): Newest (the read's own order) first, then by price both ways and by level. */
+export const MARKET_SORTS: readonly [SortKey, string][] = [['newest', 'Newest'], ['price', 'Price low-high'], ['priceDesc', 'Price high-low'], ['level', 'Level']];
+/** The Sell tab's Sort: the Inventory's, without Sell value (the NPC value is in the card). */
+export const SELL_SORTS: readonly [SortKey, string][] = INVENTORY_SORTS.filter(([key]) => key !== 'sell');
+const ORDER_WORDS: Partial<Record<SortKey, string>> = { newest: 'newest first', price: 'cheapest first', priceDesc: 'dearest first', level: 'lowest level first' };
+/** The count under Browse's list: "7 open listings · newest first". */
+export const marketCountLine = (count: number, sort: SortKey): string => `${count} open listing${count === 1 ? '' : 's'} · ${ORDER_WORDS[sort] ?? ORDER_WORDS.newest}`;
+
+/** The item chips of Browse and Sell, as the Inventory's: Weapons is the weapon slot, Armor every other slot (salvage shows under All only). */
+export const ITEM_FILTERS = ['All', 'Weapons', 'Armor'] as const;
+export type ItemFilter = typeof ITEM_FILTERS[number];
+export function matchesItemFilter(catalogId: string, filter: ItemFilter): boolean {
+  const slot = CATALOG_V1.items[catalogId]?.slot;
+  return filter === 'All' || (filter === 'Weapons' && slot === 'weapon') || (filter === 'Armor' && slot !== undefined && slot !== 'weapon');
+}
+/** What search and sort read from an offer: its item's name, level and stats, and its price. */
+export const offerView = (listing: MarketListing): Queryable => ({
+  name: itemName(listing.item), level: listing.item.tier, price: listing.price, damage: listing.item.stats.damage, armor: listing.item.stats.armor, weight: listing.item.stats.weight,
+});
+/** What search and sort read from a piece on the Sell tab: as the Inventory reads it. */
+export const sellView = (item: ItemInstance): Queryable => ({ name: itemName(item), level: item.tier, damage: item.stats.damage, armor: item.stats.armor, weight: item.stats.weight });
+/** The Sell tab's foot (the approved mockup): what is never offered for listing. */
+export const NOT_OFFERED_TEXT = 'Not offered: equipped or reserved items, account-bound or renown gear, salvage.';
+
 type OfferItem = MarketListing['item'];
-const capital = (text: string) => text.charAt(0).toUpperCase() + text.slice(1);
+/** A word with its first letter in upper case: "rare" is "Rare". */
+export const capital = (text: string) => text.charAt(0).toUpperCase() + text.slice(1);
 
 /** The item's catalog name ("Iron helmet"), or its id for an entry this build does not know. */
 export const itemName = (item: Pick<OfferItem, 'catalogId'>): string =>
   item.catalogId === CATALOG_V1.salvage.id ? CATALOG_V1.salvage.name : CATALOG_V1.items[item.catalogId]?.name ?? item.catalogId;
 /** Tier and rarity: "Level 5 · Uncommon". */
 export const itemGrade = (item: Pick<OfferItem, 'tier' | 'rarity'>): string => `Level ${item.tier} · ${capital(item.rarity)}`;
-/** The item's combat stats that it has, and its weight: "Damage 18.2 · Weight 6", "Armor 5.18 · Weight 4". */
-export function itemStats(item: Pick<OfferItem, 'stats'>): string {
-  const { damage, armor, weight } = item.stats;
-  return [damage > 0 ? `Damage ${damage}` : null, armor > 0 ? `Armor ${armor}` : null, `Weight ${weight}`].filter(Boolean).join(' · ');
-}
 /**
  * An offer's item with its quantity when it is a stack ("12 × Salvage", as Inventory counts one), or its name alone. The
  * database accepts a salvage stack, though the Sell tab offers equipment only, so Browse can show one.
  */
 export const offerName = (item: Pick<OfferItem, 'catalogId' | 'quantity'>): string =>
   item.quantity > 1 ? `${amount(item.quantity)} × ${itemName(item)}` : itemName(item);
-/** The item's slot icon (decorative), or a neutral one for anything that is not equipment (salvage). */
-export function itemIcon(item: Pick<OfferItem, 'catalogId'>): string {
-  const slot = CATALOG_V1.items[item.catalogId]?.slot;
-  return slot === 'offHand' ? '🛡' : slot === 'head' ? '⛑' : slot === 'body' ? '🥋' : slot === 'feet' ? '🥾' : slot === 'weapon' ? '🗡' : '📦';
-}
 /**
  * What an NPC merchant pays for one unit of this catalog variant, or null when NPCs do not buy it. Salvage's value is `rules`'s (the
  * active rules', Patch 1.6: 10 gold under v1, 4 under v2); gear values are the catalog's, the same under every version.

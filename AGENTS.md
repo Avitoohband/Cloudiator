@@ -504,3 +504,16 @@ including the exact queued instance and two-handed off-hand behavior; see
 `integration-recheck.log` in parent `logs/inventory-implementation-20261111/`.
 The combined gate on `2727cff` then passed 12/12. The rule as reusable guidance
 is approved for future runs.
+
+# Recording future plans (Avi, 2026-11-12)
+
+Every decided future plan (a new feature or idea, an item moved between
+patches, a patch renamed) goes into three places in the same session:
+`docs/ROADMAP.md`, the ideas log
+(`docs/superpowers/specs/2026-10-29-next-patch-ideas.md`) and the in-game
+Future Updates draft (`docs/game-info/future-updates.draft.json`; at most 40
+entries and 14,000 bytes, so merge related entries rather than drop a plan).
+The Wiki gets it when it ships. Avi: "anytime we are adding something for the
+future, it should be in the wiki". The Claude skill `cloudiator-record-plans`
+(`~/.claude/skills/cloudiator-record-plans/SKILL.md`) has the details. Editing
+the drafts is routine; publishing them to production needs Avi's go.

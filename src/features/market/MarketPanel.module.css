@@ -1,10 +1,15 @@
 /*
- * The 💰 Marketplace menu (the approved mockup's rows: the item, its seller and time left, then the price and Buy). It fits
- * a 380 px panel and a 360 px bottom sheet: text wraps inside its column and the price column never shrinks. No motion of
- * its own, so reduced motion needs nothing more here.
+ * The 💰 Marketplace menu, Patch 1.9 Task 26 (the approved list mockup, 2026-11-13): a list of rows with a big icon tile in the
+ * Inventory's style, every detail beside it, the price and action, and a seller band. The row's layout follows the panel's width
+ * (a container query): beside the icon the details, the price and action at the right and the seller band under them in the 704 px
+ * desktop panel; icon and details, then the seller band, then the price and a wide action in a narrow panel and on a phone. The Sell
+ * tab borrows the Inventory's tile grid, card and columns. A receipt shows above the list, under the tabs: the browser's scroll anchoring
+ * (left on) scrolls the menu by its height, so the rows in view stay where they are on screen. No motion of its own, so reduced motion
+ * needs nothing more here.
  */
 .market {
   min-width: 0;
+  container-type: inline-size;
 }
 
 .browsing,
@@ -20,31 +25,24 @@
   font-size: 0.86rem;
 }
 
-.wallet {
+/* The tabs, then the wallet on the same line (it wraps under them in a narrow panel). */
+.top {
   display: flex;
   flex-wrap: wrap;
-  align-items: baseline;
+  align-items: center;
   justify-content: space-between;
-  gap: 2px 12px;
+  gap: 6px 12px;
   margin-bottom: 8px;
 }
 
-.wallet p {
-  margin: 0;
-  font-size: 0.86rem;
-}
-
-/* The mockup's tabs: small pills, the shown one gold. */
 .tabs {
   display: flex;
-  flex-wrap: wrap;
   gap: 4px;
-  margin-bottom: 10px;
 }
 
 .tabs button {
   min-height: 36px;
-  padding: 5px 12px;
+  padding: 5px 14px;
   border: 0;
   border-radius: 7px;
   background: var(--glass-2, rgba(255, 255, 255, 0.07));
@@ -58,19 +56,63 @@
   font-weight: 600;
 }
 
+.wallet {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 2px 14px;
+}
+
+.wallet p {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin: 0;
+  font-size: 0.86rem;
+}
+
 .panel {
   min-width: 0;
 }
 
-.listHead {
+/* The chips (the Inventory's), with My listings' count as a quiet badge. */
+.chips {
   display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
+  flex-wrap: wrap;
+  gap: 5px;
+  margin-bottom: 8px;
 }
 
-.listHead :global(.eyebrow) {
-  margin: 0;
+.chips button {
+  padding: 5px 9px;
+  border: 1px solid #655847;
+  border-radius: 7px;
+  background: #292526;
+  color: #e4d7c9;
+  font-size: 0.82rem;
+}
+
+.chips button:hover {
+  background: #38302a;
+}
+
+.chips button[aria-pressed='true'] {
+  border-color: #ae864a;
+  background: #4b3726;
+  color: var(--gold);
+}
+
+.chipCount {
+  display: inline-block;
+  min-width: 18px;
+  margin-left: 6px;
+  padding: 0 5px;
+  box-sizing: border-box;
+  border-radius: 99px;
+  background: #4a4036;
+  color: #f3e2b3;
+  font: 800 11px/17px system-ui, sans-serif;
+  text-align: center;
 }
 
 .offers {
@@ -78,150 +120,340 @@
 }
 
 .list {
-  list-style: none;
+  display: grid;
+  gap: 9px;
   margin: 0;
   padding: 0;
+  list-style: none;
 }
 
-.offer {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
+/* ---- One listing: a narrow panel and a phone first (icon and details, the seller band, then the price and action). */
+.row {
+  display: grid;
+  grid-template-columns: 72px minmax(0, 1fr);
+  grid-template-areas: 'icon details' 'seller seller' 'deal deal';
+  gap: 8px 10px;
   min-width: 0;
-  padding: 8px 0;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  padding: 9px;
+  border: 1px solid #4a4036;
+  border-radius: 11px;
+  background: linear-gradient(145deg, #242733, #181c25 78%);
 }
 
-.offer:last-child {
-  border-bottom: 0;
+.row[data-rarity='uncommon'] { border-color: #536e5b; }
+.row[data-rarity='rare'] { border-color: #617da9; }
+.row[data-mine] { box-shadow: inset 3px 0 0 var(--gold); }
+.row[data-expired] { opacity: 0.78; }
+
+/* The big icon tile: the Inventory tile's look, its level top-left, a stack's count top-right, Yours or Expired along the bottom. */
+.tile {
+  grid-area: icon;
+  position: relative;
+  display: grid;
+  place-items: center;
+  align-self: start;
+  width: 72px;
+  height: 72px;
+  border: 1px solid #655847;
+  border-radius: 9px;
+  background: linear-gradient(155deg, #30302e, #202027 74%);
 }
 
-.what {
-  flex: 1 1 auto;
+.row[data-rarity='uncommon'] .tile { border-color: #4f7560; background: linear-gradient(150deg, #344238, #1c2825 75%); }
+.row[data-rarity='rare'] .tile { border-color: #617da9; background: linear-gradient(150deg, #38445b, #222838 75%); }
+.row[data-expired] .tile > [data-item-icon] { opacity: 0.4; filter: grayscale(0.7); }
+
+.level,
+.count,
+.mark {
+  position: absolute;
+  padding: 0 4px;
+  border-radius: 3px;
+  font: 700 10px/15px system-ui, sans-serif;
+}
+
+.level { inset: 3px auto auto 3px; color: #ede2cf; background: #39312b; font-size: 11px; }
+.count { inset: 3px 3px auto auto; color: #f3e2b3; background: #14120f; font-size: 11px; font-variant-numeric: tabular-nums; }
+.mark { inset: auto 3px 3px 3px; text-align: center; letter-spacing: 0.02em; color: #f3e2b3; background: #3a3342; }
+.mark[data-mark='expired'] { color: #ffd2c9; background: #4a2323; }
+
+.details {
+  grid-area: details;
   min-width: 0;
 }
 
 .name {
-  margin: 0;
-  font-weight: 600;
-  font-size: 0.9rem;
-  overflow-wrap: anywhere;
-}
-
-.icon {
-  margin-right: 0.35rem;
-}
-
-.detail,
-.blocked {
-  display: block;
-  margin: 0;
-  color: var(--ink-dim, var(--muted));
-  font-size: 0.75rem;
-  overflow-wrap: anywhere;
-}
-
-.blocked {
-  color: #f0c27a;
-}
-
-.yours {
-  display: inline-block;
-  margin-left: 6px;
-  padding: 0 6px;
-  border-radius: 6px;
-  background: rgba(230, 180, 80, 0.92);
-  color: var(--accent-ink, #2a1d05);
-  font-size: 0.7rem;
-  font-weight: 700;
-  vertical-align: 1px;
-}
-
-.deal {
-  flex: none;
   display: flex;
-  flex-direction: column;
-  align-items: flex-end;
-  gap: 4px;
-}
-
-.price {
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 8px;
   margin: 0;
-  font-weight: 600;
-  font-size: 0.86rem;
-  white-space: nowrap;
+  font: 700 1.05rem/1.2 Georgia, 'Palatino Linotype', serif;
+  overflow-wrap: anywhere;
 }
 
-.act,
-.more,
-.refresh,
-.retry,
-.failed button,
-.actions button,
-.google,
-.primary {
-  min-height: 36px;
-  padding: 5px 11px;
-  border: 1px solid var(--glass-line, rgba(255, 255, 255, 0.13));
-  border-radius: 8px;
-  background: var(--glass-2, rgba(255, 255, 255, 0.07));
-  color: var(--ink);
+.rarity,
+.yours {
+  padding: 1px 7px;
+  border-radius: 99px;
+  font: 700 0.7rem/1.4 system-ui, sans-serif;
+}
+
+.rarity { background: #2d2c2a; color: #cbbfae; }
+.row[data-rarity='uncommon'] .rarity { background: #233a2c; color: #a3dfb5; }
+.row[data-rarity='rare'] .rarity { background: #2b3140; color: #b7cef2; }
+.yours { border: 1px solid #ae864a; background: #4b3726; color: var(--gold); }
+
+.grade {
+  margin: 2px 0 6px;
+  color: var(--muted);
   font-size: 0.8rem;
 }
 
-.act:hover:not(:disabled):not([aria-disabled='true']),
-.more:hover:not(:disabled),
-.refresh:hover:not(:disabled),
-.retry:hover:not(:disabled),
-.actions button:hover:not(:disabled):not([aria-disabled='true']) {
-  background: rgba(255, 255, 255, 0.15);
+.stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 6px;
+  margin: 0 0 6px;
+  padding: 0;
+  list-style: none;
 }
 
-.primary,
-.actions .primary {
-  border-color: transparent;
+.stats div {
+  display: flex;
+  gap: 4px;
+  padding: 2px 8px;
+  border: 1px solid #39455c;
+  border-radius: 6px;
+  background: #12151d;
+  color: var(--muted);
+  font-size: 0.8rem;
+}
+
+.stats dd { margin: 0; color: var(--ink); font-weight: 700; }
+.stats .weight, .stats .weight dd { color: var(--gold); }
+
+.time {
+  margin: 0;
+  color: #b9b2a5;
+  font-size: 0.78rem;
+  overflow-wrap: anywhere;
+}
+
+.expiredText { color: #ffb4a8; }
+
+/* The price and the action: one line under the seller band in a narrow panel, its own column at the right in a wide one. */
+.deal {
+  grid-area: deal;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 10px;
+  min-width: 0;
+}
+
+.price {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+  color: #f3e2b3;
+  font: 800 1.25rem/1.1 system-ui, sans-serif;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.row[data-poor] .price { color: #ff9c8f; }
+.row[data-expired] .price { color: #9d9488; }
+
+.buy,
+.cancel {
+  display: inline-flex;
+  flex: 1 1 150px;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 44px;
+  padding: 0 10px;
+  border: 1px solid #ffdf97;
+  border-radius: 6px;
   background: var(--gold);
-  color: var(--accent-ink, #2a1d05);
+  color: #101625;
+  font-size: 0.88rem;
+  font-weight: 700;
+}
+
+.buy:hover:not(:disabled):not([aria-disabled='true']) { background: #f6d48c; }
+.buy:disabled { border-color: #655847; background: #292526; color: #cbbfae; cursor: default; }
+.cancel { border-color: #ae864a; background: #292526; color: var(--gold); }
+.cancel:hover:not([aria-disabled='true']) { background: #38302a; }
+
+.blocked,
+.soft {
+  flex: 1 1 100%;
+  margin: 0;
+  font-size: 0.76rem;
+  overflow-wrap: anywhere;
+}
+
+.blocked { color: #ffd9a0; }
+.soft { color: var(--muted); }
+
+/* ---- The seller band: the emphasis. A gold edge and a warm tint, the initial (tinted by class, a league corner when known), the name. */
+.seller {
+  grid-area: seller;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  padding: 7px 8px;
+  border: 1px solid #6b5a38;
+  border-left: 4px solid var(--gold);
+  border-radius: 8px;
+  background: linear-gradient(90deg, #3a2f1d, #251f17 70%);
+}
+
+.avatar {
+  position: relative;
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  overflow: hidden;
+  border: 2px solid #d9b45f;
+  border-radius: 9px;
+  background: linear-gradient(150deg, #5a5f6e, #2c2f38);
+  color: #fff;
+  font: 800 1.2rem Georgia, 'Palatino Linotype', serif;
+}
+
+.avatar[data-class='berserker'] { background: linear-gradient(150deg, #a8432f, #5b1e16); }
+.avatar[data-class='guardian'] { background: linear-gradient(150deg, #3f6aa5, #1e3556); }
+.avatar[data-class='duelist'] { background: linear-gradient(150deg, #3f8f6a, #1b4733); }
+
+.league {
+  position: absolute;
+  right: -1px;
+  bottom: -1px;
+  width: 15px;
+  height: 15px;
+  border-radius: 50% 0 0;
+  color: #1b1405;
+  font: 800 9px/15px system-ui, sans-serif;
+  text-align: center;
+}
+
+.league[data-league='bronze'] { background: #c98b52; }
+.league[data-league='silver'] { background: #c9d0da; }
+.league[data-league='gold'] { background: #f2c66b; }
+.league[data-league='champion'] { background: #e08cff; }
+
+.sellerText {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.sellerText p { margin: 0; }
+.soldBy { color: #d9c9a3; font-size: 0.74rem; letter-spacing: 0.03em; text-transform: uppercase; }
+.sellerName { color: #fff3cf; font: 800 1.08rem/1.2 Georgia, 'Palatino Linotype', serif; overflow-wrap: anywhere; }
+.sellerText .sellerLine { margin-top: 1px; color: #cbbfae; font-size: 0.76rem; }
+
+.profile {
+  flex: none;
+  min-height: 44px;
+  padding: 0 10px;
+  border: 1px solid #ae864a;
+  border-radius: 7px;
+  background: #4b3726;
+  color: var(--gold);
+  font-size: 0.82rem;
   font-weight: 600;
 }
 
-.primary:hover:not(:disabled):not([aria-disabled='true']),
-.actions .primary:hover:not(:disabled):not([aria-disabled='true']) {
-  background: #f6d48c;
+.profile:hover { background: #5d4630; }
+
+/* ---- The wide panel (the 704 px desktop Marketplace): icon | details | price and action, the seller band under the details and action. */
+@container (min-width: 560px) {
+  .row {
+    grid-template-columns: 92px minmax(0, 1fr) 168px;
+    grid-template-areas: 'icon details deal' 'icon seller seller';
+    gap: 6px 14px;
+    padding: 10px;
+  }
+
+  .tile { width: 92px; height: 92px; }
+  .name { font-size: 1.12rem; }
+  .deal { flex-direction: column; flex-wrap: nowrap; align-items: stretch; }
+  .price { justify-content: flex-end; }
+  .buy, .cancel { flex: none; min-height: 42px; }
+  .blocked, .soft { flex: none; text-align: right; }
+  .seller { gap: 10px; padding: 7px 10px; }
+  .profile { min-height: 36px; padding: 0 12px; }
 }
 
-/* Busy commands keep their focus; their handlers reject activation until the reply arrives. */
-.act[aria-disabled='true'],
-.primary[aria-disabled='true'] {
-  cursor: not-allowed;
-  opacity: .7;
+/* ---- Under the list: the count with Refresh, More, and the foot. */
+.countLine {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: 8px;
 }
 
-.tabs button:focus-visible,
-.act:focus-visible,
-.more:focus-visible,
-.refresh:focus-visible,
-.retry:focus-visible,
-.actions button:focus-visible,
-.google:focus-visible,
-.primary:focus-visible,
-.choice input:focus-visible,
-.priceInput:focus-visible {
-  outline: 2px solid var(--gold);
-  outline-offset: 2px;
+.countLine p {
+  min-height: 1.2em;
+  margin: 0;
+  color: #b9b2a5;
+  font-size: 0.8rem;
 }
 
-.refresh {
-  min-height: 32px;
-  padding: 3px 9px;
-  font-size: 0.75rem;
-}
-
+.refresh,
 .more,
-.retry {
-  margin-top: 10px;
+.ghost,
+.retry,
+.failed button {
+  min-height: 32px;
+  padding: 3px 10px;
+  border: 1px solid #655847;
+  border-radius: 7px;
+  background: #292526;
+  color: #e4d7c9;
+  font-size: 0.8rem;
 }
+
+.refresh:hover:not(:disabled),
+.more:hover:not(:disabled),
+.ghost:hover,
+.retry:hover:not(:disabled) {
+  background: #38302a;
+}
+
+.more {
+  display: block;
+  width: 100%;
+  min-height: 36px;
+  margin-top: 8px;
+}
+
+.retry {
+  margin: 0 0 8px;
+}
+
+.foot {
+  margin: 8px 0 0;
+  color: #b9b2a5;
+  font-size: 0.82rem;
+}
+
+.empty {
+  display: grid;
+  justify-items: start;
+  gap: 8px;
+}
+
+.empty p { margin: 0; }
 
 .failed {
   display: flex;
@@ -237,107 +469,133 @@
   font-size: 0.8rem;
 }
 
+.failedNote { margin-top: 8px; }
+
+/* The outcome of a trade, under the tabs (the mockup's place for it). */
 .message,
 .error {
-  margin: 10px 0 0;
+  margin: 0 0 8px;
   padding: 8px 10px;
   border-radius: 8px;
-  font-size: 0.82rem;
+  font-size: 0.85rem;
   overflow-wrap: anywhere;
 }
 
-.message {
-  background: rgba(120, 200, 150, 0.12);
-  border: 1px solid rgba(120, 200, 150, 0.35);
-}
+.message { border: 1px solid #2f6b4a; background: #132a1f; color: #d8f2e2; }
+.error { border: 1px solid #7a3535; background: #2c1719; color: #ffd2cc; }
 
-.error {
-  background: rgba(230, 110, 90, 0.12);
-  border: 1px solid rgba(230, 110, 90, 0.4);
-}
-
-/* Sell: the items as radio choices, the price, then the terms. */
+/* ---- Sell: the Inventory's grid and card, with the price box in the card. */
 .sell {
-  display: grid;
-  gap: 8px;
   min-width: 0;
 }
 
-.sell p {
-  margin: 0;
-}
+.sell p { margin: 0; }
 
-.count {
-  font-size: 0.86rem;
-}
+/* The chosen tile (a radio button, so `aria-checked`; the Inventory's own grid marks `aria-pressed`): a gold border and an inset gold
+   ring, the stack's layers kept behind it. Four parts, so it wins over the Inventory's rarity borders and stack shadow. */
+.sell [role='radio'][aria-checked='true'][data-tile-key] { border-color: var(--gold); box-shadow: inset 0 0 0 1px var(--gold); }
+.sell [role='radio'][aria-checked='true'][data-tile-key][data-stack] { box-shadow: inset 0 0 0 1px var(--gold), 3px 3px 0 -0.5px #4a4036, 6px 6px 0 -1px #2c2620; }
+.sell .tilesLine { margin-top: 8px; color: var(--muted); font-size: 0.8rem; }
+.sell .foot { margin-top: 8px; }
+.active { color: var(--ink); }
+.nothing { font-size: 0.85rem; }
 
-.nothing {
-  font-size: 0.82rem;
-}
-
-.items {
-  min-width: 0;
-  margin: 0;
-  padding: 6px 8px;
-  border: 1px solid var(--glass-line, rgba(255, 255, 255, 0.13));
+.emptyCard {
+  padding: 12px;
+  border: 1px solid #5f5750;
   border-radius: 10px;
+  background: linear-gradient(145deg, #242733, #171b24 75%);
+  color: var(--muted);
+  font-size: 0.85rem;
 }
 
-.items legend {
-  padding: 0 4px;
-  font-size: 0.8rem;
-  color: var(--ink-dim, var(--muted));
+.listBox {
+  display: grid;
+  gap: 6px;
+  margin-top: 10px;
+  padding: 9px 10px 10px;
+  border: 1px solid #4a4030;
+  border-radius: 8px;
+  background: #1a1914;
 }
 
-.choice {
-  display: flex;
-  align-items: flex-start;
-  gap: 8px;
-  min-width: 0;
-  padding: 6px 0;
-  cursor: pointer;
-}
-
-.choice input {
-  flex: none;
-  width: 18px;
-  height: 18px;
-  margin: 2px 0 0;
-  accent-color: var(--gold);
-}
-
-.choiceText {
-  min-width: 0;
+.listBox h4 {
+  margin: 0;
+  color: var(--gold);
+  font-size: 0.7rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
 }
 
 .priceLabel {
-  font-size: 0.86rem;
-  font-weight: 600;
+  font-size: 0.85rem;
 }
 
 .priceInput {
   width: 100%;
   min-width: 0;
   min-height: 40px;
-  padding: 6px 8px;
+  padding: 6px 10px;
   border: 1px solid var(--field-line);
-  border-radius: 6px;
+  border-radius: 7px;
   background: #111c2d;
   color: #f4ead5;
   font: inherit;
 }
 
+.hint { color: var(--muted); font-size: 0.78rem !important; }
+.problem { color: #ffb4a8; font-size: 0.8rem !important; }
+
 .terms {
   display: grid;
   gap: 2px;
-  padding: 8px 10px;
-  border-radius: 8px;
-  background: var(--glass-2, rgba(255, 255, 255, 0.07));
+  padding: 7px 9px;
+  border-radius: 7px;
+  background: #14120f;
+  color: #cbbfae;
   font-size: 0.82rem;
 }
 
-.receive {
-  font-weight: 600;
+.receive { color: #d8f2e2; font-weight: 700; }
+
+.listButton {
+  width: 100%;
+  min-height: 44px;
+  padding: 8px 12px;
+  border: 1px solid #ae864a;
+  border-radius: 6px;
+  background: #4b3726;
+  color: var(--gold);
+  font-weight: 700;
+}
+
+.listButton:hover:not(:disabled):not([aria-disabled='true']) { background: #5a4430; }
+.listButton:disabled { border-color: #655847; background: #292526; color: #cbbfae; }
+
+/* Busy commands keep their focus; their handlers reject activation until the reply arrives. */
+.buy[aria-disabled='true'],
+.cancel[aria-disabled='true'],
+.listButton[aria-disabled='true'],
+.primary[aria-disabled='true'] {
+  cursor: not-allowed;
+  opacity: 0.7;
+}
+
+.tabs button:focus-visible,
+.chips button:focus-visible,
+.buy:focus-visible,
+.cancel:focus-visible,
+.profile:focus-visible,
+.refresh:focus-visible,
+.more:focus-visible,
+.ghost:focus-visible,
+.retry:focus-visible,
+.actions button:focus-visible,
+.google:focus-visible,
+.listButton:focus-visible,
+.priceInput:focus-visible {
+  outline: 2px solid var(--gold);
+  outline-offset: 2px;
 }
 
 /* A visitor's sign-in, the mockup's "Sign in to trade" button below the listings. */
@@ -347,6 +605,21 @@
 
 .signIn p {
   margin: 6px 0 0;
+}
+
+.google,
+.actions button {
+  min-height: 36px;
+  padding: 5px 11px;
+  border: 1px solid var(--glass-line, rgba(255, 255, 255, 0.13));
+  border-radius: 8px;
+  background: var(--glass-2, rgba(255, 255, 255, 0.07));
+  color: var(--ink);
+  font-size: 0.8rem;
+}
+
+.actions button:hover:not(:disabled):not([aria-disabled='true']) {
+  background: rgba(255, 255, 255, 0.15);
 }
 
 .google {
@@ -364,6 +637,17 @@
 
 .google:hover:not(:disabled) {
   background: rgba(30, 28, 40, 0.95);
+}
+
+.actions .primary {
+  border-color: transparent;
+  background: var(--gold);
+  color: var(--accent-ink, #2a1d05);
+  font-weight: 600;
+}
+
+.actions .primary:hover:not(:disabled):not([aria-disabled='true']) {
+  background: #f6d48c;
 }
 
 /* The purchase confirmation: a modal dialog over the camp, inside a 360 px window too. */
@@ -399,11 +683,32 @@
   margin-top: 12px;
 }
 
-.sell .primary {
-  justify-self: start;
+/* ---- A phone (and any touch screen): every control a finger uses is at least 44 px. The search and Sort are the shared ItemSearch's. */
+@media (hover: none), (max-width: 480px) {
+  .tabs button,
+  .chips button,
+  .refresh,
+  .more,
+  .ghost,
+  .retry,
+  .failed button,
+  .google,
+  .actions button,
+  .profile,
+  .buy,
+  .cancel {
+    min-height: 44px;
+  }
+
+  .refresh { padding: 3px 14px; }
+  .chips button { padding: 5px 12px; }
+  .priceInput { min-height: 44px; font-size: 16px; }
+  .market [role='search'] input[type='search'] { min-height: 44px; }
+  .market label select[aria-label] { min-height: 44px; }
+  .market [role='search'] button[aria-label='Clear search'] { right: 0; width: 44px; height: 44px; }
 }
 
-/* Words for screen readers only ("gold" after a price shown as "💰 450"). */
+/* Words for screen readers only ("gold" after a price shown as "450", a chip's count). */
 .sr {
   position: absolute;
   width: 1px;

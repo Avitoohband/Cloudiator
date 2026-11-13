@@ -176,7 +176,9 @@
 }
 
 @media (hover: hover) and (min-width: 1220px) {
-  .shell[data-owner-menu] .surface:is([data-menu-surface='inventory'], [data-menu-surface='gladiator']) {
+  /* Patch 1.9 (Task 26): the Marketplace list is as wide as the Inventory, for everyone who browses it. */
+  .shell[data-owner-menu] .surface:is([data-menu-surface='inventory'], [data-menu-surface='gladiator']),
+  .shell .surface[data-menu-surface='market'] {
     width: 704px;
   }
 }

@@ -40,6 +40,12 @@ test('Damage, Armor, Weight and Sell value descend; ties keep the default order;
   expect(sorted('sell')).toBe('acbde'); // 30,20,10, then null d and banner in order
 });
 
+test('Price high-low descends, ties keep the default order (the Marketplace, Task 26)', () => {
+  expect(sorted('priceDesc')).toBe('adceb'); // 120, 120 (a before d), 80, 50, 40
+  // A cell without a price goes last, as in every sort.
+  expect(ids(queryItems([...cells, cell('f', 'Gift')], c => c, '', 'priceDesc'))).toBe('adcebf');
+});
+
 test('search and sort work together', () => {
   expect(sorted('price', 'r')).toBe('eca'); // Arena banner 50, Heavy armor 80, Sword 120
 });

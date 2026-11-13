@@ -552,7 +552,14 @@ test('fixture market pages open offers newest first, 50 at a time, and filters b
   const gateway = createFixtureGateway();
   const owner = await gateway.owner();
   const page = await gateway.market();
-  expect(page).toEqual(FIXTURE_MARKET[0]);
+  // Task 26: each offer carries its seller's class, league and level from the seller's public profile, as the live market read does
+  // from the `market_offer_reads` view since M37 (a row without them shows the seller's name only).
+  const withSeller = async (row: (typeof FIXTURE_MARKET)[number]['rows'][number]) => {
+    const { actor } = await gateway.profile(row.seller.gladiatorId);
+    return { ...row, sellerClassId: actor.classId, sellerLeague: actor.league, sellerLevel: actor.level };
+  };
+  const expected = { ...FIXTURE_MARKET[0], rows: await Promise.all(FIXTURE_MARKET[0].rows.map(withSeller)) };
+  expect(page).toEqual(expected);
   expect(page.nextCursor).toBeNull();
   const rows = [...page.rows];
   // At least six offers, across tiers, rarities and sellers, one of them the fixture owner's.
@@ -576,7 +583,7 @@ test('fixture market pages open offers newest first, 50 at a time, and filters b
     expect(row.item, row.listingId).toEqual({ catalogId: entry.id, catalogVersion: 'v1', tier: entry.tier, rarity: entry.rarity, stats: entry.stats, quantity: 1 });
     expect(entry.binding, row.listingId).toBe('tradable');
     expect(row.price, row.listingId).toBeGreaterThan(entry.npcSellValue!);
-    expect(Object.keys(row).sort()).toEqual(['expiresAtMs', 'item', 'listedAtMs', 'listingId', 'price', 'seller']);
+    expect(Object.keys(row).sort()).toEqual(['expiresAtMs', 'item', 'listedAtMs', 'listingId', 'price', 'seller', 'sellerClassId', 'sellerLeague', 'sellerLevel']);
   }
   // One seller's offers only, as the live read filters them.
   const own = await gateway.market(undefined, owner.gladiatorId);
@@ -603,7 +610,7 @@ test('fixture market pages open offers newest first, 50 at a time, and filters b
   // Callers get copies.
   page.rows[0].price = -1;
   page.rows.length = 0;
-  expect(await gateway.market()).toEqual(FIXTURE_MARKET[0]);
+  expect(await gateway.market()).toEqual(expected);
   expect(FIXTURE_MARKET[0].rows[0].price).not.toBe(-1);
   // The pager: a full page names its last row as `listedAtMs:listingId`, and the next page follows it.
   const pages = marketPages(rows.slice(0, 5), 2);

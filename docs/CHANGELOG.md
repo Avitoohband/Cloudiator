@@ -33,7 +33,7 @@ Project folders under `D:\Avi\Projects\Animation\Cloudiator\`.
 - Open Game Info from camp to read the Wiki and the Future Updates plans. Pick a Wiki topic from one short scrolling list: combat, attributes, stamina, Training, the Arena, dungeons and more.
 - Open Inventory and shops to browse your inventory in a square grid of pixel-art items. Select a tile to check its details, wear it, or manage it.
 - In My gladiator, hover, focus, or tap worn gear and replacements to see stats, attribute bonuses, and weight.
-- Shops are an icon grid with the same detail card as your inventory. Search and sort both.
+- Shops are an icon grid with the same detail card as your inventory. Search and sort both. The Marketplace is a list with big item icons, every detail on the row and the seller in front.
 - A new Settings menu (⚙) pins the menu to the left, bottom or right on desktop, and sets when names and titles show over the camp: Off, When zoomed in, or Always. It is remembered in this browser.
 - Wear or replace gear straight from the Worn equipment slots in My gladiator.
 - A new gold laurel marks renown, including in the corner chip.

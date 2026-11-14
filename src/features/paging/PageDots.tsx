@@ -8,8 +8,8 @@
 // pages (fix round 1, I3), and the row does not re-centre until the finger lifts. Sliding never reads from the server: only the "+"
 // circle ("Load more") does, and it is never held. Pointer events with pointer capture, on this row only.
 import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type PointerEvent as ReactPointerEvent } from 'react';
-import { COMPACT_QUERY } from '../shell/rail-reveal';
 import { MAX_DOTS, dotWindow, slidePage } from './paging';
+import { useCompactLayout } from './useCompactLayout';
 import styles from './paging.module.css';
 
 /** Hold this long before a slide starts. */
@@ -20,13 +20,13 @@ const FLASH_MS = 1200;
 const SWIPE_PX = 10;
 const NARROW_QUERY = '(max-width: 359px)';
 
-const subscribeMedia = (onChange: () => void) => {
-  const queries = [COMPACT_QUERY, NARROW_QUERY].map(query => window.matchMedia?.(query));
-  queries.forEach(query => query?.addEventListener('change', onChange));
-  return () => queries.forEach(query => query?.removeEventListener('change', onChange));
+const subscribeNarrow = (onChange: () => void) => {
+  const query = window.matchMedia?.(NARROW_QUERY);
+  query?.addEventListener?.('change', onChange);
+  return () => query?.removeEventListener?.('change', onChange);
 };
-const readMax = () => (window.matchMedia?.(NARROW_QUERY).matches ? MAX_DOTS.narrow
-  : window.matchMedia?.(COMPACT_QUERY).matches ? MAX_DOTS.phone : MAX_DOTS.desktop);
+const readNarrow = () => window.matchMedia?.(NARROW_QUERY).matches ?? false;
+const serverNarrow = () => false;
 
 /** A bubble: where, and why (a tap's flash and a slide outlast the focus and the pointer leaving). */
 type Tip = { at: number | 'more'; x?: number; scrub?: boolean; flash?: boolean };
@@ -40,7 +40,9 @@ export function PageDots({ count, current, names, more = false, onGo, onMore }: 
   more?: boolean;
   onGo(page: number): void; onMore?(): void;
 }) {
-  const max = useSyncExternalStore(subscribeMedia, readMax, () => MAX_DOTS.desktop);
+  const compact = useCompactLayout();
+  const narrow = useSyncExternalStore(subscribeNarrow, readNarrow, serverNarrow);
+  const max = narrow ? MAX_DOTS.narrow : compact ? MAX_DOTS.phone : MAX_DOTS.desktop;
   const [tip, setTip] = useState<Tip | null>(null);
   const [frozen, setFrozen] = useState<readonly (number | 'gap')[] | null>(null);
   const row = useRef<HTMLDivElement>(null);

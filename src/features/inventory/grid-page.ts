@@ -6,7 +6,7 @@
 // the page size always matches the columns drawn. A panel that is not laid out (a hidden section) keeps the size it had.
 import { useLayoutEffect, useState, type RefObject } from 'react';
 import { GRID_PAGE } from '../paging/paging';
-import { COMPACT_QUERY } from '../shell/rail-reveal';
+import { useCompactLayout } from '../paging/useCompactLayout';
 
 /** The widest panel whose grid has five columns (the container query in InventoryPanel.module.css). */
 export const NARROW_GRID_PX = 370;
@@ -18,21 +18,20 @@ export function gridLayout(compact: boolean, width: number): keyof typeof GRID_P
 
 /** The tiles a grid page holds in `panel` (the inventory's container), followed as the panel or the layout changes. */
 export function useGridPage(panel: RefObject<HTMLElement | null>): number {
+  const compact = useCompactLayout();
   const [layout, setLayout] = useState<keyof typeof GRID_PAGE>('desktop');
   useLayoutEffect(() => {
     const element = panel.current;
     if (!element) return;
-    const media = window.matchMedia?.(COMPACT_QUERY);
     const update = () => {
       const width = element.getBoundingClientRect().width;
-      if (width > 0) setLayout(gridLayout(!!media?.matches, width));
+      if (width > 0) setLayout(gridLayout(compact, width));
     };
     update();
     const observer = typeof ResizeObserver === 'function' ? new ResizeObserver(update) : null;
     observer?.observe(element);
-    media?.addEventListener?.('change', update);
-    return () => { observer?.disconnect(); media?.removeEventListener?.('change', update); };
-  }, [panel]);
+    return () => observer?.disconnect();
+  }, [panel, compact]);
   return GRID_PAGE[layout];
 }
 

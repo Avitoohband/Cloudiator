@@ -85,6 +85,18 @@ export function GameInfoPanel({ id, onClose, update, fixture, editorAccount, onD
   const [activeId, setActiveId] = useState<string | null>(null);
   const onWikiPage = (id: string | null | undefined) => id != null && wikiPaged.rows.some(row => row.id === id);
   const activeTopicId = onWikiPage(activeId) ? activeId : onWikiPage(article?.id) ? article!.id : wikiPaged.rows[0]?.id;
+  // A page turn keeps the focus on the listbox (never on an option: the listbox is a composite whose active option is `aria-activedescendant`, and a
+  // focused option would unmount on the next jump), and brings the active option into view. The list's own `listRef` is not given to the paging
+  // hook, so it does not move the focus to the first row.
+  const lastWikiPage = useRef(wikiPaged.page);
+  useEffect(() => {
+    if (lastWikiPage.current === wikiPaged.page) return;
+    lastWikiPage.current = wikiPaged.page;
+    const here = document.activeElement;
+    if (here && (topics.current?.contains(here) || here.closest('[data-pager]'))) topics.current?.focus({ preventScroll: true });
+    if (activeTopicId) document.getElementById(optionId(activeTopicId))?.scrollIntoView?.({ block: 'nearest' });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [wikiPaged.page]);
   /** The tab the editor works on (Wiki or Future Updates; the Feedback tab has no editor). */
   const editTab = currentTab.id === 'feedback' ? null : currentTab.id;
   const tabId = (key: string) => `${id}-${key}-tab`;
@@ -228,7 +240,7 @@ export function GameInfoPanel({ id, onClose, update, fixture, editorAccount, onD
       {!settled ? active === 0 && <p role="status" className={styles.loading}>Loading Game Info…</p> : active === 0 && editing === null && <>
         <div ref={topics} role="listbox" aria-label="Wiki topics" tabIndex={0} className={styles.topics}
           aria-activedescendant={activeTopicId ? optionId(activeTopicId) : undefined} onKeyDown={moveTopic}>
-          <div ref={wikiPaged.listRef as RefObject<HTMLDivElement | null>} role="presentation">
+          <div role="presentation">
             {wikiPaged.rows.map(item => {
               const chosen = item.id === article?.id;
               return <div key={item.id} id={optionId(item.id)} role="option" aria-selected={chosen} aria-label={item.video ? `${item.title}, video guide` : undefined} className={styles.topic}

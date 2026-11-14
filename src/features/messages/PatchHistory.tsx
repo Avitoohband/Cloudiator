@@ -72,13 +72,19 @@ export function PatchHistory({ load, build, latest, open, notes, onReadNote }: {
     const last = items?.at(-1);
     return last ? read(last.sortKey) : Promise.resolve();
   } } });
-  // The patch a note named opens on the page that holds it, once the list is read (once).
+  // The patch a note named opens on the page that holds it. It may be older than the 20 first read: the older-page loader runs until the patch is found
+  // or the history is exhausted. A failed read keeps the request open (nothing is retried on its own; the pager's Next reads again, and the search goes on
+  // from what that read brings).
   const landed = useRef(false);
+  const searching = useRef(false);
   useEffect(() => {
-    if (landed.current || items === null) return;
-    landed.current = true;
-    const at = open === null ? -1 : items.findIndex(patch => patch.number === open);
-    if (at > 0) paged.goToIndex(at);
+    if (landed.current || items === null || open === null) return;
+    const at = items.findIndex(patch => patch.number === open);
+    if (at >= 0) { landed.current = true; if (at > 0) paged.goToIndex(at); return; }
+    if (!pages?.more) { landed.current = true; return; }
+    if (searching.current || failed) return;
+    searching.current = true;
+    read(items[items.length - 1].sortKey).catch(() => undefined).finally(() => { searching.current = false; });
   });
 
   return (
@@ -116,7 +122,7 @@ export function PatchHistory({ load, build, latest, open, notes, onReadNote }: {
             </li>;
           })}
         </ul>
-        <PanelFooter><Pager list={paged} /></PanelFooter>
+        <PanelFooter><Pager list={paged} show /></PanelFooter>
       </>}
     </div>
   );

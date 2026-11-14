@@ -258,8 +258,7 @@
   font-size: 0.8rem;
 }
 
-.failed p,
-.moreFailed {
+.failed p {
   margin: 0;
   font-size: 0.8rem;
 }
@@ -292,7 +291,7 @@
 
   /* Eight rows fit the tall sheet (Task 32 fix round 1, I3). */
   .row {
-    padding: 1px 0;
+    padding: 0;
   }
 
   .chips {

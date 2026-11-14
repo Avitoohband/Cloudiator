@@ -9,7 +9,7 @@
 // distinguish"): a gold double-trimmed frame, a trophy medallion with laurels, the round in gold small caps, the tournament's name, a WON
 // or LOST pill. Rewards show only on the viewer's own card (`own`, from its own rewards); the foot says whose rewards show. Every word
 // is `history-text`'s, rendered as text.
-import { Fragment, useEffect, useId, useMemo, useRef, type Ref, type RefObject } from 'react';
+import { Fragment, useEffect, useId, useMemo, useRef, useState, type Ref, type RefObject } from 'react';
 import type { HistoryEntry, HistoryKind } from '@contracts/reads';
 import { useClockMode } from '../../lib/clock-setting';
 import type { SceneView } from '../shell/scene-url';
@@ -118,6 +118,8 @@ export function GladiatorHistory({ store, kind, onKind, name, own, nowMs, onBack
   // Back from a replay this card opened: the page and row it was opened from (kept in `history-return`, taken once). Rows not read yet are
   // read first, a page at a time, and a row on the partly read last page waits for the rest of it.
   const landing = useRef<Landing | null>(null);
+  // The read for the landing failed: the page stays where it is and says so, as the pager does for a Next that fails (it knows nothing of this read).
+  const [landingFailed, setLandingFailed] = useState(false);
   useEffect(() => {
     const found = gladiatorId ? takeHistoryRow(gladiatorId, kind) : null;
     if (found) landing.current = { kind, entryId: found };
@@ -128,8 +130,10 @@ export function GladiatorHistory({ store, kind, onKind, name, own, nowMs, onBack
     const next = landingStep(wanted, { kind, ids: list.rows.map(row => row.entryId), hasMore: list.nextCursor !== null, failed: list.moreFailed, size: paged.size });
     if (next.step === 'jump') { landing.current = null; paged.goToIndex(next.index); }
     else if (next.step === 'read') { if (!list.loadingMore) void store.more(kind); }
+    else if (next.step === 'failed') { landing.current = null; setLandingFailed(true); }
     else landing.current = null;
   });
+  useEffect(() => { setLandingFailed(false); }, [kind]);
   return (
     <section className={styles.history} aria-labelledby={`${ids}-title`} data-history={kind}>
       <div className={styles.head}>
@@ -169,6 +173,7 @@ export function GladiatorHistory({ store, kind, onKind, name, own, nowMs, onBack
             ))}
           </div>
           <PanelFooter><Pager list={paged} show={!compact} /></PanelFooter>
+          {landingFailed && list.moreFailed && <p className={styles.failed} role="alert" data-landing-failed="">Could not load more. Try Next again.</p>}
           {/* The end of a list that paged is said on its last page. */}
           {!list.nextCursor && list.pages > 1 && paged.page === paged.knownPages ? <p className={styles.everything}>{EVERYTHING}</p> : null}
         </>}

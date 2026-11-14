@@ -76,7 +76,8 @@ test.describe('Results in pages', () => {
     await expect(label(menu)).toHaveText('Page 1');
   });
 
-  test('a page of eight fits the menu on page 1 and page 2, without a scroll', async ({ page, context }) => {
+  test('a page of eight fits the menu on page 1 and page 2, without a scroll (1280×720, and the 360×780 sheet on the phone project)', async ({ page, context }, info) => {
+    await page.setViewportSize(info.project.name === 'mobile' ? { width: 360, height: 780 } : { width: 1280, height: 720 });
     const { menu } = await openResults(page, context);
     await everyone(menu);
     await menu.evaluate(el => Promise.all(el.getAnimations({ subtree: true }).map(a => a.finished)));

@@ -42,8 +42,8 @@ describe('where the landing goes next', () => {
     expect(landingStep(landing('missing'), state({ hasMore: false }))).toEqual({ step: 'done' });
   });
 
-  it('is done after a failed read, and when the chip is not the one it belongs to', () => {
-    expect(landingStep(landing('e40'), state({ failed: true }))).toEqual({ step: 'done' });
+  it('says so after a failed read, and is done when the chip is not the one it belongs to', () => {
+    expect(landingStep(landing('e40'), state({ failed: true }))).toEqual({ step: 'failed' });
     expect(landingStep(landing('e5', 'arena'), state({ kind: 'tournament' }))).toEqual({ step: 'done' });
   });
 });

@@ -475,6 +475,41 @@ test.describe('A gladiator’s history from the live views', () => {
     await expect(label).toHaveText(`Page ${known + 1} of ${Math.ceil(30 / per)}`);
   });
 
+  test('a failed read for the row to land on says so, and the card stays on its first page', async ({ page, context }) => {
+    await quietArrivals(context);
+    const many = Array.from({ length: 30 }, (_, i) => row(lucilla.id, i + 1, { opponent: { name: `Rival ${i + 1}`, npc: false } }));
+    await routeLiveReads(context, { world, history: many });
+    // The reads that continue after the first twenty (they carry the cursor's `or` filter) fail once this is set.
+    let failCursor = false;
+    await context.route('**/rest/v1/gladiator_history_reads*', route => (failCursor && new URL(route.request().url()).searchParams.has('or')
+      ? route.fulfill({ status: 500, contentType: 'application/json', body: '{}' }) : route.fallback()));
+    await page.goto('/game/');
+    await page.waitForFunction(() => window.__cloudiatorCamp?.state()?.ready === true, null, { timeout: 45_000 });
+    const card = await fromList(page, 'Lucilla');
+    await card.getByRole('button', { name: 'History', exact: true }).click();
+    const bar = card.getByRole('navigation', { name: 'Pages' });
+    const label = bar.locator('b').first();
+    const per = await perPage(page), known = Math.floor(20 / per), n = known * per + 2;
+    await expect(historyRows(card)).toHaveCount(per);
+    await bar.getByRole('button', { name: `Go to page ${known}`, exact: true }).click();
+    await bar.getByRole('button', { name: 'Next page', exact: true }).click();
+    await expect(label).toHaveText(`Page ${known + 1} of ${Math.ceil(30 / per)}`);
+    await historyRows(card).filter({ hasText: `vs Rival ${n}` }).getByRole('button', { name: new RegExp(`^Watch: vs Rival ${n},`) }).click();
+    const replay = page.getByRole('dialog', { name: 'Replay', exact: true });
+    await expect(replay).toBeVisible();
+    failCursor = true;
+    await replay.getByRole('button', { name: /^Back to Lucilla.s history$/ }).click();
+    await expect(card.getByRole('heading', { name: /^Lucilla.s history$/, level: 2 })).toBeVisible();
+    await expect(card.locator('[data-landing-failed]')).toHaveText('Could not load more. Try Next again.');
+    await expect(label).toHaveText('Page 1');
+    // Served again, Next reads on and the line goes.
+    failCursor = false;
+    await bar.getByRole('button', { name: `Go to page ${known}`, exact: true }).click();
+    await bar.getByRole('button', { name: 'Next page', exact: true }).click();
+    await expect(label).toHaveText(`Page ${known + 1} of ${Math.ceil(30 / per)}`);
+    await expect(card.locator('[data-landing-failed]')).toHaveCount(0);
+  });
+
   test('desktop: Show 25 makes a page taller than the card, and the bar stays the card’s bottom edge', async ({ page, context }) => {
     await quietArrivals(context);
     const many = Array.from({ length: 30 }, (_, i) => row(lucilla.id, i + 1, { opponent: { name: `Rival ${i + 1}`, npc: false } }));

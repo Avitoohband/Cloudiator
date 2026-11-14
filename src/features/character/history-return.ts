@@ -19,16 +19,18 @@ export function takeHistoryRow(gladiatorId: string, kind: string): string | null
 export type Landing = { kind: string; entryId: string };
 
 /**
- * What the landing does next, given the rows read so far. `done`: forget it (the row is not on this chip's list, or the read failed or ended);
- * `jump`: turn to the row's index; `read`: read the next server page first (the row is further down, or on the partly read last page).
+ * What the landing does next, given the rows read so far. `done`: forget it (the row is not on this chip's list, or the list ended without it);
+ * `failed`: forget it, and say so (the read for it failed); `jump`: turn to the row's index; `read`: read the next server page first (the row is
+ * further down, or on the partly read last page).
  * A row already on page 1 (rows shown even when the first page is partly read) counts as loaded.
  */
 export function landingStep(landing: Landing, state: { kind: string; ids: readonly string[]; hasMore: boolean; failed: boolean; size: number }):
-  { step: 'done' } | { step: 'jump'; index: number } | { step: 'read' } {
+  { step: 'done' } | { step: 'failed' } | { step: 'jump'; index: number } | { step: 'read' } {
   if (landing.kind !== state.kind) return { step: 'done' };
   const index = state.ids.indexOf(landing.entryId);
   const whole = Math.floor(state.ids.length / state.size) * state.size;
   const loaded = Math.max(whole, Math.min(state.ids.length, state.size));
   if (index >= 0 && (!state.hasMore || index < loaded)) return { step: 'jump', index };
-  return state.hasMore && !state.failed ? { step: 'read' } : { step: 'done' };
+  if (!state.hasMore) return { step: 'done' };
+  return state.failed ? { step: 'failed' } : { step: 'read' };
 }

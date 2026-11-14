@@ -54,20 +54,22 @@ export function createPageController() {
     changed();
   };
 
-  /** Reads the next rows and then shows `page` (a page past the loaded ones). */
-  const readThen = (page: number) => {
+  /** Reads the next rows and then shows `page` (a page past the loaded ones), and row `row` when a jump asked for it. */
+  const readThen = (page: number, row: number | null = null) => {
     if (busy || !load) return;
     busy = true;
     failed = false;
     const started = generation;
     changed();
     load().then(() => {
+      // A read that a reset left behind changes nothing: a newer read may be running (fix round 2, R2-4).
+      if (started !== generation) return;
       busy = false;
-      if (started === generation) turnTo(page);
-      else changed();
+      turnTo(page, row);
     }, () => {
+      if (started !== generation) return;
       busy = false;
-      if (started === generation) failed = true;
+      failed = true;
       changed();
     });
   };
@@ -90,9 +92,9 @@ export function createPageController() {
         jump = null;
         generation += 1;
       } else if (synced && next.size !== input.size) {
-        // A new size from the caller (a grid that changes layout): the page that holds the first row on screen (fix round 1, I2).
-        asked = pageOfIndex((shown() - 1) * input.size, next.size);
-        jump = null;
+        // A new size (a grid that changes layout, the saved Show choice applying on open): the page that holds the jumped-to row,
+        // else the first row on screen (fix round 1, I2; fix round 2, R2-2: a jump made on open is kept).
+        asked = pageOfIndex(jump ?? (shown() - 1) * input.size, next.size);
       }
       synced = true;
       input = next;
@@ -109,8 +111,15 @@ export function createPageController() {
     back() { if (shown() > 1) turnTo(shown() - 1); },
     next() { go(shown() + 1); },
     go,
-    /** Turns to the page that holds row `index`; asked as is, so a row not loaded yet is shown once it is (fix round 1, M3). */
-    goToIndex(index: number) { turnTo(pageOfIndex(index, input.size), index); },
+    /**
+     * Turns to the page that holds row `index`, asked as is, so a row not loaded yet is shown once it is (fix round 1, M3). Past the
+     * full pages of a cursor list it reads once first and then shows that page, or the last page if the server has no more (R2-3).
+     */
+    goToIndex(index: number) {
+      const page = pageOfIndex(index, input.size);
+      if (page > knownPages() && input.hasMore) readThen(page, index);
+      else turnTo(page, index);
+    },
     /** A new page size: the page is the one that holds `firstIndex` (by default the first row shown now). */
     resize(size: number, firstIndex = (shown() - 1) * input.size) {
       input = { ...input, size };

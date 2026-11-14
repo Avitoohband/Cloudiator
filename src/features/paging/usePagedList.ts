@@ -73,7 +73,9 @@ export function usePagedList<T>(all: readonly T[], options: {
       row?.scrollIntoView?.({ block: 'nearest' });
     }
     if (view.turn === handled.current || !box) return;
-    if (view.page !== view.target && more?.hasMore) return;
+    // A turn waits for its page: rows still being read, or a jumped-to row that has not arrived yet (fix round 2: it is scrolled
+    // into view, without moving the focus, once its page shows).
+    if (view.page !== view.target && (more?.hasMore || view.jump !== null)) return;
     handled.current = view.turn;
     const rows = pageRowsOf(box);
     if (view.jump !== null) {

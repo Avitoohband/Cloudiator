@@ -21,6 +21,15 @@ export const ownsKeys = (target: EventTarget | null, key: string): boolean => {
   return element.closest(key.startsWith('Arrow') ? OWNS_ARROWS : OWNS_PAGE_KEYS) !== null;
 };
 
+/**
+ * Whether a key on `target` belongs to `panel`: the nearest menu or `PagingScope` around the target is that panel (or there is none).
+ * A `PagingScope` inside a menu keeps its keys from the menu's own bar (fix round 2, R2-6).
+ */
+export const keyInPanel = (target: Element, panel: Element): boolean => {
+  const owner = target.closest('[data-paging-scope], [data-menu-surface]');
+  return owner === null || owner === panel;
+};
+
 export function usePageKeys(anchor: RefObject<HTMLElement | null>, keys: Record<string, () => void>, enabled = true) {
   const scope = usePanelScope();
   const latest = useRef(keys);
@@ -32,7 +41,7 @@ export function usePageKeys(anchor: RefObject<HTMLElement | null>, keys: Record<
       if (!action || event.defaultPrevented || event.altKey || event.ctrlKey || event.metaKey || ownsKeys(event.target, event.key)) return;
       // The panel: the open menu or the PagingScope, else the dialog or section the bar sits in.
       const panel = scope?.panel ?? anchor.current?.closest('[data-paging-scope], [role="dialog"], section') ?? null;
-      if (!panel || !(event.target instanceof Node) || !panel.contains(event.target)) return;
+      if (!panel || !(event.target instanceof Element) || !panel.contains(event.target) || !keyInPanel(event.target, panel)) return;
       event.preventDefault();
       action();
     };

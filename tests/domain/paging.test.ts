@@ -6,7 +6,7 @@ import { createPageController } from '../../src/features/paging/page-controller'
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { PagingScope, PanelScopeContext, usePanelScope, type PanelScope } from '../../src/features/paging/PanelFooter';
-import { ownsKeys } from '../../src/features/paging/usePageKeys';
+import { keyInPanel, ownsKeys } from '../../src/features/paging/usePageKeys';
 import { PAGE_SIZE_KEY, readPageSize, resetPageSizeMemory, writePageSize } from '../../src/features/paging/page-size-prefs';
 
 // Patch 1.9 Task 30 (Avi, 2026-11-13: "Menus next and backwards instead of scrolling"): long menus show one page with Back and Next.
@@ -247,6 +247,51 @@ describe('the page controller (usePagedList)', () => {
     expect(c.view().page).toBe(12);
   });
 
+  it('keeps a jump made on open when the saved Show choice applies (fix round 2, R2-2)', () => {
+    const c = createPageController();
+    c.sync(input(50, { size: 7 }));
+    c.goToIndex(28);
+    c.sync(input(50, { size: 25 }));
+    expect(c.view()).toMatchObject({ page: 2, jump: 28 });
+  });
+
+  it('reads once to reach a loaded row past the full pages of a cursor list (fix round 2, R2-3)', async () => {
+    const c = createPageController();
+    const load = vi.fn(() => Promise.resolve());
+    c.sync(input(50, { hasMore: true }), load);
+    c.goToIndex(49);
+    c.goToIndex(49);
+    expect(load).toHaveBeenCalledTimes(1);
+    // While it reads, the list stays where it was.
+    expect(c.view()).toMatchObject({ page: 1, busy: true });
+    await Promise.resolve();
+    await Promise.resolve();
+    c.sync(input(100, { hasMore: true }), load);
+    expect(c.view()).toMatchObject({ page: 8, jump: 49 });
+    // The server had no more: the last page shows.
+    const d = createPageController();
+    d.sync(input(50, { hasMore: true }), () => Promise.resolve());
+    d.goToIndex(49);
+    await Promise.resolve();
+    await Promise.resolve();
+    d.sync(input(50, { hasMore: false }), null);
+    expect(d.view().page).toBe(8);
+  });
+
+  it('a read that a reset left behind never clears a newer read (fix round 2, R2-4)', async () => {
+    const c = createPageController();
+    let finishOld!: () => void;
+    c.sync(input(7, { hasMore: true }), () => new Promise<void>(resolve => { finishOld = resolve; }));
+    c.next();
+    c.sync(input(7, { hasMore: true, resetKey: 'x' }), () => new Promise<void>(() => {}));
+    c.next();
+    expect(c.view().busy).toBe(true);
+    finishOld();
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(c.view().busy).toBe(true);
+  });
+
   it('jumps to the page that holds a row', () => {
     const c = createPageController();
     c.sync(input(50));
@@ -267,6 +312,14 @@ describe('the paging scope and the keys', () => {
     expect(seen).toEqual({ slot: null, panel: null });
     expect(html).toContain('data-paging-scope');
     expect(html).toContain('data-panel-footer');
+  });
+
+  it('acts on a key only in its own scope, not a PagingScope inside it (fix round 2, R2-6)', () => {
+    const menu = {} as Element, scope = {} as Element;
+    const inScope = (owner: Element | null) => ({ closest: () => owner }) as unknown as Element;
+    expect(keyInPanel(inScope(menu), menu)).toBe(true);
+    expect(keyInPanel(inScope(scope), menu)).toBe(false);
+    expect(keyInPanel(inScope(null), menu)).toBe(true);
   });
 
   it('leaves the arrows to controls that use them, and PageDown to text fields only', () => {

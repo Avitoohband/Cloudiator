@@ -55,6 +55,8 @@ export function PageDots({ count, current, names, more = false, onGo, onMore }: 
   const dots = frozen ?? dotWindow(current, count, max);
   /** A bubble whose circle has left the row (the row re-centred under a hover) is not shown (fix round 1, M5). */
   const shownTip = tip && (tip.scrub || (tip.at === 'more' ? more && !!onMore : dots.includes(tip.at))) ? tip : null;
+  // A bubble that is no longer shown is forgotten, so it does not come back with its circle (fix round 2, R2-7).
+  useEffect(() => { if (tip && !shownTip) setTip(null); }, [tip, shownTip]);
   const text = (at: number | 'more') => (at === 'more' ? 'Load more' : names ? names[at - 1] ?? '' : more ? `Page ${at}` : `Page ${at} of ${count}`);
   const label = (at: number) => (names ? `Go to section: ${names[at - 1] ?? at}` : `Go to page ${at}`);
 
@@ -109,6 +111,8 @@ export function PageDots({ count, current, names, more = false, onGo, onMore }: 
       timer: window.setTimeout(() => {
         if (press.current !== held || on === 'more') return;
         held.scrub = true;
+        // The slide is measured from where the finger is when the hold fires, so a drift before it moves nothing (fix round 2, R2-5).
+        held.startX = held.x;
         held.frozen = dotWindow(shown.current, count, max);
         setFrozen(held.frozen);
         try { box.setPointerCapture(pointer); } catch { /* The pointer is gone already. */ }

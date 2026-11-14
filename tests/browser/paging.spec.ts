@@ -6,7 +6,10 @@ import { expect, test, type Locator, type Page } from './fixtures';
 import { MENU_PREFS_KEY } from '../../src/features/shell/menu-prefs';
 import { PAGE_SIZE_KEY } from '../../src/features/paging/page-size-prefs';
 import { noHorizontalScroll } from './a11y-helpers';
-import { openMenu, touchLayout } from './shell-helpers';
+import { createDemoWorld } from '../../src/game/demo-world';
+import { openMenu, quietArrivals, touchLayout } from './shell-helpers';
+import { routeLiveReads } from './live-routes';
+import { worldFixture } from '../fixtures/domain';
 
 const production = process.env.PLAYWRIGHT_STATIC === 'true';
 const SHOTS = '.superpowers/sdd/2026-11-12-1.9-additions';
@@ -313,6 +316,22 @@ test.describe('menus with Back and Next: the Gladiators list', () => {
     await up(at.x + step * 2, at.y);
     await page.waitForTimeout(500);
     await expect(label(menu)).toHaveText('Page 6 of 8');
+  });
+
+  test('a phone list of 10 pages keeps the circles on their own row above Back and Next (fix round 2)', async ({ page, context }) => {
+    test.skip(!(await touchLayout(page)), 'The touch layout only.');
+    // 70 gladiators (live mode, a visitor): 10 pages of 7, more than the desktop's 8 circles between the buttons.
+    await quietArrivals(context);
+    await routeLiveReads(context, { world: createDemoWorld(worldFixture.serverNowMs, 70, 0) });
+    await page.goto('/game/');
+    const menu = await openMenu(page, 'Gladiators');
+    await expect(rows(menu)).toHaveCount(7, { timeout: 45_000 });
+    await expect(label(menu)).toHaveText('Page 1 of 10');
+    const [dots, next, back] = [(await pager(menu).locator('[data-page-dots]').boundingBox())!,
+      (await pager(menu).getByRole('button', { name: 'Next page', exact: true }).boundingBox())!,
+      (await pager(menu).getByRole('button', { name: 'Previous page', exact: true }).boundingBox())!];
+    expect(dots.height).toBeGreaterThanOrEqual(43.5);
+    expect(dots.y + dots.height).toBeLessThanOrEqual(Math.min(next.y, back.y) + 1);
   });
 
   test('Find my gladiator still finds the owner in the camp, from any page', async ({ page }) => {

@@ -300,7 +300,9 @@
 
 /* ---- Phone (the shell's touch layout): the circles' own 44 px row, 44 px buttons, the safe area. */
 @media (hover: none), (max-width: 480px) {
-  .pager {
+  .pager,
+  .pager[data-dots='wide'] {
+    /* Any page count: the circles have their own row above Back and Next (fix round 2, R2-1). */
     grid-template-areas: 'dots dots dots' 'back where next';
     padding: 4px 12px calc(10px + env(safe-area-inset-bottom, 0px));
     border-radius: 0;

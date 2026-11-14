@@ -25,7 +25,7 @@ import { SectionStrip, type Section } from '../paging/SectionPager';
 import { pageOfIndex } from '../paging/paging';
 import { usePagedList } from '../paging/usePagedList';
 import { gridColumns, rowFill, useGridPage } from './grid-page';
-import { usePhoneCard } from './phone-card';
+import { useCloseOnTurn, usePhoneCard } from './phone-card';
 import { ItemIcon, ItemStats } from './ItemPresentation';
 import { ItemSearch, MatchCount, NoMatch } from './ItemSearch';
 import { groupStacks, isStackable, joinsStack, stackSaleItems, type StackTile } from './stacks';
@@ -158,10 +158,10 @@ export function InventoryPanel({ owner, gateway, refresh, clock, preview = false
   // Fix round 1 (review Important 1): on a phone the chosen item's card opens over the grid (`usePhoneCard`).
   const phoneCard = usePhoneCard(visibleTiles.length > 0);
   const covered = phoneCard.open;
-  // Another section hides the card's (it opens again from a tile). A page the grid turns under it (the bar's Next by keyboard, a page key
-  // pressed outside the card) closes it too, so the card never lies over another page than its tile's (Codex review 6).
+  // Another section hides the card's (it opens again from a tile). A page the grid turns under it closes it too, and the new page's first
+  // tile takes the focus (`useCloseOnTurn`).
   useEffect(() => { if (section !== 0) phoneCard.close(false); }, [section, phoneCard.close]);
-  useEffect(() => { phoneCard.close(false); }, [paged.page, phoneCard.close]);
+  useCloseOnTurn(phoneCard, paged.page, paged.listRef as RefObject<HTMLElement | null>);
   // On a phone a closed card is not shown, so an outcome that belongs in it (a sale's, a piece's) shows at the section's end instead, never
   // left in the hidden card when the player closes it while the command is on its way (Codex review Minor 4).
   const inCard = !(phoneCard.phone && visibleTiles.length > 0) || phoneCard.open;

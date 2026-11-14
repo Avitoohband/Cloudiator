@@ -1063,10 +1063,14 @@ test.describe('the live Tournaments panel', () => {
     await expect(bracket.getByRole('heading', { name: 'Bronze tournament' })).toBeVisible();
     // An owner opens on its own league (Task 37 adds the league buttons for a player: its own is marked).
     await expect(panel.getByRole('group', { name: 'League' }).getByRole('button', { name: 'Bronze (yours)' })).toHaveAttribute('aria-pressed', 'true');
+    // An explicit pick of the own league does not outlive a promotion: the panel follows the new own league, and says nothing of "viewing".
+    await panel.getByRole('group', { name: 'League' }).getByRole('button', { name: 'Bronze (yours)' }).click();
     live.setOwner({ ...owner, progression: { ...owner.progression, league: 'silver' } });
     live.setWorld({ ...world, revision: 'promoted' });
     await page.clock.fastForward(30_000);
     await expect(bracket.getByRole('heading', { name: 'Silver tournament' })).toBeVisible();
+    await expect(panel.getByRole('group', { name: 'League' }).getByRole('button', { name: 'Silver (yours)' })).toHaveAttribute('aria-pressed', 'true');
+    await expect(panel.locator('[data-viewing-league]')).toHaveCount(0);
     expect(live.requests.some(r => r.table === 'tournament_views' && r.query.get('id') === `eq.tournament:${OPENING_SLOT}:silver`)).toBe(true);
   });
 
@@ -1106,7 +1110,8 @@ test.describe('the live Tournaments panel', () => {
     await expect(bracket).not.toContainText(/You are|Your /);
     await allEntrants(bracket);
     await expect(bracket.getByRole('region', { name: 'Entrants' }).getByRole('listitem')).toHaveCount(8);
-    await page.screenshot({ path: `C:/Avi/Studies/Projects/Cloudiator/design/.superpowers/sdd/2026-11-12-1.9-additions/task-37-tournaments-other-league-${testInfo.project.name === 'mobile' ? 'phone' : 'desktop'}.png` });
+    // The screenshot for the task report is written only when TASK_SHOTS names a folder (the gate never sets it).
+    if (process.env.TASK_SHOTS) await page.screenshot({ path: `${process.env.TASK_SHOTS}/task-37-tournaments-other-league-${testInfo.project.name === 'mobile' ? 'phone' : 'desktop'}.png` });
     await leagues.getByRole('button', { name: 'Bronze (yours)' }).click();
     await expect(bracket.getByRole('heading', { name: 'Bronze tournament' })).toBeVisible();
     await expect(panel.getByRole('heading', { name: 'Registration' })).toBeVisible();

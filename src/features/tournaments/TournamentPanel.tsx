@@ -519,9 +519,9 @@ const readClock = (clock: DisplayClock) => ({ now: clock.now(), ready: clock.syn
 /**
  * The Tournaments tab. In fixture mode it opens sample tournaments; otherwise the tournament of the running or latest
  * tournament slot (Task 19's lookup id `tournament:<slot>:<league>`, `tournamentLookupIdOrNull`) in the owner's league,
- * or, for a visitor or a viewer without a gladiator, in the league the viewer picks (Bronze first). Task 37: a player gets the league buttons too (the
- * own league marked "(yours)", pressed on opening) to watch any league; another league hides the registration and the player's own parts. A signed-in player
- * whose owner is still loading gets no picker and reads nothing until its league is known. Without a reader it says
+ * or, for a visitor or a viewer without a gladiator, in the league the viewer picks (Bronze first).
+ * Task 37: a player gets the league buttons too (the own league marked "(yours)", pressed on opening) to watch any league;
+ * another league hides the registration and the player's own parts. A signed-in player whose owner is still loading gets no picker and reads nothing until its league is known. Without a reader it says
  * brackets cannot be shown yet. Every time is the shared display clock's; until it has the server's time the panel waits,
  * or says brackets cannot be loaded while the sync fails to read the revision. Registration is a player's only: everyone
  * else sees the countdown and the brackets (spec "Menus", the Visitor column).
@@ -625,6 +625,8 @@ export function TournamentPanel({ reads, owner, clock, fixture, samples = [], re
   // Task 37: a player gets the league buttons too, opening on their own league each time the menu opens, to watch any league's bracket and replays.
   const ownLeague = owner ? owner.progression.league : null;
   const leagueButtons = !fixture && (picker || !!owner);
+  // A change of the player's own league (a promotion) drops the pick: the panel follows the new own league again.
+  useEffect(() => { setPicked(null); }, [ownLeague]);
   const league: LeagueId = picked ?? ownLeague ?? 'bronze';
   const liveLeague = owner || picker ? league : null;
   /** Another league than the player's own is shown: the player's own parts (registration, role, rewards) stay with their own league. */

@@ -389,7 +389,7 @@ export function StandingsPanel({ reads, owner, clock, revision, onProfile, timeZ
   }, [reads]);
 
   /** Reads a league's first page of a season (null: the current one), or for a refresh of what is shown as many pages as are shown. */
-  const load = useCallback(async (which: LeagueId, season: string | null, refresh: boolean) => {
+  const loadNow = useCallback(async (which: LeagueId, season: string | null, refresh: boolean) => {
     const reader = counted();
     if (!reader) { setStatus('unavailable'); return; }
     const mine = ++request.current;
@@ -409,6 +409,14 @@ export function StandingsPanel({ reads, owner, clock, revision, onProfile, timeZ
       setStatus('failed');
     }
   }, [counted]);
+  /** The first-page read in flight, so a Next waits for it and extends the list it leaves (Codex review, finding 2). */
+  const refreshing = useRef<Promise<void> | null>(null);
+  const load = useCallback((which: LeagueId, season: string | null, refresh: boolean) => {
+    const run = loadNow(which, season, refresh);
+    refreshing.current = run;
+    void run.then(() => { if (refreshing.current === run) refreshing.current = null; });
+    return run;
+  }, [loadNow]);
 
   const loadSeasons = useCallback(async () => {
     if (!reads?.seasons) return;
@@ -461,12 +469,17 @@ export function StandingsPanel({ reads, owner, clock, revision, onProfile, timeZ
 
   // Next past the loaded rows (Patch 1.9 Task 32): reads the next server page. A failed read keeps the rows and the page and rejects, so the
   // pager says so and Next tries again.
+  // A first-page refresh in flight is waited for first, and the page read extends the list as the refresh left it: a response whose base list is
+  // no longer the shown one is dropped, so older rows never replace a refreshed list.
   const more = async () => {
     const reader = counted();
-    if (!reader || !page?.nextCursor) return;
+    if (!reader) return;
+    while (refreshing.current) await refreshing.current;
+    const base = shown.current;
+    if (!base?.nextCursor || base.key !== keyOf(league, chosen)) return;
     const mine = request.current;
-    const next: ShownPages = { ...await readNextPage(reader, page), key: page.key };
-    if (mine !== request.current) return;
+    const next: ShownPages = { ...await readNextPage(reader, base), key: base.key };
+    if (mine !== request.current || shown.current !== base) return;
     shown.current = next;
     setPage(next);
   };

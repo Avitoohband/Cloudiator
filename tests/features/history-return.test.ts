@@ -1,10 +1,20 @@
 import { describe, expect, it } from 'vitest';
-import { landingStep, rememberHistoryRow, takeHistoryRow } from '@/features/character/history-return';
+import { clearHistoryRow, landingStep, rememberHistoryRow, takeHistoryRow } from '@/features/character/history-return';
 
 describe('the History row a replay was opened from (Task 32)', () => {
   it('is taken once, by the same gladiator and chip', () => {
     rememberHistoryRow('g1', 'arena', 'e7');
     expect(takeHistoryRow('g1', 'arena')).toBe('e7');
+    expect(takeHistoryRow('g1', 'arena')).toBeNull();
+  });
+
+  it('is forgotten by the History that made it, and only by that one (Codex review, finding 7)', () => {
+    const mine = {}, other = {};
+    rememberHistoryRow('g1', 'arena', 'e7', mine);
+    clearHistoryRow(other);
+    expect(takeHistoryRow('g1', 'arena')).toBe('e7');
+    rememberHistoryRow('g1', 'arena', 'e7', mine);
+    clearHistoryRow(mine);
     expect(takeHistoryRow('g1', 'arena')).toBeNull();
   });
 

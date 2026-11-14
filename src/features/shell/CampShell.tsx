@@ -298,6 +298,8 @@ export function CampShell({ fixture, previewAs, previewResting = false, previewB
     : game.session.status === 'loading' ? undefined : game.session.status === 'signed-in' ? game.session.userId : null;
   const [messagesRequest, setMessagesRequest] = useState<MessagesRequest | null>(null);
   const messageRequests = useRef(0);
+  /** The result a Watch from Notifications opened (Task 31): the panel comes back on the page that holds it. */
+  const watchedRow = useRef<string | null>(null);
   useEffect(() => {
     setMessagesRequest(request => messagesRequestFor(request, requestAccount, choiceKey));
   }, [requestAccount, choiceKey]);
@@ -436,7 +438,11 @@ export function CampShell({ fixture, previewAs, previewResting = false, previewB
       openHistory(historyCard.gladiatorId, historyCard.kind, historyNames.current.get(historyCard.gladiatorId));
       return;
     }
-    if (from === 'notifications') setMessagesRequest({ tab: 'notifications', n: ++messageRequests.current, account: requestAccount, owner: choiceKey });
+    if (from === 'notifications') {
+      const row = watchedRow.current ?? undefined;
+      watchedRow.current = null;
+      setMessagesRequest({ tab: 'notifications', n: ++messageRequests.current, account: requestAccount, owner: choiceKey, row });
+    }
     const filter = boutFilterOf(from);
     if (filter) chooseResults({ view: 'mine', filter });
     else if (from === 'results') chooseResults({ view: 'everyone' });
@@ -484,7 +490,7 @@ export function CampShell({ fixture, previewAs, previewResting = false, previewB
       open: note => {
         if (!clock.synced() || !replayKept(note.summary.replayExpiry, clock.now()) || note.kind === 'training') return;
         const view = sceneForResult(note.activityId, note.kind);
-        if (view) openScene({ ...view, from: 'notifications' });
+        if (view) { watchedRow.current = note.activityId; openScene({ ...view, from: 'notifications' }); }
       },
     },
     load: () => reads.messages(),

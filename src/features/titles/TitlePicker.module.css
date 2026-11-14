@@ -492,3 +492,9 @@ label.option:hover {
     min-height: 44px;
   }
 }
+
+/* Patch 1.9 Task 31: the paging surface around the choices: it fills what the top and the foot leave, so the bar sits on its bottom edge. */
+.paged {
+  flex: 1 1 auto;
+  min-height: 0;
+}

@@ -298,7 +298,7 @@ test.describe('patch numbers in live mode', () => {
     expect((await notice(page).boundingBox())!.width).toBeGreaterThan(100);
   });
 
-  test('reads older patches 20 at a time', async ({ page }) => {
+  test('reads older patches 20 at a time, 8 to a page: Next past the loaded ones reads the next 20', async ({ page }) => {
     const live = await player(page);
     // 25 patches, 1.0 to 1.24: the history reads the newest 20, then the 5 older ones.
     live.setPatches(Array.from({ length: 25 }, (_, i) => ({ number: `1.${i}`, sortKey: 1_000_000 + i * 1_000, title: `Patch title ${i}`,
@@ -306,11 +306,21 @@ test.describe('patch numbers in live mode', () => {
     await openLive(page);
     const panel = await openHistoryFromMenu(page);
     const buttons = panel.locator('[data-patch]');
-    await expect(buttons).toHaveCount(20);
+    const bar = panel.getByRole('navigation', { name: 'Pages' });
+    await expect(buttons).toHaveCount(8);
     await expect(disclosure(panel, '1.24')).toHaveAttribute('aria-expanded', 'true');
-    await panel.getByRole('button', { name: 'Older patches', exact: true }).click();
-    await expect(buttons).toHaveCount(25);
-    expect(await buttons.evaluateAll(els => els.map(el => el.getAttribute('data-patch')))).toEqual(Array.from({ length: 25 }, (_, i) => `1.${24 - i}`));
+    await expect(bar).toContainText('Page 1');
+    await expect(bar).toContainText('more to see');
+    await bar.getByRole('button', { name: 'Next page', exact: true }).click();
+    await expect(bar.locator('b').first()).toHaveText('Page 2');
+    await expect(buttons).toHaveCount(8);
+    // Page 3 is only partly loaded (4 of 8 rows): Next reads the older 5, then page 3 shows 8 rows.
+    await bar.getByRole('button', { name: 'Next page', exact: true }).click();
+    await expect(bar.locator('b').first()).toHaveText('Page 3 of 4');
+    await expect(buttons).toHaveCount(8);
+    await bar.getByRole('button', { name: 'Next page', exact: true }).click();
+    await expect(buttons).toHaveCount(1);
+    expect(await buttons.evaluateAll(els => els.map(el => el.getAttribute('data-patch')))).toEqual(['1.0']);
     await expect(panel.getByRole('button', { name: 'Older patches', exact: true })).toHaveCount(0);
     const reads = live.requests.filter(r => r.table === 'patches' && r.query.get('select')?.includes('patch_features'));
     // The first page asks for no key (React's development double mount may ask twice), the next one for patches older than 1.5.

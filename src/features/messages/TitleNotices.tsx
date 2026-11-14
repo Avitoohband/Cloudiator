@@ -101,7 +101,7 @@ export function NoticeCard({ notice, fresh, titles, wear, onChoose }: {
   onChoose(): void;
 }) {
   const history = notice.kind === 'history';
-  return <li className={styles.card} data-title-notice={history ? 'history' : notice.key} data-unread={fresh ? '' : undefined}>
+  return <li className={styles.card} data-page-row="" tabIndex={-1} data-title-notice={history ? 'history' : notice.key} data-unread={fresh ? '' : undefined}>
     <span className={styles.rowTop}>
       <span className={styles.rowTitle}>
         {fresh && <span className={styles.dot} data-unread-dot aria-hidden="true" />}

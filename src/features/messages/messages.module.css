@@ -1056,3 +1056,9 @@
     min-height: 44px;
   }
 }
+
+/* Patch 1.9 Task 31: the panel's paging surface (`PagingScope`) fills what the head and the footer leave, so the bar sits on its bottom edge. */
+.paged {
+  flex: 1 1 auto;
+  min-height: 0;
+}

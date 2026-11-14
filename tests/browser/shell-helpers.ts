@@ -35,7 +35,14 @@ export async function revealRail(page: Page) {
     const burger = page.getByRole('button', { name: 'Menus', exact: true });
     if ((await burger.getAttribute('aria-expanded')) !== 'true') await burger.click();
   } else {
-    await page.mouse.move(2, page.viewportSize()!.height / 2);
+    // The pointer's entry into the edge strip is one event: one that lands while the page is busy (a heavy run) can be missed, and the
+    // rail then never shows (2026-11-14, stamina-notices). Move off and in again until the rail's own state says it is shown.
+    const y = page.viewportSize()!.height / 2;
+    await expect(async () => {
+      await page.mouse.move(120, y);
+      await page.mouse.move(2, y);
+      await expect(page.getByTestId('menu-rail')).toHaveAttribute('data-revealed', 'true', { timeout: 2_000 });
+    }).toPass({ timeout: 20_000 });
   }
   // A translated-offscreen rail still satisfies toBeVisible. Wait for the shell's actual reveal state before clicking an icon.
   await expect(page.getByTestId('menu-rail')).toHaveAttribute('data-revealed', 'true');

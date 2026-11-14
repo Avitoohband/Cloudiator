@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState, type RefObject } from 'react';
 import type { ClipboardEvent, KeyboardEvent } from 'react';
 import { GameInfoEditor } from './GameInfoEditor';
 import { FeedbackReview } from './FeedbackReview';
@@ -8,6 +8,9 @@ import { listFeedback } from './feedback-review';
 import { editGameInfo, guideThumbnail, loadDraftGameInfo, loadPublishedGameInfo, type GameInfoEntry, type GameInfoPages, type GameInfoSnapshot, type GameInfoTab } from './game-info-client';
 import type { EditorProbe } from './new-feedback';
 import { futureUpdates, wikiTopics } from './public-content';
+import { Pager } from '../paging/Pager';
+import { PagingScope, PanelFooter } from '../paging/PanelFooter';
+import { usePagedList } from '../paging/usePagedList';
 import styles from './game-info.module.css';
 
 const tabs = [{ id: 'wiki', label: 'Wiki' }, { id: 'future', label: 'Future Updates' }] as const;
@@ -55,6 +58,10 @@ export function GameInfoPanel({ id, onClose, update, fixture, editorAccount, onD
   const topics = useRef<HTMLDivElement>(null);
   const tabButtons = useRef<(HTMLButtonElement | null)[]>([]);
   const [pages, setPages] = useState<GameInfoPages>({});
+  // Patch 1.9 Task 31: the built-in Wiki and Future Updates are the fallback when nothing was published, not what shows first. Until the
+  // published (or draft) pages have been read, or the read has failed, a steady "Loading Game Info…" shows, so the built-in text never
+  // flashes before the real text replaces it. The plain fixture preview has nothing to read and shows the built-in text at once.
+  const [settled, setSettled] = useState(() => fixture && !(typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('info') === 'draft'));
   const [canEdit, setCanEdit] = useState(false);
   const [editing, setEditing] = useState<GameInfoSnapshot | null>(null);
   const [loadingEditor, setLoadingEditor] = useState(false);
@@ -68,6 +75,9 @@ export function GameInfoPanel({ id, onClose, update, fixture, editorAccount, onD
   const future = pages.future?.document.entries ?? futureFallback;
   const article = wiki.find(item => item.id === topic) ?? wiki[0];
   const currentTab = shownTabs[active] ?? tabs[0];
+  // Wiki topics 5 a page and Future Updates entries 8 a page (the article and each entry keep their scroll); a tab change goes back to page 1.
+  const wikiPaged = usePagedList(wiki, { list: 'wikiTopics', resetKey: active });
+  const futurePaged = usePagedList(future, { list: 'future', resetKey: active });
   /** The tab the editor works on (Wiki or Future Updates; the Feedback tab has no editor). */
   const editTab = currentTab.id === 'feedback' ? null : currentTab.id;
   const tabId = (key: string) => `${id}-${key}-tab`;
@@ -75,7 +85,11 @@ export function GameInfoPanel({ id, onClose, update, fixture, editorAccount, onD
   const optionId = (key: string) => `${id}-topic-${key}`;
 
   useEffect(() => {
-    // Scroll only the list (not the panel) so the chosen row is inside its visible area.
+    // The chosen topic's page shows (an arrow key, or the tab coming back), then only the list (not the panel) scrolls so the row is inside.
+    const at = article ? wiki.findIndex(item => item.id === article.id) : -1;
+    // Only when the choice, the tab or the topics change: a turn of the player's own (Back, Next, a circle) is left alone.
+    const first = (wikiPaged.page - 1) * wikiPaged.size;
+    if (active === 0 && editing === null && at >= 0 && (at < first || at >= first + wikiPaged.size)) wikiPaged.goToIndex(at);
     const list = topics.current;
     const option = article && list?.querySelector<HTMLElement>(`[id="${optionId(article.id)}"]`);
     if (!list || !option) return;
@@ -100,13 +114,13 @@ export function GameInfoPanel({ id, onClose, update, fixture, editorAccount, onD
     if (fixture) {
       // `?mode=fixture&info=draft` previews the drafts in docs/game-info (fixture builds only).
       if (new URLSearchParams(window.location.search).get('info') === 'draft') void loadDraftGameInfo().then(next => {
-        if (alive) setPages(next);
-      }, () => {});
+        if (alive) { setPages(next); setSettled(true); }
+      }, () => { if (alive) setSettled(true); });
       return () => { alive = false; };
     }
     void loadPublishedGameInfo().then(next => {
-      if (alive) setPages(previous => ({ ...next, ...previous }));
-    }, () => {});
+      if (alive) { setPages(previous => ({ ...next, ...previous })); setSettled(true); }
+    }, () => { if (alive) setSettled(true); });
     if (editorAccount) void editGameInfo({ tab: 'wiki', action: 'read' }).then(result => {
       if (!alive) return;
       setCanEdit(result.ok);
@@ -194,38 +208,46 @@ export function GameInfoPanel({ id, onClose, update, fixture, editorAccount, onD
         </button>;
       })}
     </div>
+    <PagingScope className={styles.paged}>
     <section id={panelId('wiki')} role="tabpanel" aria-labelledby={tabId('wiki')} className={styles.body} hidden={active !== 0 || editing !== null} tabIndex={0}>
-      <div ref={topics} role="listbox" aria-label="Wiki topics" tabIndex={0} className={styles.topics}
-        aria-activedescendant={article ? optionId(article.id) : undefined} onKeyDown={moveTopic}>
-        {wiki.map(item => {
-          const chosen = item.id === article?.id;
-          return <div key={item.id} id={optionId(item.id)} role="option" aria-selected={chosen} aria-label={item.video ? `${item.title}, video guide` : undefined} className={styles.topic}
-            onClick={() => setTopic(item.id)}>
-            <span aria-hidden="true" className={styles.mark}>{chosen ? '✓' : ''}</span>{item.title}
-            {item.video && <span aria-hidden="true" className={styles.pm} title="Has a video guide">▶</span>}
-          </div>;
-        })}
-      </div>
-      {article && <article className={`${styles.entry} ${styles.readText}`} onCopy={stopCopy} aria-labelledby={`${id}-article`}>
-        <h3 id={`${id}-article`}>{article.title}</h3>
-        {article.video ? <GuideCard key={article.video} title={article.title} video={article.video} length={article.videoLength} />
-          : <p className={styles.soon}>Video guide coming soon</p>}
-        <p>{article.body}</p>
-      </article>}
+      {!settled ? active === 0 && <p role="status" className={styles.loading}>Loading Game Info…</p> : active === 0 && editing === null && <>
+        <div ref={topics} role="listbox" aria-label="Wiki topics" tabIndex={0} className={styles.topics}
+          aria-activedescendant={article ? optionId(article.id) : undefined} onKeyDown={moveTopic}>
+          <div ref={wikiPaged.listRef as RefObject<HTMLDivElement | null>} role="presentation">
+            {wikiPaged.rows.map(item => {
+              const chosen = item.id === article?.id;
+              return <div key={item.id} id={optionId(item.id)} role="option" aria-selected={chosen} aria-label={item.video ? `${item.title}, video guide` : undefined} className={styles.topic}
+                data-page-row="" onClick={() => setTopic(item.id)}>
+                <span aria-hidden="true" className={styles.mark}>{chosen ? '✓' : ''}</span>{item.title}
+                {item.video && <span aria-hidden="true" className={styles.pm} title="Has a video guide">▶</span>}
+              </div>;
+            })}
+          </div>
+        </div>
+        <PanelFooter><Pager list={wikiPaged} show /></PanelFooter>
+        {article && <article className={`${styles.entry} ${styles.readText}`} onCopy={stopCopy} aria-labelledby={`${id}-article`}>
+          <h3 id={`${id}-article`}>{article.title}</h3>
+          {article.video ? <GuideCard key={article.video} title={article.title} video={article.video} length={article.videoLength} />
+            : <p className={styles.soon}>Video guide coming soon</p>}
+          <p>{article.body}</p>
+        </article>}
+      </>}
     </section>
     <section id={panelId('future')} role="tabpanel" aria-labelledby={tabId('future')} className={styles.body} hidden={active !== 1 || editing !== null} tabIndex={0}>
-      <div className={styles.readText} onCopy={stopCopy}>
+      {!settled ? active === 1 && <p role="status" className={styles.loading}>Loading Game Info…</p> : active === 1 && editing === null && <div className={styles.readText} onCopy={stopCopy}>
         <p className={styles.intro}>Plans for upcoming patches. Patch numbers appear when confirmed.</p>
-        <ul className={styles.roadmap}>{future.map(item => <li className={styles.entry} key={item.id}>
+        <ul className={styles.roadmap} ref={futurePaged.listRef as RefObject<HTMLUListElement | null>}>{futurePaged.rows.map(item => <li className={styles.entry} key={item.id} data-page-row="" tabIndex={-1}>
           <h3>{item.title}</h3>
           {item.patch && <p>Patch {item.patch}</p>}
           <p>{item.body}</p>
         </li>)}</ul>
-      </div>
+        <PanelFooter><Pager list={futurePaged} show /></PanelFooter>
+      </div>}
     </section>
     {canEdit && <section id={panelId('feedback')} role="tabpanel" aria-labelledby={tabId('feedback')} className={styles.body} hidden={currentTab.id !== 'feedback' || editing !== null}>
       {currentTab.id === 'feedback' && <FeedbackReview onCount={setFeedbackNew} />}
     </section>}
+    </PagingScope>
     {editing && editTab ? <GameInfoEditor tab={editTab} initial={editing} selectedId={article?.id ?? ''} publishedVersion={pages[editTab]?.version}
       onDirty={onDirty} onClose={() => { if (allowDiscard()) closeEditor(); }}
       onPublished={snapshot => { setPages(previous => ({ ...previous, [editTab]: snapshot })); closeEditor(); }} />

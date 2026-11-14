@@ -1,5 +1,8 @@
-.tag {
+/* The BOT badge, sized to its text. Task 31: `.tag.tag` outranks a list's own `.who span` rule (the Gladiators row made it a wide pale bar of
+   pale text); the colours are set here too, so the text keeps its contrast (dark #142536 on #a9ddfa, about 11:1) wherever it sits. */
+.tag.tag {
   display: inline-block;
+  width: fit-content;
   margin-inline-start: .35em;
   padding: .05em .38em;
   border-radius: .24em;

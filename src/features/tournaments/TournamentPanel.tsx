@@ -31,10 +31,14 @@
 // and fight summary stay), a watched replay whose log is not loaded says so instead of "cannot be loaded", no log is read,
 // and an old tournament link whose view is gone (its id carries its slot) is "no longer kept" instead of missing.
 //
+// Patch 1.9 Task 31 (menus with Back and Next): the long lists of a bracket, up to 50 entrants and up to 32 bouts in a round, show 6 rows a page.
+// Each has its own bar right under it (a `PagingScope`: the panel is a long page of its own, so a bar at the menu's bottom edge could not say which
+// list it turns); the Show choice is shared. A round tab goes back to page 1 of its bouts. The panel unmounts with its menu, so a closed menu forgets both pages.
+//
 // Patch 1.6 (spec "Tournaments"): Registration's checklist and entry rules follow the active display rules of the revision read (`rules`,
 // RULES_V1 by default): under v2 entry costs no stamina and the last rule lists each league's prizes. A settled bracket's own credit stays
 // its summary's.
-import { useCallback, useEffect, useId, useRef, useState, type KeyboardEvent } from 'react';
+import { useCallback, useEffect, useId, useRef, useState, type KeyboardEvent, type RefObject } from 'react';
 import type { GameCommand, LeagueId } from '@contracts/commands';
 import type { ActivitySummary } from '@contracts/events';
 import type { OwnerState, TournamentView } from '@contracts/reads';
@@ -52,6 +56,9 @@ import { useClockMode } from '../../lib/clock-setting';
 import { tournamentLookupIdOrNull, tournamentSlotOf } from '../../lib/tournament-id';
 import { tournamentEndsAtMs, tournamentReplayKept } from '../../lib/replay-retention';
 import { BattleReplay } from '../arena/BattleReplay';
+import { Pager } from '../paging/Pager';
+import { PagingScope, PanelFooter } from '../paging/PanelFooter';
+import { usePagedList } from '../paging/usePagedList';
 import type { TitleLookup } from '../titles/title-text';
 import {
   countdownText, creditedText, cutoffUtc, entryRules, entryStamina, eveningText, leagueName, ordinal, registrationNote, roleText, roundNote,
@@ -166,6 +173,7 @@ export type BracketModel = {
 };
 
 /** Seven days after a tournament ends its bout replays are no longer kept; its results stay (Task 22.5). */
+const NO_BOUTS: readonly TournamentBoutState[] = [];
 const REPLAYS_GONE = 'These bout replays are no longer kept. Detailed replays are kept for seven days; the results stay.';
 
 /** One fighter of a bout: the name, and the title it wears on a second line (gold italic); accessible text "{name}, {title}". */
@@ -186,7 +194,7 @@ function BoutCard({ bout, kept, onWatch, titles }: { bout: TournamentBoutState; 
   const winner = bout.sides.find(s => s?.gladiatorId === bout.winnerId) ?? null;
   const how = victoryText(bout);
   return (
-    <li className={styles.bout} data-status={bout.status}>
+    <li className={styles.bout} data-status={bout.status} data-page-row="" tabIndex={-1}>
       <p className={styles.boutTitle}>Bout {bout.position + 1}</p>
       {bout.sides.length === 0 ? <p className={styles.sides}>To be revealed</p>
         : bout.status === 'bye' ? <p className={styles.sides}><Entrant side={bout.sides[0]} titles={titles} /></p>
@@ -218,6 +226,8 @@ export function TournamentBracketView({ model, onRound, onWatch }: {
   const champion = state.entrants.find(e => e.gladiatorId === state.championId) ?? null;
   const own = viewerText(state, !!model.viewerId, clockMode, timeZone);
   const kept = tournamentReplayKept(state.endsAtMs, state.displayNowMs);
+  const entrantsPaged = usePagedList(state.entrants, { list: 'tournaments' });
+  const boutsPaged = usePagedList(round?.bouts ?? NO_BOUTS, { list: 'tournaments', resetKey: round?.round });
 
   const onTabKey = (event: KeyboardEvent<HTMLDivElement>) => {
     if (!round) return;
@@ -248,12 +258,15 @@ export function TournamentBracketView({ model, onRound, onWatch }: {
       {state.entrants.length > 0 && (
         <section aria-label="Entrants" className={styles.entrants}>
           <h5>Entrants ({state.entrants.length})</h5>
-          <ul>{state.entrants.map(e => (
-            <li key={e.gladiatorId} data-role={e.role ?? 'none'} aria-current={e.gladiatorId === model.viewerId ? 'true' : undefined}>
-              <span className={styles.name}>{e.name}</span>{e.gladiatorId === model.viewerId && <span className={styles.you}>You</span>}
-              <span className={styles.role}>{roleText(e, state)}</span>
-            </li>
-          ))}</ul>
+          <PagingScope>
+            <ul ref={entrantsPaged.listRef as RefObject<HTMLUListElement | null>}>{entrantsPaged.rows.map(e => (
+              <li key={e.gladiatorId} data-role={e.role ?? 'none'} aria-current={e.gladiatorId === model.viewerId ? 'true' : undefined} data-page-row="" tabIndex={-1}>
+                <span className={styles.name}>{e.name}</span>{e.gladiatorId === model.viewerId && <span className={styles.you}>You</span>}
+                <span className={styles.role}>{roleText(e, state)}</span>
+              </li>
+            ))}</ul>
+            <PanelFooter><Pager list={entrantsPaged} show /></PanelFooter>
+          </PagingScope>
         </section>
       )}
 
@@ -269,7 +282,10 @@ export function TournamentBracketView({ model, onRound, onWatch }: {
             <p className={styles.roundStatus}>{roundStatus(round)}</p>
             {roundNote(round, clockMode, timeZone) && <p className="muted">{roundNote(round, clockMode, timeZone)}</p>}
             {!kept && <p className="muted">{REPLAYS_GONE}</p>}
-            <ul className={styles.bouts}>{round.bouts.map(b => <BoutCard key={b.id} bout={b} kept={kept} onWatch={onWatch} titles={model.titles} />)}</ul>
+            <PagingScope>
+              <ul className={styles.bouts} ref={boutsPaged.listRef as RefObject<HTMLUListElement | null>}>{boutsPaged.rows.map(b => <BoutCard key={b.id} bout={b} kept={kept} onWatch={onWatch} titles={model.titles} />)}</ul>
+              <PanelFooter><Pager list={boutsPaged} show /></PanelFooter>
+            </PagingScope>
           </div>
         </section>
       )}

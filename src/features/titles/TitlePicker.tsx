@@ -10,7 +10,7 @@
 //   answer that left the outcome open, another title gets a new id. An accepted wear tells the shell the answer's title at once
 //   (`onWorn`, Review Focus 5), reads the owner and the camp again (`refresh`) and closes with the status line. A refusal keeps the dialog
 //   open with its reason. Cancel, × and Escape close it without a command; while a wear is sent they do nothing.
-import { useEffect, useId, useMemo, useRef, useState, type FormEvent } from 'react';
+import { useEffect, useId, useMemo, useRef, useState, type FormEvent, type RefObject } from 'react';
 import type { WearTitleValue } from '@contracts/commands';
 import type { OwnerState, PrestigeAward } from '@contracts/reads';
 import { titleById } from '@domain/titles';
@@ -18,6 +18,9 @@ import type { GameGateway } from '../../lib/api/gateway';
 import { NO_TITLE, titleName, wornTitleText } from './title-text';
 import { LATER_TITLES, NO_TITLE_LINE, pickerCounts, pickerGroups, wornStatus, type PickerRow } from './title-picker';
 import { WEAR_PREVIEW, WEAR_REFUSED, answeredTitle, keepsWearAttempt, wearAttemptFor, type WearAttempt } from './title-wear';
+import { Pager } from '../paging/Pager';
+import { PagingScope, PanelFooter } from '../paging/PanelFooter';
+import { usePagedList } from '../paging/usePagedList';
 import styles from './TitlePicker.module.css';
 
 /** The Title button beside the name: TITLE, the worn title's name (or No title) and ›. An id this client does not know is no title. */
@@ -92,6 +95,16 @@ export function TitlePicker({ owner, gateway, refresh, onWorn, onClose, preview 
   const headingId = useId(), group = useId();
   const groups = useMemo(() => pickerGroups(owner, view), [owner, view]);
   const counts = pickerCounts(owner);
+  // Patch 1.9 Task 31: the choices are one paged sequence of 8 (No title first, then each family's rows); a page shows each family's name over
+  // its rows on the page. Earned and All go back to page 1. The choice itself is kept while its row is on another page.
+  const sequence = useMemo(() => [{ family: 'Wear nothing', row: null as PickerRow | null },
+    ...groups.flatMap(group => group.rows.map(row => ({ family: group.family, row })))], [groups]);
+  const paged = usePagedList(sequence, { list: 'titles', resetKey: view });
+  const onPage = paged.rows.reduce<{ family: string; rows: (PickerRow | null)[] }[]>((out, entry) => {
+    const last = out[out.length - 1];
+    if (last && last.family === entry.family) last.rows.push(entry.row); else out.push({ family: entry.family, rows: [entry.row] });
+    return out;
+  }, []);
   // Wear title follows the title worn now (a read from another device may change it while this is open), not the one it opened on.
   const same = choice === worn;
   const champion = owner.titles.some(title => title.id === 'champion');
@@ -191,19 +204,20 @@ export function TitlePicker({ owner, gateway, refresh, onWorn, onClose, preview 
           <button type="button" aria-pressed={view === 'all'} onClick={() => setView('all')}>All · {counts.all}</button>
         </div>
       </div>
-      <div className={styles.body} data-testid="title-picker-body">
-        <fieldset className={styles.family}>
-          <legend className={styles.familyName}>Wear nothing</legend>
-          <Choice group={group} id={null} label={NO_TITLE} line={NO_TITLE_LINE} earned={false} checked={choice === null} onChoose={choose} />
-        </fieldset>
-        {groups.map(family => <fieldset key={family.family} className={styles.family}>
-          <legend className={styles.familyName}>{family.family}</legend>
-          {family.rows.map(row => (row.earned
-            ? <Choice key={row.id} group={group} id={row.id} label={row.name} line={row.rule} earned checked={choice === row.id} onChoose={choose} />
-            : <Locked key={row.id} row={row} />))}
-        </fieldset>)}
-        {view === 'all' && <p className={styles.later}>{LATER_TITLES}</p>}
-      </div>
+      <PagingScope className={styles.paged} bodyClassName={styles.body}>
+        <div data-testid="title-picker-body" ref={paged.listRef as RefObject<HTMLDivElement | null>}>
+          {onPage.map(family => <fieldset key={family.family} className={styles.family}>
+            <legend className={styles.familyName}>{family.family}</legend>
+            {family.rows.map(row => (row === null
+              ? <div key="none" data-page-row="" tabIndex={-1}><Choice group={group} id={null} label={NO_TITLE} line={NO_TITLE_LINE} earned={false} checked={choice === null} onChoose={choose} /></div>
+              : <div key={row.id} data-page-row="" tabIndex={-1}>{row.earned
+                ? <Choice group={group} id={row.id} label={row.name} line={row.rule} earned checked={choice === row.id} onChoose={choose} />
+                : <Locked row={row} />}</div>))}
+          </fieldset>)}
+          {view === 'all' && paged.page === (paged.pages ?? 1) && <p className={styles.later}>{LATER_TITLES}</p>}
+        </div>
+        <PanelFooter><Pager list={paged} show /></PanelFooter>
+      </PagingScope>
       <div className={styles.foot}>
         {shownError && <p role="alert" className={styles.error}>{shownError}</p>}
         <div className={styles.buttons}>

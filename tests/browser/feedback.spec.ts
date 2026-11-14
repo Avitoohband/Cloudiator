@@ -389,6 +389,51 @@ test('the fixture preview shows no feedback entry', async ({ page }) => {
   await expect(page.getByTestId('info-feedback-badge')).toHaveCount(0);
 });
 
+// Patch 1.9 Task 31 (menus with Back and Next): My feedback shows 6 items a page; a feedback just sent is the newest and shows on page 1.
+test('My feedback shows 6 items a page, and a feedback just sent turns to page 1', async ({ page }) => {
+  const many: NonNullable<Setup['feedback']> = Array.from({ length: 14 }, (_, i) => ({ minutesAgo: (i + 2) * 24 * 60, category: 'idea' as const, status: 'new' as const, text: `Feedback number ${i + 1} about the game.` }));
+  await player(page, { feedback: many });
+  const panel = await openPanel(page);
+  await panel.locator('[data-feedback-foot]').getByRole('button', { name: /^My feedback/ }).click();
+  const rows = panel.locator('[data-feedback-row]');
+  const bar = panel.getByRole('navigation', { name: 'Pages' });
+  await expect(rows).toHaveCount(6);
+  await expect(bar.locator('b').first()).toHaveText('Page 1 of 3');
+  await bar.getByRole('button', { name: 'Next page', exact: true }).click();
+  await expect(bar.locator('b').first()).toHaveText('Page 2 of 3');
+  await expect(rows).toHaveCount(6);
+  await panel.locator('[data-feedback-foot]').getByRole('button', { name: 'Send feedback', exact: true }).click();
+  const dialog = feedbackDialog(page);
+  await dialog.getByRole('textbox', { name: 'Your message' }).fill('A brand new idea that is the newest of all.');
+  await dialog.getByRole('button', { name: 'Send', exact: true }).click();
+  await expect(sentDialog(page)).toBeVisible();
+  await sentDialog(page).getByRole('button', { name: 'Close', exact: true }).click();
+  await expect(bar.locator('b').first()).toHaveText('Page 1 of 3');
+  await expect(rows.first()).toContainText('A brand new idea');
+});
+
+// The owner's Feedback list in Game Info: 6 items a page; New, Answered and All go back to page 1.
+test('the owner’s Feedback list shows 6 items a page, and a chip goes back to page 1', async ({ page }) => {
+  const { panel, items } = await owner(page, true, { remembered: true });
+  const now = Date.now();
+  for (let i = 0; i < 8; i++) items.push({ ...items[0], id: 20 + i, text: `Extra feedback ${i}`, createdAtMs: now - (300 + i) * MIN, who: 'Extra' });
+  await page.getByRole('button', { name: /^Game Info/ }).click();
+  await expect(panel).toBeVisible();
+  await panel.getByRole('tab', { name: /^Feedback/ }).click();
+  const show = panel.getByRole('group', { name: 'Show' });
+  await show.getByRole('button', { name: 'All', exact: true }).click();
+  const cards = panel.locator('[data-feedback-item]');
+  const bar = panel.getByRole('navigation', { name: 'Pages' });
+  await expect(cards).toHaveCount(6);
+  await expect(bar.locator('b').first()).toHaveText('Page 1 of 2');
+  await bar.getByRole('button', { name: 'Next page', exact: true }).click();
+  await expect(cards).toHaveCount(6);
+  await show.getByRole('button', { name: 'Answered', exact: true }).click();
+  await expect(cards).toHaveCount(1);
+  await show.getByRole('button', { name: 'All', exact: true }).click();
+  await expect(bar.locator('b').first()).toHaveText('Page 1 of 2');
+});
+
 // ---- The owner's Feedback tab in Game Info (Avi only: the Game Info editors). ----
 
 type Owned = OwnerFeedbackItem & { who: string };

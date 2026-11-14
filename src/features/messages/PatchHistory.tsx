@@ -4,15 +4,20 @@
 // panel, opened from the account menu's "Patch history ›" and from a patch note's number. The heading, "You are playing Patch 1.4" (when
 // the server has a newer patch, "· Patch 1.5 is out" and Reload), then every patch newest first, each a disclosure button with its number,
 // title and date; one is open at a time, at first the newest or the one a note named. An open patch lists its features and, when its note
-// is one the panel can show, "Read the patch note ›". "Older patches" reads the next 20. The text is data, shown as plain text.
+// is one the panel can show, "Read the patch note ›". Patch 1.9 Task 31: 8 patches a page with Back and Next; Next past the loaded ones reads the next 20
+// from the server (its total is unknown until the last page: "Page 2 / more to see"), and a patch a note named opens on the page that holds it. The text is data, shown as plain text.
 // The panel's own head holds "‹ Back to messages" and ×. The focus goes to the heading when it opens (the control that opened it is gone).
-import { useEffect, useId, useRef, useState } from 'react';
+import { useEffect, useId, useRef, useState, type RefObject } from 'react';
 import { isBehind, playingLine, type PatchEntry } from '../../lib/patch';
 import { messageDate } from './messages';
+import { Pager } from '../paging/Pager';
+import { PanelFooter } from '../paging/PanelFooter';
+import { usePagedList } from '../paging/usePagedList';
 import { reloadPage } from '../shell/PatchNotice';
 import styles from './messages.module.css';
 
 type Pages = { items: PatchEntry[]; more: boolean };
+const NO_PATCHES: readonly PatchEntry[] = [];
 
 export function PatchHistory({ load, build, latest, open, notes, onReadNote }: {
   /** One page of 20 patches, older than `beforeSortKey` when given. */
@@ -31,32 +36,31 @@ export function PatchHistory({ load, build, latest, open, notes, onReadNote }: {
   const heading = useRef<HTMLHeadingElement>(null);
   const [pages, setPages] = useState<Pages | null>(null);
   const [failed, setFailed] = useState(false);
-  const [loading, setLoading] = useState(false);
   // Which patch is open: `undefined` until the player chooses (then the one named, else the newest), null when they closed it.
   const [chosen, setChosen] = useState<string | null | undefined>(open ?? undefined);
   // Only the latest read lands, and nothing after the view is gone.
   const ticket = useRef(0);
-  const read = (before?: number) => {
+  /** Reads a page; the promise settles once the rows are in (or rejects when the read fails), for the pager's Next. */
+  const read = (before?: number) => new Promise<void>((resolve, reject) => {
     const mine = ++ticket.current;
-    setLoading(true);
     load(before).then(page => {
-      if (mine !== ticket.current) return;
+      if (mine !== ticket.current) { resolve(); return; }
       setPages(previous => {
         if (before === undefined || previous === null) return { items: page.items, more: page.more };
         const known = new Set(previous.items.map(p => p.number));
         return { items: [...previous.items, ...page.items.filter(p => !known.has(p.number))], more: page.more };
       });
       setFailed(false);
-      setLoading(false);
+      resolve();
     }, () => {
-      if (mine !== ticket.current) return;
+      if (mine !== ticket.current) { resolve(); return; }
       setFailed(true);
-      setLoading(false);
+      reject(new Error('patches'));
     });
-  };
+  });
   useEffect(() => {
     heading.current?.focus();
-    read();
+    read().catch(() => undefined);
     return () => { ticket.current++; };
   }, []);
 
@@ -64,7 +68,18 @@ export function PatchHistory({ load, build, latest, open, notes, onReadNote }: {
   const current = chosen === undefined ? (items?.[0]?.number ?? null) : chosen;
   const behind = isBehind(latest, build);
   const lead = `You are playing Patch ${build}`;
-  const older = () => { const last = items?.at(-1); if (last) read(last.sortKey); };
+  const paged = usePagedList(items ?? NO_PATCHES, { list: 'patches', more: { hasMore: !!pages?.more, load: () => {
+    const last = items?.at(-1);
+    return last ? read(last.sortKey) : Promise.resolve();
+  } } });
+  // The patch a note named opens on the page that holds it, once the list is read (once).
+  const landed = useRef(false);
+  useEffect(() => {
+    if (landed.current || items === null) return;
+    landed.current = true;
+    const at = open === null ? -1 : items.findIndex(patch => patch.number === open);
+    if (at > 0) paged.goToIndex(at);
+  });
 
   return (
     <div className={styles.history} data-testid="patch-history">
@@ -77,12 +92,12 @@ export function PatchHistory({ load, build, latest, open, notes, onReadNote }: {
         <p role="alert">Patch history could not be loaded.</p>
         <button type="button" className={styles.retry} onClick={() => read()}>Try again</button>
       </div> : <p role="status" className={styles.state}>Loading patches…</p>) : <>
-        <ul className={styles.patches}>
-          {items.map(patch => {
+        <ul className={styles.patches} ref={paged.listRef as RefObject<HTMLUListElement | null>}>
+          {paged.rows.map(patch => {
             const expanded = patch.number === current;
             const detailId = `${ids}-patch-${patch.number}`;
             const note = patch.messageId !== null && notes.includes(patch.messageId) ? patch.messageId : null;
-            return <li key={patch.number}>
+            return <li key={patch.number} data-page-row="" tabIndex={-1}>
               <button type="button" className={styles.patchButton} data-patch={patch.number} aria-expanded={expanded} aria-controls={expanded ? detailId : undefined}
                 onClick={() => setChosen(expanded ? null : patch.number)}>
                 <span className={styles.patchPill}>{patch.number}</span>
@@ -101,8 +116,7 @@ export function PatchHistory({ load, build, latest, open, notes, onReadNote }: {
             </li>;
           })}
         </ul>
-        {failed && <p role="alert" className={styles.state}>Older patches could not be loaded.</p>}
-        {pages?.more && <button type="button" className={`${styles.retry} ${styles.older}`} disabled={loading} onClick={older}>Older patches</button>}
+        <PanelFooter><Pager list={paged} /></PanelFooter>
       </>}
     </div>
   );

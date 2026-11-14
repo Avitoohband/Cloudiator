@@ -82,7 +82,7 @@ export function CornerChip({ viewer, session, owner, fixture, previewAs, clock, 
   /** The messages button's lists and marks (the shell's); a player without it, or a visitor, has no messages button. */
   messaging?: MessagingActions;
   /** Opens the messages panel on Notifications, or (patch 1.9) on My feedback. */
-  messagesRequest?: { tab: 'notifications' | 'feedback'; n: number } | null;
+  messagesRequest?: { tab: 'notifications' | 'feedback'; n: number; row?: string } | null;
   /** The server's newest patch (the sync's): ahead of this build, the menu offers Reload. */
   latestPatch?: string | null;
   /** Opens the change-look dialog from the look note's Change look button (the messages panel closes first; the shell owns the dialog). */
@@ -103,7 +103,7 @@ export function CornerChip({ viewer, session, owner, fixture, previewAs, clock, 
   // The messages panel opened from the account menu's "Patch history ›" opens on the history, and gives the focus back to the account
   // button when it closes; opened from its own button, it opens on the lists and gives it back there.
   const [history, setHistory] = useState<{ patch: string | null } | undefined>(undefined);
-  const [requestedTab, setRequestedTab] = useState<{ tab: 'notifications' | 'feedback'; n: number } | null>(null);
+  const [requestedTab, setRequestedTab] = useState<{ tab: 'notifications' | 'feedback'; n: number; row?: string } | null>(null);
   const handledRequest = useRef<number | null>(null);
   const open = popover === 'account';
   const [signOutError, setSignOutError] = useState(false);
@@ -205,7 +205,7 @@ export function CornerChip({ viewer, session, owner, fixture, previewAs, clock, 
     <div ref={chip} className={styles.chip} data-testid="corner-chip" data-popover={popover ?? undefined}>
       <div className={styles.chipRow}>
         {viewer === 'no-gladiator' && <button type="button" className={styles.create} data-create-offer="" onClick={() => { if (allowDiscard()) { setPopover(null); onCreate(); } }}>Create your gladiator</button>}
-        {messaging && inbox && <MessagesButton key={requestedTab?.n ?? 'ordinary'} initialTab={requestedTab?.tab} inbox={inbox} {...messaging}
+        {messaging && inbox && <MessagesButton key={requestedTab?.n ?? 'ordinary'} initialTab={requestedTab?.tab} initialRow={requestedTab?.row} inbox={inbox} {...messaging}
           watch={messaging.watch ? { kept: messaging.watch.kept, open: note => { setPopover(null); messaging.watch!.open(note); } } : undefined} changeLook={onChangeLook} open={popover === 'messages'} panelId={messagesId}
           onToggle={() => { if (allowDiscard()) { setRequestedTab(null); setHistory(undefined); setPopover(value => (value === 'messages' ? null : 'messages')); } }} onClose={closeMessages} buttonRef={messagesButton}
           history={history} latestPatch={latestPatch} titles={titles} />}

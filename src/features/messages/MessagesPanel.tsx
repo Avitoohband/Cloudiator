@@ -15,7 +15,7 @@
 // - Titles (patch 1.7, spec "Notices (Notifications tab)"): a title a result earned is a gold line with Wear inside that result's card; the
 //   other titles are notices of their own, merged with the results by time (`TitleNotices`, `title-notices.ts`). They count in the summary
 //   line and in the badge (the server's `newNotifications`), and the tab is marked seen up to the newest of its results and notices.
-import { useEffect, useId, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
+import { useEffect, useId, useMemo, useRef, useState, type KeyboardEvent, type MutableRefObject, type ReactNode, type RefObject } from 'react';
 import type { GameMessage, GameNotification, Inbox, MessageBlock, OwnFeedback } from '@contracts/reads';
 import { PATCH } from '../../lib/patch';
 import { NOTIFICATIONS_PAGE } from '../../lib/api/reads';
@@ -37,6 +37,9 @@ import { RULES_V2 } from '@domain/rules-v2';
 import type { Rules } from '@domain/types';
 import { NoticeCard, TitleLines, useNoticeWear, type NoticeTitles } from './TitleNotices';
 import { useLoaded, useLoadedList } from './useLoadedList';
+import { Pager } from '../paging/Pager';
+import { PagingScope, PanelFooter } from '../paging/PanelFooter';
+import { usePagedList } from '../paging/usePagedList';
 import styles from './messages.module.css';
 
 type Tab = 'messages' | 'notifications';
@@ -80,6 +83,7 @@ function PatchNumber({ patch, onOpen }: { patch: string; onOpen(): void }) {
 }
 
 const NO_NOTICES: readonly TitleNotice[] = [];
+const NO_MESSAGES: readonly ShownMessage[] = [];
 const NO_RESTS: readonly RestedActivity[] = [];
 const NO_RESTED_ROWS: readonly RestedRow[] = [];
 /** A settled rest that replaced a planned activity, as a row of the Notifications list. */
@@ -88,7 +92,7 @@ const restedRows = (rests: readonly RestedActivity[]): RestedRow[] =>
   rests.flatMap(rest => (rest.settledAtMs === null ? [] : [{ ...rest, settledAtMs: rest.settledAtMs, rested: true as const }]));
 const isRested = (row: GameNotification | RestedRow): row is RestedRow => 'rested' in row;
 
-export function MessagesPanel({ id, inbox, load, loadNotifications, loadPatches, read, seeNotifications, changeLook, onClose, history, initialTab, watch, latestPatch = null,
+export function MessagesPanel({ id, inbox, load, loadNotifications, loadPatches, read, seeNotifications, changeLook, onClose, history, initialTab, initialRow, watch, latestPatch = null,
   titles, feedback, rules = RULES_V2 }: MessagingActions & {
   id: string;
   inbox: Inbox;
@@ -96,6 +100,8 @@ export function MessagesPanel({ id, inbox, load, loadNotifications, loadPatches,
   titles?: NoticeTitles;
   /** Explicit origin return overrides the ordinary unread-count choice; `feedback` opens on My feedback (patch 1.9). */
   initialTab?: Tab | 'feedback';
+  /** Patch 1.9 Task 31: the result (its activity id) a Watch left from; Notifications opens on the page that holds it. */
+  initialRow?: string;
   /** Opens the panel on Patch history, with that patch open (null: the newest). */
   history?: { patch: string | null };
   /** The server's newest patch (the sync's), for Patch history's "Patch 1.5 is out". */
@@ -150,6 +156,19 @@ export function MessagesPanel({ id, inbox, load, loadNotifications, loadPatches,
   const entries = useMemo(() => (noteRows && noteItems ? notificationEntries(noteRows, notices, NOTIFICATIONS_PAGE, noteItems) : []), [noteRows, noteItems, notices]);
   const listedNotices = useMemo(() => entries.flatMap(entry => (entry.kind === 'notice' ? [entry.notice] : [])), [entries]);
   const wear = useNoticeWear(titles);
+  // Patch 1.9 Task 31: Messages and Notifications, 7 rows a page each. The hooks live here, so Back from a message or Patch history returns to the
+  // page it left; a tab change goes back to page 1 (and only the shown tab's list and bar are mounted).
+  const messagesPaged = usePagedList(messages.items ?? NO_MESSAGES, { list: 'messages', resetKey: tab });
+  const notesPaged = usePagedList(entries, { list: 'notifications', resetKey: tab });
+  // A Watch's return lands on the page that holds the result it left from, once the list is read (once).
+  const rowWanted = useRef(initialRow ?? null);
+  useEffect(() => {
+    if (rowWanted.current === null || tab !== 'notifications') return;
+    const at = entries.findIndex(entry => entry.kind === 'result' && entry.result.activityId === rowWanted.current);
+    if (at < 0) { if (noteItems !== null) rowWanted.current = null; return; }
+    rowWanted.current = null;
+    notesPaged.goToIndex(at);
+  });
 
   // Read a list again when the inbox says it is stale, once per change of what the inbox says about it (a list that stays stale, such as
   // 25 new results behind a 20-row list, is not read in a loop).
@@ -208,7 +227,8 @@ export function MessagesPanel({ id, inbox, load, loadNotifications, loadPatches,
   };
   const unreadIds = (messages.items ?? []).filter(m => isUnread(m, inbox)).map(m => m.id);
   const focusMark = (id: number | undefined) => window.setTimeout(() => {
-    const target = id === undefined ? list.current : root.current?.querySelector<HTMLElement>(`[data-mark-button="${id}"]`);
+    // The next unread row may be on another page: the list takes the focus then.
+    const target = (id === undefined ? null : root.current?.querySelector<HTMLElement>(`[data-mark-button="${id}"]`)) ?? list.current;
     target?.focus();
   }, 0);
   const markRow = async (id: number) => {
@@ -290,6 +310,7 @@ export function MessagesPanel({ id, inbox, load, loadNotifications, loadPatches,
     if (!message) return;
     setPatches(null);
     setTab('messages');
+    messagesPaged.goToIndex(messages.items?.indexOf(message) ?? 0);
     open(message);
   };
   const noteIds = (messages.items ?? []).filter(m => m.kind === 'patch-notes').map(m => m.id);
@@ -386,7 +407,7 @@ export function MessagesPanel({ id, inbox, load, loadNotifications, loadPatches,
           </div>}
         <button type="button" className={styles.close} aria-label="Close messages" onClick={onClose}><Cross /></button>
       </div>
-      <div className={styles.body}>
+      <PagingScope className={styles.paged} bodyClassName={styles.body}>
         {detail ? (
           <article className={styles.detail} aria-labelledby={`${ids}-title`}>
             <span className={styles.rowTop} data-row-top="">
@@ -423,10 +444,10 @@ export function MessagesPanel({ id, inbox, load, loadNotifications, loadPatches,
                     <span>{banner.text}</span>
                     {banner.retry && <button type="button" className={styles.bannerRetry} data-mark-retry onClick={() => markAll(true)}>Try again</button>}
                   </p>}
-                  <ul className={styles.list} ref={list} tabIndex={-1} aria-label="Messages">
-                    {messages.items.map(message => {
+                  <ul className={styles.list} ref={element => { list.current = element; (messagesPaged.listRef as MutableRefObject<HTMLElement | null>).current = element; }} tabIndex={-1} aria-label="Messages">
+                    {messagesPaged.rows.map(message => {
                       const unread = isUnread(message, inbox);
-                      return <li key={message.id} className={styles.item}>
+                      return <li key={message.id} className={styles.item} data-page-row="" tabIndex={-1}>
                         <button type="button" className={styles.row} data-message-row={message.id} data-unread={unread ? '' : undefined} onClick={() => open(message)}>
                           <span className={styles.rowTop}>
                             <span className={`${styles.tag} ${TAG_CLASS[message.kind]}`} data-message-tag>{tagName(message.kind)}</span>
@@ -453,6 +474,7 @@ export function MessagesPanel({ id, inbox, load, loadNotifications, loadPatches,
                       </li>;
                     })}
                   </ul>
+                  <PanelFooter><Pager list={messagesPaged} show /></PanelFooter>
                 </>}
               </>}
           </div>
@@ -473,8 +495,8 @@ export function MessagesPanel({ id, inbox, load, loadNotifications, loadPatches,
                     <span>Could not mark notifications. Try again.</span>
                     <button type="button" className={styles.bannerRetry} data-mark-retry ref={notesRetry} onClick={markNotes}>Try again</button>
                   </p>}
-                  <ul className={styles.list}>
-                    {entries.map(entry => {
+                  <ul className={styles.list} ref={notesPaged.listRef as RefObject<HTMLUListElement | null>}>
+                    {notesPaged.rows.map(entry => {
                       if (entry.kind === 'notice') {
                         return titles && <NoticeCard key={`notice:${entry.notice.key}`} notice={entry.notice} fresh={entry.notice.atMs > seenAtOpen} titles={titles} wear={wear}
                           onChoose={chooseTitle} />;
@@ -482,7 +504,7 @@ export function MessagesPanel({ id, inbox, load, loadNotifications, loadPatches,
                       if (isRested(entry.result)) {
                         const rest = entry.result, fresh = rest.settledAtMs > seenAtOpen;
                         const { title, lines } = restedNoteLines(rest, rest.name, rules);
-                        return <li key={rest.activityId} className={styles.card} data-notification data-rested="" data-unread={fresh ? '' : undefined}>
+                        return <li key={rest.activityId} className={styles.card} data-page-row="" tabIndex={-1} data-notification data-rested="" data-unread={fresh ? '' : undefined}>
                           <span className={styles.rowTop}>
                             <span className={styles.rowTitle}>
                               {fresh && <span className={styles.dot} data-unread-dot aria-hidden="true" />}
@@ -499,7 +521,7 @@ export function MessagesPanel({ id, inbox, load, loadNotifications, loadPatches,
                       const fresh = isNewNotification(note, seenAtOpen);
                       const label = watch && watch.kept(note) ? watchLabel(note) : null;
                       const earned = titles ? resultTitleRows(titles.held, note.activityId) : [];
-                      return <li key={note.activityId} className={styles.card} data-notification data-unread={fresh ? '' : undefined}>
+                      return <li key={note.activityId} className={styles.card} data-page-row="" tabIndex={-1} data-notification data-unread={fresh ? '' : undefined}>
                         <span className={styles.rowTop}>
                           <span className={styles.rowTitle}>
                             {fresh && <span className={styles.dot} data-unread-dot aria-hidden="true" />}
@@ -518,11 +540,12 @@ export function MessagesPanel({ id, inbox, load, loadNotifications, loadPatches,
                       </li>;
                     })}
                   </ul>
+                  <PanelFooter><Pager list={notesPaged} show /></PanelFooter>
                 </>}
               </>}
           </div>
         )}
-      </div>
+      </PagingScope>
       {feedback && !detail && !patches && <div className={styles.foot} data-feedback-foot="">
         <button ref={sendButton} type="button" className={styles.sendFeedback} aria-haspopup="dialog" onClick={() => setWriting(true)}><Speech />Send feedback</button>
         {mine ? (own.value && <span className={styles.footHint}>{leftToday(own.value, feedback.clock.now())} left today</span>)

@@ -519,7 +519,8 @@ const readClock = (clock: DisplayClock) => ({ now: clock.now(), ready: clock.syn
 /**
  * The Tournaments tab. In fixture mode it opens sample tournaments; otherwise the tournament of the running or latest
  * tournament slot (Task 19's lookup id `tournament:<slot>:<league>`, `tournamentLookupIdOrNull`) in the owner's league,
- * or, for a visitor or a viewer without a gladiator, in the league the viewer picks (Bronze first). A signed-in player
+ * or, for a visitor or a viewer without a gladiator, in the league the viewer picks (Bronze first). Task 37: a player gets the league buttons too (the
+ * own league marked "(yours)", pressed on opening) to watch any league; another league hides the registration and the player's own parts. A signed-in player
  * whose owner is still loading gets no picker and reads nothing until its league is known. Without a reader it says
  * brackets cannot be shown yet. Every time is the shared display clock's; until it has the server's time the panel waits,
  * or says brackets cannot be loaded while the sync fails to read the revision. Registration is a player's only: everyone
@@ -549,8 +550,8 @@ export function TournamentPanel({ reads, owner, clock, fixture, samples = [], re
   const [time, setTime] = useState(() => readClock(clock));
   const now = time.now;
   const [selected, setSelected] = useState<string | null>(null);
-  /** The league a viewer without a gladiator follows. */
-  const [league, setLeague] = useState<LeagueId>('bronze');
+  /** The league the viewer picked with the league buttons; null follows the player's own league (Bronze for a viewer without a gladiator). */
+  const [picked, setPicked] = useState<LeagueId | null>(null);
   /** Fixture only: the opened sample's bracket is held at its projection time until the test hook sets the clock. */
   const [holding, setHolding] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -621,7 +622,13 @@ export function TournamentPanel({ reads, owner, clock, fixture, samples = [], re
   // Only once the shared clock has the server's time (or is held): the browser's own clock could name another slot.
   // Only a visitor or a viewer without a gladiator picks; a signed-in player whose owner is loading waits for its league.
   const picker = !fixture && !owner && (viewer === 'visitor' || viewer === 'no-gladiator');
-  const liveLeague = owner ? owner.progression.league : picker ? league : null;
+  // Task 37: a player gets the league buttons too, opening on their own league each time the menu opens, to watch any league's bracket and replays.
+  const ownLeague = owner ? owner.progression.league : null;
+  const leagueButtons = !fixture && (picker || !!owner);
+  const league: LeagueId = picked ?? ownLeague ?? 'bronze';
+  const liveLeague = owner || picker ? league : null;
+  /** Another league than the player's own is shown: the player's own parts (registration, role, rewards) stay with their own league. */
+  const elsewhere = !!owner && ownLeague !== league;
   const liveId = fixture || !time.ready || !liveLeague ? null : tournamentLookupIdOrNull(latestTournament(now).slotIndex, liveLeague);
   const id = selected ?? liveId;
   // A fixture sample is one view projected at one server time (the preview has no server clock), so its bracket is
@@ -634,7 +641,7 @@ export function TournamentPanel({ reads, owner, clock, fixture, samples = [], re
         <span className="tag">Wed &amp; Sat · {cutoffUtc(clockMode)}</span>
       </div>
       <TournamentScheduleView now={now} />
-      {viewer === 'player' && <RegistrationView model={{ optIn: owner ? owner.tournamentOptIn : null, busy, message, displayNowMs: now, rules,
+      {viewer === 'player' && !elsewhere && <RegistrationView model={{ optIn: owner ? owner.tournamentOptIn : null, busy, message, displayNowMs: now, rules,
         owner: owner ? { evening: owner.schedule.evening, stamina: owner.stamina.current } : null }} onToggle={() => void toggle()} />}
       <section className={styles.brackets} aria-labelledby={bracketsId}>
         <h3 id={bracketsId}>Brackets</h3>
@@ -646,11 +653,13 @@ export function TournamentPanel({ reads, owner, clock, fixture, samples = [], re
             ))}</ul>
           </nav>
         )}
-        {picker && (
+        {leagueButtons && (
           <div className={styles.leagues} role="group" aria-label="League">
-            {LEAGUES.map(option => <button key={option} type="button" aria-pressed={league === option} onClick={() => setLeague(option)}>{leagueName(option)}</button>)}
+            {LEAGUES.map(option => <button key={option} type="button" aria-pressed={league === option} onClick={() => setPicked(option)}>
+              {leagueName(option)}{option === ownLeague ? ' (yours)' : ''}</button>)}
           </div>
         )}
+        {elsewhere && <p className="muted" role="status" data-viewing-league="">Viewing the {leagueName(league)} league</p>}
         {fixture && !id ? <p className="muted">Choose a sample tournament to follow its bracket.</p>
           : !reads ? <p className="panel-notice" role="status">Tournament brackets cannot be shown in this build yet.</p>
             : !fixture && !liveLeague && !selected ? (viewer === 'unavailable' ? <TournamentNotice failure="unavailable" preparing={false} />
@@ -659,9 +668,9 @@ export function TournamentPanel({ reads, owner, clock, fixture, samples = [], re
               // No server time yet: a failed revision read is said at once, never an endless "Loading" (review M1).
               : syncError ? <TournamentNotice failure="unavailable" preparing={false} />
                 : <p role="status" className={styles.detail}>Loading the tournament…</p>)
-              : <TournamentCard key={id} id={id} reads={reads} clock={clock} now={sampleTime ?? now} viewerId={owner?.gladiatorId ?? null} titles={titles}
-                processedSlotIndex={owner?.processedSlotIndex ?? null} publishedSlotIndex={fixture ? null : publishedSlotIndex}
-                refreshOwner={refresh} onRead={onRead} onWatchBout={onWatchBout} hook={cardState} />}
+              : <TournamentCard key={id} id={id} reads={reads} clock={clock} now={sampleTime ?? now} viewerId={elsewhere ? null : owner?.gladiatorId ?? null} titles={titles}
+                processedSlotIndex={elsewhere ? null : owner?.processedSlotIndex ?? null} publishedSlotIndex={fixture ? null : publishedSlotIndex}
+                refreshOwner={elsewhere ? undefined : refresh} onRead={onRead} onWatchBout={onWatchBout} hook={cardState} />}
       </section>
     </section>
   );

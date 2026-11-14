@@ -1061,13 +1061,105 @@ test.describe('the live Tournaments panel', () => {
     const panel = await tournamentsPanel(page);
     const bracket = panel.locator('article[data-status]');
     await expect(bracket.getByRole('heading', { name: 'Bronze tournament' })).toBeVisible();
-    // An owner follows its own league: no picker.
-    await expect(panel.getByRole('group', { name: 'League' })).toHaveCount(0);
+    // An owner opens on its own league (Task 37 adds the league buttons for a player: its own is marked).
+    await expect(panel.getByRole('group', { name: 'League' }).getByRole('button', { name: 'Bronze (yours)' })).toHaveAttribute('aria-pressed', 'true');
     live.setOwner({ ...owner, progression: { ...owner.progression, league: 'silver' } });
     live.setWorld({ ...world, revision: 'promoted' });
     await page.clock.fastForward(30_000);
     await expect(bracket.getByRole('heading', { name: 'Silver tournament' })).toBeVisible();
     expect(live.requests.some(r => r.table === 'tournament_views' && r.query.get('id') === `eq.tournament:${OPENING_SLOT}:silver`)).toBe(true);
+  });
+
+  // Task 37 (Avi, 2026-11-14: "be able to watch tournament replays even if I not playing"): a player gets the league buttons too, opens on their own
+  // league, and can watch any league's bracket and replays; their own parts (the registration box, their role and rewards) stay with their league.
+  test('a player gets the league buttons with their own league pressed and marked, and the registration with it', async ({ page, context }) => {
+    const at = startOf('opening') + 30 * MIN;
+    await seedSession(context);
+    const owner = { ...structuredClone(ownerFixture), processedSlotIndex: OPENING_SLOT };
+    await routeLiveReads(context, { world: emptyWorld(at), owner, tournaments: [VIEWS.opening, inLeague(VIEWS.opening, 'gold')], serverNowMs: () => at });
+    await page.goto('/game/');
+    await expectOwnerShown(page, 'Aster');
+    const panel = await tournamentsPanel(page);
+    const leagues = panel.getByRole('group', { name: 'League' });
+    await expect(leagues.getByRole('button')).toHaveText(['Bronze (yours)', 'Silver', 'Gold', 'Champion']);
+    await expect(leagues.getByRole('button', { name: 'Bronze (yours)' })).toHaveAttribute('aria-pressed', 'true');
+    await expect(panel.locator('article[data-status]').getByRole('heading', { name: 'Bronze tournament' })).toBeVisible();
+    await expect(panel.getByRole('heading', { name: 'Registration' })).toBeVisible();
+    await expect(panel.locator('[data-viewing-league]')).toHaveCount(0);
+  });
+
+  test('another league shows its bracket as a visitor sees it, without the registration box, and the own league brings it back', async ({ page, context }, testInfo) => {
+    const at = startOf('opening') + 30 * MIN;
+    await seedSession(context);
+    const owner = { ...structuredClone(ownerFixture), processedSlotIndex: OPENING_SLOT };
+    await routeLiveReads(context, { world: emptyWorld(at), owner, tournaments: [VIEWS.opening, inLeague(VIEWS.opening, 'gold')], serverNowMs: () => at });
+    await page.goto('/game/');
+    await expectOwnerShown(page, 'Aster');
+    const panel = await tournamentsPanel(page);
+    const leagues = panel.getByRole('group', { name: 'League' });
+    const bracket = panel.locator('article[data-status]');
+    await leagues.getByRole('button', { name: 'Gold' }).click();
+    await expect(leagues.getByRole('button', { name: 'Gold' })).toHaveAttribute('aria-pressed', 'true');
+    await expect(bracket.getByRole('heading', { name: 'Gold tournament' })).toBeVisible();
+    await expect(panel.locator('[data-viewing-league]')).toHaveText('Viewing the Gold league');
+    await expect(panel.getByRole('heading', { name: 'Registration' })).toHaveCount(0);
+    await expect(bracket).not.toContainText(/You are|Your /);
+    await allEntrants(bracket);
+    await expect(bracket.getByRole('region', { name: 'Entrants' }).getByRole('listitem')).toHaveCount(8);
+    await page.screenshot({ path: `C:/Avi/Studies/Projects/Cloudiator/design/.superpowers/sdd/2026-11-12-1.9-additions/task-37-tournaments-other-league-${testInfo.project.name === 'mobile' ? 'phone' : 'desktop'}.png` });
+    await leagues.getByRole('button', { name: 'Bronze (yours)' }).click();
+    await expect(bracket.getByRole('heading', { name: 'Bronze tournament' })).toBeVisible();
+    await expect(panel.getByRole('heading', { name: 'Registration' })).toBeVisible();
+    await expect(panel.locator('[data-viewing-league]')).toHaveCount(0);
+  });
+
+  test('Watch replay of another league’s bout plays, and Back lands on that league', async ({ page, context }) => {
+    const view = inLeague(VIEWS.completed, 'gold'), at = view.endsAtMs + 5 * MIN;
+    await seedSession(context);
+    const owner = { ...structuredClone(ownerFixture), processedSlotIndex: Math.floor(at / SLOT_MS) };
+    const live = await routeLiveReads(context, { world: emptyWorld(at), owner, tournaments: [view], serverNowMs: () => at });
+    await page.goto('/game/');
+    await expectOwnerShown(page, 'Aster');
+    const panel = await tournamentsPanel(page);
+    const leagues = panel.getByRole('group', { name: 'League' });
+    await leagues.getByRole('button', { name: 'Gold' }).click();
+    const bracket = panel.locator('article[data-status]');
+    await expect(bracket.getByRole('heading', { name: 'Gold tournament' })).toBeVisible();
+    await bracket.getByRole('button', { name: /^Watch replay of / }).first().click();
+    const replay = page.getByRole('dialog', { name: 'Replay', exact: true });
+    await expect(replay).toBeVisible();
+    await expect(replay).toContainText('TOURNAMENT · GOLD');
+    await page.waitForFunction(() => !!window.__cloudiatorReplay?.state().battleId);
+    // The bout's log was read as a signed-in player who is in no part of that tournament.
+    expect(live.requests.some(r => r.table === 'tournament_bout_results' && r.query.has('bout_id') && r.reader !== null)).toBe(true);
+    await page.getByRole('button', { name: 'Back to Tournaments', exact: true }).click();
+    await expect(replay).toHaveCount(0);
+    await expect(leagues.getByRole('button', { name: 'Gold' })).toHaveAttribute('aria-pressed', 'true');
+    await expect(bracket.getByRole('heading', { name: 'Gold tournament' })).toBeVisible();
+    await expect(panel.getByRole('heading', { name: 'Registration' })).toHaveCount(0);
+  });
+
+  test('the paged lists go back to page 1 when the league changes', async ({ page, context }) => {
+    const templates = Object.values(VIEWS).flatMap(v => v.bouts.flatMap(b => (b.revealedResult?.battleLog ? [b.revealedResult.battleLog] : [])));
+    const start = startOf('opening');
+    const { view, actors } = largeTournament(50, { startsAtMs: start, league: 'gold', templates });
+    const at = start + Math.ceil(80 * MIN * 2 / 7) + 10_000;
+    await seedSession(context);
+    const owner = { ...structuredClone(ownerFixture), processedSlotIndex: OPENING_SLOT };
+    await routeLiveReads(context, { world: { ...emptyWorld(at), actors }, owner, tournaments: [view], serverNowMs: () => at });
+    await page.goto('/game/');
+    await expectOwnerShown(page, 'Aster');
+    const panel = await tournamentsPanel(page);
+    const leagues = panel.getByRole('group', { name: 'League' });
+    await leagues.getByRole('button', { name: 'Gold' }).click();
+    const entrants = panel.getByRole('region', { name: 'Entrants' });
+    const bar = entrants.getByRole('navigation', { name: 'Pages' });
+    await expect(bar.locator('b').first()).toHaveText('Page 1 of 9');
+    await bar.getByRole('button', { name: 'Go to page 4', exact: true }).click();
+    await expect(bar.locator('b').first()).toHaveText('Page 4 of 9');
+    await leagues.getByRole('button', { name: 'Silver' }).click();
+    await leagues.getByRole('button', { name: 'Gold' }).click();
+    await expect(bar.locator('b').first()).toHaveText('Page 1 of 9');
   });
 
   // Patch 1.9 Task 31 (menus with Back and Next): a 50-entrant bracket shows its entrants and a round's bouts 6 a page, each with its own bar.

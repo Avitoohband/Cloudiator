@@ -324,11 +324,13 @@
   }
 
   /* Task 33 fix round 1: the section strip is one line on a phone, as the approved mockup draws it: ‹, the section's name, quiet circles,
-     ›. The neighbours' names are read (each button keeps its accessible name) but not shown; the bottom bar shows them. */
+     ›. The neighbours' names are read (each button keeps its accessible name) but not shown; the bottom bar shows them. Fix round 2
+     (re-review I-1, the coordinator's ruling): ‹, › and every circle are 44 px targets (the circle's dot stays small inside its button),
+     side by side, and the name ellipsizes to make room. */
   .strip {
     grid-template-columns: auto minmax(0, 1fr) auto auto;
     grid-template-areas: 'prev name dots next';
-    column-gap: 4px;
+    column-gap: 0;
     margin-bottom: 6px;
     padding-bottom: 2px;
   }
@@ -344,18 +346,24 @@
     display: none;
   }
 
+  .stripName {
+    padding: 0 4px;
+  }
+
   .stripMove {
-    min-width: 40px;
-    padding: 0 8px;
+    min-width: 44px;
+    padding: 0;
   }
 
   .strip .dots {
     height: 44px;
     margin: 0;
+    gap: 0;
   }
 
   .strip .dot {
-    width: 16px;
+    width: 44px;
+    min-width: 44px;
   }
 
   .strip .dot i {

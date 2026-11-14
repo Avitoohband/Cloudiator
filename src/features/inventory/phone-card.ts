@@ -31,14 +31,17 @@ export function usePhoneCard(available = true) {
   const [shown, setShown] = useState(false);
   /** The positioned box that holds the grid and the card, the grid's box the card lies over, and the card. */
   const hostRef = useRef<HTMLDivElement>(null), anchorRef = useRef<HTMLDivElement>(null), sheetRef = useRef<HTMLElement>(null);
-  /** What had the focus when the card opened (the tile), which takes it back when the card closes. */
+  /**
+   * The tile the card opened from, which takes the focus back when the card closes. It is the tile pressed (fix round 2, re-review M-3), not
+   * the focus at that moment: iOS Safari does not focus a tapped button.
+   */
   const opener = useRef<HTMLElement | null>(null);
   const open = phone && shown && available;
   useEffect(() => { if (!available) { setShown(false); opener.current = null; } }, [available]);
 
-  const show = useCallback(() => {
+  const show = useCallback((tile: HTMLElement) => {
     if (!compact()) return;
-    opener.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    opener.current = tile;
     setShown(true);
   }, []);
   const close = useCallback((giveBack = true) => {
@@ -60,6 +63,13 @@ export function usePhoneCard(available = true) {
       sheet.style.setProperty('--card-height', `${Math.max(120, Math.min(view.bottom, window.innerHeight) - top)}px`);
     };
     place();
+    // A line that comes or goes above the grid (a purchase's, fix round 2, re-review M-1) moves the grid: the card follows it and stays
+    // wholly inside the menu. Every box from the card's host up to the menu's body grows or shrinks with such a line.
+    const body = scroller(host);
+    const boxes: Element[] = [];
+    for (let node: HTMLElement | null = host; node && node !== body; node = node.parentElement) boxes.push(node);
+    const resized = typeof ResizeObserver === 'function' ? new ResizeObserver(place) : null;
+    for (const box of boxes) resized?.observe(box);
     // The card takes the focus only as it opens: a card that kept a tabindex would catch the focus a control in it leaves (a discarded
     // piece's Discard; `useFocusRescue`) before that command's outcome could take it (`useOutcomeFocus`).
     sheet.tabIndex = -1;
@@ -67,7 +77,7 @@ export function usePhoneCard(available = true) {
     const drop = () => sheet.removeAttribute('tabindex');
     sheet.addEventListener('blur', drop, { once: true });
     window.addEventListener('resize', place);
-    return () => { window.removeEventListener('resize', place); sheet.removeEventListener('blur', drop); drop(); };
+    return () => { window.removeEventListener('resize', place); resized?.disconnect(); sheet.removeEventListener('blur', drop); drop(); };
   }, [open]);
 
   // A press outside the card closes it (the press goes on to what it pressed).
@@ -83,7 +93,9 @@ export function usePhoneCard(available = true) {
   }, [open, close]);
 
   // Escape with the focus elsewhere in the menu (on the menu itself, where the focus goes when a control in the card leaves, or on a chip):
-  // the card closes first, not the menu. A field keeps its own Escape (the search clears), and the card's own keys are the card's.
+  // the card closes first, not the menu. A field keeps its Escape as before Task 33 (3ed69c0; fix round 2, the coordinator's ruling on
+  // re-review M-2): a typed search clears itself, and an empty search or the Sort select leave it to the shell, which closes the menu.
+  // The card's own keys are the card's.
   useEffect(() => {
     const menu = hostRef.current?.closest<HTMLElement>('[data-menu-surface]');
     if (!open || !menu) return;

@@ -283,11 +283,14 @@ export function InventoryPanel({ owner, gateway, refresh, clock, preview = false
     {error && <p ref={outcome} role="alert" tabIndex={-1} {...target}>{error}</p>}
     {retry && <button disabled={busy} onClick={() => { if (attempt.current) void send(attempt.current, undefined, where); }}>Retry request</button>}
   </>;
-  /** The held outcome at `at`: the same lines, unseen and out of reach, keeping their room until the new outcome comes. */
+  /**
+   * The held outcome at `at`: the same lines, unseen and out of reach, keeping their room until the new outcome comes. Each copy has its
+   * line's own box: `data-role` takes the style a line's role gives it (the Buy back's boxed lines, fix round 2, re-review I4).
+   */
   const heldAt = (at: string) => held && held.place === at && <div className={styles.held} aria-hidden="true" inert>
-    {held.message && (held.sold && offersBuyBack ? <div className={styles.soldNote}><p>{held.message}</p><button type="button" className={styles.linkButton}>Open Buy back</button></div>
-      : <p>{held.message}</p>)}
-    {held.error && <p>{held.error}</p>}
+    {held.message && (held.sold && offersBuyBack ? <div className={styles.soldNote}><p data-role="status">{held.message}</p><button type="button" className={styles.linkButton}>Open Buy back</button></div>
+      : <p data-role="status">{held.message}</p>)}
+    {held.error && <p data-role="alert">{held.error}</p>}
     {held.retry && <button type="button">Retry request</button>}
   </div>;
   /**
@@ -439,7 +442,7 @@ export function InventoryPanel({ owner, gateway, refresh, clock, preview = false
               return <button key={tile.key} type="button" className={styles.tile} data-testid={`tile-${tile.key}`} data-rarity={item.rarity} data-stack={tile.items.length > 1 ? tile.items.length : undefined}
                 data-page-row="" tabIndex={0}
                 aria-label={[itemLabel(item), itemBinding(item), count > 1 && `${count} owned`, status].filter(Boolean).join(', ')}
-                aria-description={`Weight ${item.stats.weight}`} aria-controls={detailsId} aria-pressed={tile.key === selected?.key} onClick={() => { setSelectedId(tile.key); phoneCard.show(); }}>
+                aria-description={`Weight ${item.stats.weight}`} aria-controls={detailsId} aria-pressed={tile.key === selected?.key} onClick={event => { setSelectedId(tile.key); phoneCard.show(event.currentTarget); }}>
                 <ItemIcon catalogId={item.catalogId} />
                 <span className={styles.level} aria-hidden="true">L{item.tier}</span>
                 {word && <span className={styles.mark} data-mark={word.toLowerCase()} aria-hidden="true">{word}</span>}
@@ -497,7 +500,7 @@ export function InventoryPanel({ owner, gateway, refresh, clock, preview = false
     {place === 'trade' && section === SHOPS && outcomes}
     {section === SHOPS && heldAt('trade')}
     <ShopPanel key={merchantRequest} initialMerchant={initialMerchant} owner={owner} busy={busy || selling !== null} preview={preview} buy={(catalogId, quantity) => void send({ kind: 'buy-shop', catalogId, catalogVersion: CATALOG_V1.version, quantity })}
-      clock={clock} buyBack={buyBack} buyBackOutcome={place === 'buyback' ? outcomes : heldAt('buyback') || null} buyBackRequest={buyBackRequest} gridPage={gridPage} active={section === SHOPS} />
+      clock={clock} buyBack={buyBack} buyBackOutcome={place === 'buyback' ? <>{outcomes}{heldAt('buyback')}</> : heldAt('buyback') || null} buyBackRequest={buyBackRequest} gridPage={gridPage} active={section === SHOPS} />
     </div>
     </div>
     <dialog ref={dialog} aria-labelledby="discard-heading" onCancel={() => setConfirmation(null)} onClose={() => {

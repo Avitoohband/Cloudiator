@@ -308,7 +308,7 @@ test('nothing in the Shops moves while a buy back is on its way', async ({ page,
  * Task 33 fix round 1 (review Important 4): holds the next command of `kind` until released, and samples every frame from the press until it
  * is released: where the Shops, their grid and the card are. Returns the press and the samples.
  */
-async function holdAndWatch(context: BrowserContext, page: Page, kind: GameCommand['kind'], shops: Locator, grid: Locator) {
+async function holdAndWatch(context: BrowserContext, page: Page, kind: GameCommand['kind'], shops: Locator, grid: Locator, extra: Locator[] = []) {
   let release = () => {}, sent = 0;
   const held = new Promise<void>(resolve => { release = resolve; });
   await context.route(`${SUPABASE_URL}/functions/v1/game-command`, async route => {
@@ -316,16 +316,17 @@ async function holdAndWatch(context: BrowserContext, page: Page, kind: GameComma
     if (request.method() === 'POST' && !isPresence(request) && (request.postDataJSON() as GameCommand).kind === kind && sent++ === 0) await held;
     return route.fallback();
   });
-  const places = () => Promise.all([shops, grid].map(locator => locator.evaluate(element => Math.round(element.getBoundingClientRect().top))));
+  const watched = [shops, grid, ...extra];
+  const places = () => Promise.all(watched.map(locator => locator.evaluate(element => Math.round(element.getBoundingClientRect().top))));
   const before = await places();
-  await grid.evaluate(element => element.setAttribute('data-watch', ''));
-  await shops.evaluate(element => {
-    const parts = [element, document.querySelector('[data-watch]')!];
+  for (const [n, locator] of watched.entries()) await locator.evaluate((element, at) => element.setAttribute('data-watch', String(at)), n);
+  await shops.evaluate((element, count) => {
+    const parts = Array.from({ length: count }, (_, n) => document.querySelector(`[data-watch="${n}"]`)!);
     const state = { seen: [] as number[][], on: true };
     (window as unknown as { __shopsSeen: typeof state }).__shopsSeen = state;
     const look = () => { if (!state.on) return; state.seen.push(parts.map(node => Math.round(node.getBoundingClientRect().top))); requestAnimationFrame(look); };
     requestAnimationFrame(look);
-  });
+  }, watched.length);
   return {
     before,
     sent: () => sent,
@@ -384,6 +385,45 @@ test('nothing in the Shops moves while a second purchase is on its way', async (
   expect(await watch.finish()).toEqual([watch.before.join(',')]);
   await expect(menu.getByRole('status').filter({ hasText: 'Purchase confirmed.' })).toBeVisible();
   expect(flow.commands.map(command => command.kind)).toEqual(['buy-shop', 'buy-shop']);
+});
+
+// Task 33 fix round 2 (re-review I4, partial): a buy back after a buy back, and the Retry of a refused one, keep the outcome line's room while
+// they are on their way: its held copy has the line's own box, so nothing in the card or the Shops moves (the button pressed included).
+test('nothing in the Shops or the card moves while a second buy back is on its way', async ({ page, context }, info) => {
+  if (info.project.name === 'desktop') await page.setViewportSize({ width: 1920, height: 1080 });
+  const flow = await shopFlow(context);
+  const { menu, shops } = await openBuyBack(page);
+  await card(shops).getByRole('button', { name: 'Buy back for 39 gold' }).click();
+  const line = card(shops).getByRole('status').filter({ hasText: 'Bought back. Sword is in your bag again.' });
+  await expect(line).toBeVisible();
+  const buy = card(shops).getByRole('button', { name: 'Buy back for 34 gold' });
+  await menu.getByTestId('menu-body').evaluate(body => { body.scrollTop = body.scrollHeight; });
+  await buy.scrollIntoViewIfNeeded();
+  const watch = await holdAndWatch(context, page, 'buy-back', shops, shops.getByRole('group', { name: 'Items to buy back' }), [card(shops), buy]);
+  await buy.click();
+  await expect.poll(watch.sent).toBe(1);
+  expect(await watch.finish()).toEqual([watch.before.join(',')]);
+  await expect(card(shops).getByRole('status').filter({ hasText: 'Bought back. Iron helmet is in your bag again.' })).toBeVisible();
+  expect(buyBacks(flow.commands)).toHaveLength(2);
+});
+
+test('nothing in the Shops or the card moves while the Retry of a refused buy back is on its way', async ({ page, context }, info) => {
+  if (info.project.name === 'desktop') await page.setViewportSize({ width: 1920, height: 1080 });
+  const flow = await shopFlow(context, { refuse: 'processing' });
+  const { menu, shops } = await openBuyBack(page);
+  await card(shops).getByRole('button', { name: 'Buy back for 39 gold' }).click();
+  await expect(card(shops).getByRole('alert')).toContainText('The world is processing previous results.');
+  const retry = card(shops).getByRole('button', { name: 'Retry request' });
+  const buy = card(shops).getByRole('button', { name: 'Buy back for 39 gold' });
+  await menu.getByTestId('menu-body').evaluate(body => { body.scrollTop = body.scrollHeight; });
+  await retry.scrollIntoViewIfNeeded();
+  const watch = await holdAndWatch(context, page, 'buy-back', shops, shops.getByRole('group', { name: 'Items to buy back' }), [card(shops), buy]);
+  await retry.click();
+  await expect.poll(watch.sent).toBe(1);
+  expect(await watch.finish()).toEqual([watch.before.join(',')]);
+  await expect(card(shops).getByRole('status').filter({ hasText: 'Bought back. Sword is in your bag again.' })).toBeVisible();
+  const [first, second] = buyBacks(flow.commands);
+  expect(second.operationId).toBe(first.operationId);
 });
 
 test('not enough gold turns Buy back off and says why', async ({ page, context }, info) => {

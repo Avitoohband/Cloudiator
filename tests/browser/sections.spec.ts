@@ -130,7 +130,7 @@ test.describe('named sections and paged grids (fixture preview)', () => {
     const menu = await openMenu(page, 'Inventory and shops');
     await expect(shownSection(menu)).toHaveText('Inventory');
     await expect(circles(menu)).toHaveCount(2);
-    await expect(sectionStrip(menu).getByRole('button', { name: 'Next section: Shops', exact: true })).toBeAttached();
+    await expect(sectionStrip(menu).getByRole('button', { name: 'Next section: Shops', exact: true })).toBeVisible();
     // A section with a paged grid: its bottom bar is the grid's, never the section bar.
     await expect(sectionBar(menu)).toHaveCount(0);
     const size = await pageSize(page);
@@ -173,6 +173,40 @@ test.describe('named sections and paged grids (fixture preview)', () => {
     const practice = menu.getByRole('button', { name: /Practice fight/ });
     expect((await practice.boundingBox())!.y + (await practice.boundingBox())!.height).toBeLessThanOrEqual((await sectionBar(menu).boundingBox())!.y);
     expect(await menu.getByTestId('menu-body').evaluate(body => body.scrollHeight <= body.clientHeight + 1)).toBe(true);
+    expect(await noHorizontalScroll(page)).toBe(true);
+  });
+
+  // Task 33 fix round 2 (re-review I-1, the coordinator's ruling): on a phone ‹, › and every circle of the one-line strip are 44 px targets
+  // (the circle's dot may stay small); the section's name ellipsizes to make room, and the accessible names are unchanged.
+  test('on a phone the strip’s ‹, › and each of its five circles are 44 px targets, side by side on one line (360 × 780)', async ({ page }) => {
+    await page.setViewportSize({ width: 360, height: 780 });
+    await openCamp(page);
+    const menu = await openSection(await openMenu(page, 'My gladiator'), 'Attributes and stats');
+    const strip = sectionStrip(menu);
+    await expect(circles(menu)).toHaveCount(5);
+    const controls = [strip.getByRole('button', { name: 'Previous section: Level and stamina', exact: true }),
+      ...SECTIONS.map(name => strip.getByRole('button', { name: `Go to section: ${name}`, exact: true })),
+      strip.getByRole('button', { name: 'Next section: Worn equipment', exact: true })];
+    const boxes: { x: number; y: number; width: number; height: number }[] = [];
+    for (const control of controls) {
+      const box = (await control.boundingBox())!;
+      expect(box.width, await control.getAttribute('aria-label') ?? '').toBeGreaterThanOrEqual(44);
+      expect(box.height, await control.getAttribute('aria-label') ?? '').toBeGreaterThanOrEqual(44);
+      boxes.push(box);
+    }
+    // ‹, the circles and ›, left to right, none over another, on one line with the name.
+    for (let n = 1; n < boxes.length; n++) {
+      if (n === 1) continue; // the name sits between ‹ and the first circle
+      expect(boxes[n].x).toBeGreaterThanOrEqual(boxes[n - 1].x + boxes[n - 1].width - 0.5);
+    }
+    const middles = boxes.map(box => box.y + box.height / 2);
+    expect(Math.max(...middles) - Math.min(...middles)).toBeLessThan(2);
+    const name = (await shownSection(menu).boundingBox())!;
+    expect(name.x).toBeGreaterThanOrEqual(boxes[0].x + boxes[0].width - 0.5);
+    expect(name.x + name.width).toBeLessThanOrEqual(boxes[1].x + 0.5);
+    expect(Math.abs(name.y + name.height / 2 - middles[0])).toBeLessThan(6);
+    expect(await shownSection(menu).evaluate(element => getComputedStyle(element).textOverflow)).toBe('ellipsis');
+    expect((await strip.boundingBox())!.height).toBeLessThanOrEqual(52);
     expect(await noHorizontalScroll(page)).toBe(true);
   });
 

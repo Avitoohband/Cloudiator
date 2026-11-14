@@ -3,7 +3,7 @@ import { ownerFixture, worldFixture } from '../fixtures/domain';
 import { DUNGEON_FIXTURES } from '../fixtures/dungeons';
 import { MENUS } from '../../src/features/shell/menus';
 import { SUPABASE_URL, dungeonLiveData, emptyWorld, routeLiveReads, seedSession } from './live-routes';
-import { cornerChip, expectOwnerShown, joinButton, menuDialog, openMenu, railIcons, railMenus, revealRail, touchLayout } from './shell-helpers';
+import { cornerChip, expectOwnerShown, joinButton, menuDialog, openMenu, railIcons, railMenus, revealRail, touchLayout, closeMenu } from './shell-helpers';
 
 // Task 13.5: the full-screen camp shell. The camp fills the window; a hidden rail on the left edge (a ☰ button and
 // bottom sheets on touch) opens one floating menu at a time; the corner chip sits top right.
@@ -310,13 +310,20 @@ test.describe('the camp shell on any device', () => {
     const rowFinds = roster.getByRole('listitem').getByRole('button', { name: /^Find / });
     expect(await rowFinds.count()).toBeGreaterThan(5);
     for (const button of await rowFinds.all()) await expect(button).toBeDisabled();
-    // The camp's own notice (its text) stays in view beside the open menu.
-    expect(await page.evaluate(() => {
+    // The camp's own notice (its text) stays in view beside the open menu. On a phone the menu is a tall sheet over the camp (Task 30), so the
+    // notice is read with the sheet closed, and the sheet is opened again after.
+    const noticeInView = () => page.evaluate(() => {
       const range = document.createRange();
       range.selectNodeContents(document.querySelector('[data-camp-fallback]')!);
       const r = range.getBoundingClientRect();
       return !!document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2)?.closest('[data-camp-fallback]');
-    })).toBe(true);
+    });
+    if (await touchLayout(page)) {
+      await closeMenu(page);
+      expect(await noticeInView()).toBe(true);
+    } else {
+      expect(await noticeInView()).toBe(true);
+    }
     const schedule = await openMenu(page, 'Schedule');
     await expect(schedule.getByRole('heading', { name: 'Repeating schedule' })).toBeVisible();
     await revealRail(page);
@@ -404,7 +411,9 @@ test.describe('the camp shell on touch', () => {
     const b = await boxOf(sheet);
     expect([b.x, b.width]).toEqual([0, view.width]);
     expect(Math.abs(b.y + b.height - view.height)).toBeLessThanOrEqual(1);
-    expect(b.y).toBeGreaterThan(view.height * 0.2);
+    // Task 30: the paged menus (Arena is one) open tall, 62% of the height at least, with 96 px of the camp left above (see the Schedule below).
+    expect(b.y).toBeGreaterThanOrEqual(90);
+    expect(b.height).toBeGreaterThanOrEqual(view.height * 0.62 - 1);
     // Swiping the sheet's handle down closes it.
     const handle = await boxOf(sheet.getByTestId('sheet-handle'));
     const cdp = await page.context().newCDPSession(page);
@@ -417,6 +426,9 @@ test.describe('the camp shell on touch', () => {
     const results = await openMenu(page, 'Results');
     await results.getByRole('button', { name: 'Close', exact: true }).click();
     await expect(results).toBeHidden();
+    // A menu that is not paged keeps the shorter sheet: the camp shows above it (more than 20% of the height).
+    const schedule = await settled(await openMenu(page, 'Schedule'));
+    expect((await boxOf(schedule)).y).toBeGreaterThan(view.height * 0.2);
   });
 
   test('shows the menu icons as one row that scrolls sideways when it does not fit, without zoom buttons', async ({ page }) => {

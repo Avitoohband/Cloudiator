@@ -705,7 +705,7 @@ export function CampShell({ fixture, previewAs, previewResting = false, previewB
   };
 
   return (
-    <div ref={shellRef} className={styles.shell} data-rail={railShown ? 'shown' : 'hidden'} data-menu-place={prefs.place} data-sheet={open ? 'open' : undefined}
+    <div ref={shellRef} className={styles.shell} data-rail={railShown ? 'shown' : 'hidden'} data-menu-place={prefs.place} data-sheet={open ? 'open' : undefined} data-arrival={arrival ? 'shown' : undefined}
       data-card={card ? 'open' : undefined} data-owner-menu={owner ? '' : undefined} data-pill={fixture || fixtureRefused ? 'shown' : undefined}
       style={{ '--chip-w': `${place.chipWidth}px`, '--chip-bottom': `${place.chipBottom}px`,
         '--panel-clear-left': `${place.panelClearLeft}px`, '--panel-clear-right': `${place.panelClearRight}px`, '--menu-clear-top': `${place.menuClearTop}px` } as CSSProperties}>

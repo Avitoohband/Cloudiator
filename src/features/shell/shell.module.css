@@ -1817,3 +1817,20 @@
 .chip[data-popover] ~ .notices .staminaNotice button {
   visibility: hidden;
 }
+
+/*
+ * Patch 1.9 Task 30 fix round 3: the paged menus open as a tall sheet on phones (62% of the height, 96 px free at the top), which leaves room for
+ * the corner chip alone. (1) A popover open under the chip (the account menu, the messages panel) rises above the sheet (it was behind it, and
+ * Sign out could not be pressed with My gladiator open). (2) While an arrival banner shows under the chip, the tall sheet starts below it (the
+ * shell's measured --menu-clear-top: the chip and the notices), so the banner and its Find stay in view and clear of the sheet; it grows back to
+ * 96 px when the banner goes.
+ */
+@media (hover: none), (max-width: 480px) {
+  .chip[data-popover] {
+    z-index: 11;
+  }
+
+  .shell[data-arrival] .surface[data-paged] {
+    height: max(62%, calc(100% - var(--menu-clear-top, 148px)));
+  }
+}

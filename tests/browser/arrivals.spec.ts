@@ -157,6 +157,9 @@ test.describe('Patch A: a new player is announced', () => {
       await page.evaluate(key => localStorage.removeItem(key), ARRIVALS_KEY).catch(() => undefined);
       await page.goto('/game/');
       await expect(banner(page)).toBeVisible();
+      // Find is off until the camp scene is ready (its `findReason`), and an off button cannot take the focus: with the clock stopped the scene never
+      // gets ready, and a focus made too early held nothing (arrivals:150 failed about 1 run in 8, Task 30 fix round 3).
+      await expect(page.getByRole('button', { name: 'Find Ursa', exact: true })).toBeEnabled({ timeout: 45_000 });
       await page.clock.pauseAt(await page.evaluate(() => Date.now() + 100));
     };
     const showingFor = (seconds: number) => showingForOn(page, seconds);

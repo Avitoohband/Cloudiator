@@ -9,7 +9,7 @@ import { ARENA_OWNER } from '../fixtures/arena-build';
 import { itemFixture, worldFixture } from '../fixtures/domain';
 import { MARKET_ROWS } from '../fixtures/market';
 import { SUPABASE_URL, isPresence, routeLiveReads, seedSession, type LiveTransport } from './live-routes';
-import { expectOwnerShown, joinButton, openMenu } from './shell-helpers';
+import { campReady, expectOwnerShown, joinButton, openMenu } from './shell-helpers';
 import { a11yShot, focusDrops, watchFocus } from './a11y-helpers';
 import { forbidRemote } from './remote';
 import { showChoice } from './show-choice';
@@ -52,7 +52,6 @@ const tileLook = (tile: Locator) => tile.evaluate(el => { const style = getCompu
 const itemName = (listing: MarketListing) => CATALOG_V1.items[listing.item.catalogId].name;
 const noHorizontalScroll = (page: Page) => page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth);
 /** Waits until the camp scene is drawn, so a capture for the visual review shows the camp behind the menu. */
-const campReady = (page: Page) => page.waitForFunction(() => window.__cloudiatorCamp?.state()?.ready === true, null, { timeout: 45_000 });
 
 type Flow = {
   live: LiveTransport; state: OwnerState; offers: MarketListing[]; commands: GameCommand[]; bought: ItemInstance[];

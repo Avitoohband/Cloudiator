@@ -10,6 +10,9 @@ import { worldFixture } from '../fixtures/domain';
 /** The shell's touch layout: no hover (plan Decision 3, the Playwright mobile project) or a window under 481 px. */
 export const touchLayout = (page: Page) => page.evaluate(query => matchMedia(query).matches, COMPACT_QUERY);
 
+/** Waits until the camp scene is ready. */
+export const campReady = (page: Page) => page.waitForFunction(() => window.__cloudiatorCamp?.state()?.ready === true, null, { timeout: 45_000 });
+
 /** The menu panel (desktop) or sheet (touch) named `label`. */
 export const menuDialog = (page: Page, label: string) => page.getByRole('dialog', { name: label, exact: true });
 /** The rail's menu icons (the touch dock shows the same buttons). */

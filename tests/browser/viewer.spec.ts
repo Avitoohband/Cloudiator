@@ -7,7 +7,7 @@ import type { BattleLog, RevealedTimeline } from '../../supabase/functions/_shar
 import { ownerFixture } from '../fixtures/domain';
 import { SLOT_MS, emptyWorld, routeLiveReads, seedSession } from './live-routes';
 import { noHorizontalScroll } from './a11y-helpers';
-import { expectOwnerShown, menuDialog, openMenu, quietArrivals, touchLayout } from './shell-helpers';
+import { campReady, expectOwnerShown, menuDialog, openMenu, quietArrivals, touchLayout } from './shell-helpers';
 import { showChoice } from './show-choice';
 
 // Arena replays Task 5 (spec 2, the approved mockup; plan Review Focus 1, 4 and 5): one replay viewer with Patch A's bar (▶/⏸, a
@@ -31,7 +31,6 @@ type QueuePageRace = {
 };
 declare global { interface Window { __queuePageRace?: QueuePageRace } }
 
-const campReady = (page: Page) => page.waitForFunction(() => window.__cloudiatorCamp?.state()?.ready === true, null, { timeout: 45_000 });
 async function openCamp(page: Page, url = '/game/?mode=fixture') {
   await page.goto(url);
   await campReady(page);

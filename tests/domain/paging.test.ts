@@ -164,6 +164,57 @@ describe('the page controller (usePagedList)', () => {
     expect(c.view().page).toBe(2);
   });
 
+  it('keeps a jump requested during an in-flight cursor read and lands on it when the rows commit', async () => {
+    const c = createPageController();
+    let finish!: () => void;
+    const load = vi.fn(() => new Promise<void>(resolve => { finish = resolve; }));
+    c.sync(input(14, { hasMore: true }), load);
+    c.go(2);
+    c.next(); // Ask for page 3.
+    expect(c.view()).toMatchObject({ page: 2, busy: true });
+
+    c.goToIndex(28); // Page 5. The same response will contain it.
+    expect(load).toHaveBeenCalledTimes(1);
+    expect(c.view().page).toBe(2);
+
+    finish();
+    await Promise.resolve();
+    await Promise.resolve();
+    // The load promise can settle before the caller's setState is committed.
+    c.sync(input(35, { hasMore: false }));
+    expect(c.view()).toMatchObject({ page: 5, jump: 28, target: 5, busy: false });
+    expect(load).toHaveBeenCalledTimes(1);
+  });
+
+  it('can jump to an already loaded row on a partial page when no loader is supplied', () => {
+    const c = createPageController();
+    c.sync(input(50, { hasMore: true }));
+    c.goToIndex(49); // Row 50 is present. Only the first seven pages are full.
+    expect(c.view()).toMatchObject({ page: 8, jump: 49, target: 8 });
+  });
+
+  for (const stateCommitsFirst of [true, false]) {
+    it(`does not issue a focus turn when the cursor is exhausted without adding rows (state commits ${stateCommitsFirst ? 'first' : 'after settlement'})`, async () => {
+      const c = createPageController();
+      let finish!: () => void;
+      const load = vi.fn(() => new Promise<void>(resolve => { finish = resolve; }));
+      c.sync(input(14, { hasMore: true }), load);
+      c.go(2);
+      const before = c.view().turn;
+
+      c.next();
+      expect(c.view()).toMatchObject({ page: 2, busy: true, turn: before });
+      if (stateCommitsFirst) c.sync(input(14));
+      finish();
+      await Promise.resolve();
+      await Promise.resolve();
+      if (!stateCommitsFirst) c.sync(input(14));
+
+      expect(c.view()).toMatchObject({ page: 2, pages: 2, busy: false, failed: false, turn: before });
+      expect(load).toHaveBeenCalledTimes(1);
+    });
+  }
+
   it('keeps the page and says failed when a read fails', async () => {
     const c = createPageController();
     const load = vi.fn(() => Promise.reject(new Error('down')));

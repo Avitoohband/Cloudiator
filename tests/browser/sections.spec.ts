@@ -27,7 +27,8 @@ test.describe('named sections and paged grids (fixture preview)', () => {
   test.skip(production, 'The camp harness runs on the fixture preview only.');
 
   test('My gladiator opens as five sections; the strip, its circles, the bottom bar and ← → move between them, each control in its section', async ({ page }, info) => {
-    if (info.project.name === 'mobile') await page.setViewportSize({ width: 360, height: 780 });
+    const phone = info.project.name === 'mobile';
+    if (phone) await page.setViewportSize({ width: 360, height: 780 });
     await openCamp(page);
     const menu = await openMenu(page, 'My gladiator');
     const strip = sectionStrip(menu), bar = sectionBar(menu);
@@ -50,8 +51,10 @@ test.describe('named sections and paged grids (fixture preview)', () => {
     await expect(menu.getByRole('progressbar', { name: 'Stamina', exact: true })).toBeVisible();
     await expect(menu.getByRole('progressbar', { name: 'Experience', exact: true })).toBeVisible();
     await expect(menu.getByRole('button', { name: 'Stamina', exact: true })).toBeVisible();
-    // The strip's next: Attributes and stats, with the attribute and stat help and ⚔ Practice fight.
-    await strip.getByRole('button', { name: 'Next section: Attributes and stats', exact: true }).click();
+    // The strip's next: Attributes and stats, with the attribute and stat help and ⚔ Practice fight. (A phone's strip has no ‹ ›, fix round 2
+    // ruling: its circle goes there.)
+    if (phone) await strip.getByRole('button', { name: 'Go to section: Attributes and stats', exact: true }).click();
+    else await strip.getByRole('button', { name: 'Next section: Attributes and stats', exact: true }).click();
     await expect(shownSection(menu)).toHaveText('Attributes and stats');
     await expect(bar).toContainText('3 of 5');
     await expect(menu.getByRole('region', { name: 'Attributes', exact: true })).toBeVisible();
@@ -78,7 +81,8 @@ test.describe('named sections and paged grids (fixture preview)', () => {
     await expect(menu.getByRole('heading', { name: 'My history', exact: true })).toBeVisible();
     await expect(menu.getByRole('group', { name: 'Show history', exact: true })).toBeVisible();
     await expect(bar).toHaveCount(0);
-    await expect(strip.getByRole('button', { name: 'Next section', exact: true })).toHaveAttribute('aria-disabled', 'true');
+    if (phone) await expect(strip.getByRole('button', { name: /^(Previous|Next) section/ })).toHaveCount(0);
+    else await expect(strip.getByRole('button', { name: 'Next section', exact: true })).toHaveAttribute('aria-disabled', 'true');
     expect(await noHorizontalScroll(page)).toBe(true);
     // The menu reopens on the last section seen in this visit; a reload starts at the Overview.
     await closeMenu(page);
@@ -130,7 +134,9 @@ test.describe('named sections and paged grids (fixture preview)', () => {
     const menu = await openMenu(page, 'Inventory and shops');
     await expect(shownSection(menu)).toHaveText('Inventory');
     await expect(circles(menu)).toHaveCount(2);
-    await expect(sectionStrip(menu).getByRole('button', { name: 'Next section: Shops', exact: true })).toBeVisible();
+    // ‹ › are the pointer layout's; a phone's strip has its circles only (fix round 2 ruling).
+    if (info.project.name === 'mobile') await expect(sectionStrip(menu).getByRole('button', { name: 'Next section: Shops', exact: true })).toHaveCount(0);
+    else await expect(sectionStrip(menu).getByRole('button', { name: 'Next section: Shops', exact: true })).toBeVisible();
     // A section with a paged grid: its bottom bar is the grid's, never the section bar.
     await expect(sectionBar(menu)).toHaveCount(0);
     const size = await pageSize(page);
@@ -159,16 +165,14 @@ test.describe('named sections and paged grids (fixture preview)', () => {
     await openCamp(page);
     const menu = await openSection(await openMenu(page, 'My gladiator'), 'Attributes and stats');
     const strip = sectionStrip(menu);
-    const [previous, next] = [strip.getByRole('button', { name: 'Previous section: Level and stamina', exact: true }), strip.getByRole('button', { name: 'Next section: Worn equipment', exact: true })];
-    await expect(previous).toBeVisible();
-    await expect(next).toBeVisible();
-    // One row: ‹, the name, the circles and › share a line; the neighbours' names are read (the buttons' names) but not shown.
+    // One row: the name and the circles; no ‹ › on a phone (fix round 2 ruling: the bottom bar has Back and Next with the neighbours' names).
+    await expect(strip.getByRole('button', { name: /^(Previous|Next) section/ })).toHaveCount(0);
+    await expect(sectionBar(menu).getByRole('button', { name: 'Previous section: Level and stamina', exact: true })).toBeVisible();
+    await expect(sectionBar(menu).getByRole('button', { name: 'Next section: Worn equipment', exact: true })).toBeVisible();
     const middle = async (locator: Locator) => { const box = (await locator.boundingBox())!; return box.y + box.height / 2; };
     const line = await middle(shownSection(menu));
-    for (const part of [previous, next, circles(menu).nth(2)]) expect(Math.abs((await middle(part)) - line)).toBeLessThan(6);
+    for (const n of [0, 2, 4]) expect(Math.abs((await middle(circles(menu).nth(n))) - line)).toBeLessThan(6);
     expect((await strip.boundingBox())!.height).toBeLessThanOrEqual(52);
-    expect(await previous.evaluate(element => (element as HTMLElement).innerText.trim())).toBe('‹');
-    expect(await next.evaluate(element => (element as HTMLElement).innerText.trim())).toBe('›');
     // The whole section (Attributes, Stats and Practice fight) above the bottom bar, with no scroll.
     const practice = menu.getByRole('button', { name: /Practice fight/ });
     expect((await practice.boundingBox())!.y + (await practice.boundingBox())!.height).toBeLessThanOrEqual((await sectionBar(menu).boundingBox())!.y);
@@ -176,17 +180,17 @@ test.describe('named sections and paged grids (fixture preview)', () => {
     expect(await noHorizontalScroll(page)).toBe(true);
   });
 
-  // Task 33 fix round 2 (re-review I-1, the coordinator's ruling): on a phone ‹, › and every circle of the one-line strip are 44 px targets
-  // (the circle's dot may stay small); the section's name ellipsizes to make room, and the accessible names are unchanged.
-  test('on a phone the strip’s ‹, › and each of its five circles are 44 px targets, side by side on one line (360 × 780)', async ({ page }) => {
+  // Task 33 fix round 2 (re-review I-1, the coordinator's rulings): on a phone the one-line strip is the section's name and its circles, each
+  // circle a 44 px target (its dot may stay small) with its accessible name unchanged, and no ‹ ›. The name ellipsizes only when it does not
+  // fit: at 360 px "Worn equipment" and "Level and stamina" show at least eight characters.
+  test('on a phone the strip’s five circles are 44 px targets beside the section’s name, on one line, and the name is not cut short (360 × 780)', async ({ page }) => {
     await page.setViewportSize({ width: 360, height: 780 });
     await openCamp(page);
     const menu = await openSection(await openMenu(page, 'My gladiator'), 'Attributes and stats');
     const strip = sectionStrip(menu);
     await expect(circles(menu)).toHaveCount(5);
-    const controls = [strip.getByRole('button', { name: 'Previous section: Level and stamina', exact: true }),
-      ...SECTIONS.map(name => strip.getByRole('button', { name: `Go to section: ${name}`, exact: true })),
-      strip.getByRole('button', { name: 'Next section: Worn equipment', exact: true })];
+    await expect(strip.getByRole('button', { name: /^(Previous|Next) section/ })).toHaveCount(0);
+    const controls = SECTIONS.map(name => strip.getByRole('button', { name: `Go to section: ${name}`, exact: true }));
     const boxes: { x: number; y: number; width: number; height: number }[] = [];
     for (const control of controls) {
       const box = (await control.boundingBox())!;
@@ -194,20 +198,29 @@ test.describe('named sections and paged grids (fixture preview)', () => {
       expect(box.height, await control.getAttribute('aria-label') ?? '').toBeGreaterThanOrEqual(44);
       boxes.push(box);
     }
-    // ‹, the circles and ›, left to right, none over another, on one line with the name.
-    for (let n = 1; n < boxes.length; n++) {
-      if (n === 1) continue; // the name sits between ‹ and the first circle
-      expect(boxes[n].x).toBeGreaterThanOrEqual(boxes[n - 1].x + boxes[n - 1].width - 0.5);
-    }
+    // The circles, left to right, none over another, on one line with the name before them.
+    for (let n = 1; n < boxes.length; n++) expect(boxes[n].x).toBeGreaterThanOrEqual(boxes[n - 1].x + boxes[n - 1].width - 0.5);
     const middles = boxes.map(box => box.y + box.height / 2);
     expect(Math.max(...middles) - Math.min(...middles)).toBeLessThan(2);
     const name = (await shownSection(menu).boundingBox())!;
-    expect(name.x).toBeGreaterThanOrEqual(boxes[0].x + boxes[0].width - 0.5);
-    expect(name.x + name.width).toBeLessThanOrEqual(boxes[1].x + 0.5);
+    expect(name.x + name.width).toBeLessThanOrEqual(boxes[0].x + 0.5);
     expect(Math.abs(name.y + name.height / 2 - middles[0])).toBeLessThan(6);
     expect(await shownSection(menu).evaluate(element => getComputedStyle(element).textOverflow)).toBe('ellipsis');
     expect((await strip.boundingBox())!.height).toBeLessThanOrEqual(52);
     expect(await noHorizontalScroll(page)).toBe(true);
+    // The name is not cut to a letter: the box it shows the text in holds at least its first eight characters and the ellipsis, and its full
+    // text stays for assistive technology.
+    for (const section of ['Worn equipment', 'Level and stamina']) {
+      await strip.getByRole('button', { name: `Go to section: ${section}`, exact: true }).click();
+      await expect(shownSection(menu)).toHaveText(section);
+      const room = await shownSection(menu).evaluate(element => {
+        const style = getComputedStyle(element), context = document.createElement('canvas').getContext('2d')!;
+        context.font = `${style.fontStyle} ${style.fontWeight} ${style.fontSize} ${style.fontFamily}`;
+        const text = element.textContent ?? '';
+        return { shown: element.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight), eight: context.measureText(`${text.slice(0, 8)}…`).width };
+      });
+      expect(room.shown, `${section}: ${JSON.stringify(room)}`).toBeGreaterThanOrEqual(room.eight);
+    }
   });
 
   test('while a Worn equipment picker is open, ← and → leave the section alone (desktop)', async ({ page }, info) => {
@@ -262,8 +275,9 @@ test.describe('named sections and paged grids (fixture preview)', () => {
     // A currency goes back to page 1.
     await shops.getByRole('group', { name: 'Shop currency', exact: true }).getByRole('button', { name: 'Renown', exact: true }).click();
     await expect(pages(menu).locator('b').first()).toHaveText(/^Page 1 of \d+$/);
-    // The strip's previous section: the inventory, as it was left.
-    await sectionStrip(menu).getByRole('button', { name: 'Previous section: Inventory', exact: true }).click();
+    // The strip's previous section (its circle on a phone, which has no ‹ ›): the inventory, as it was left.
+    if (info.project.name === 'mobile') await sectionStrip(menu).getByRole('button', { name: 'Go to section: Inventory', exact: true }).click();
+    else await sectionStrip(menu).getByRole('button', { name: 'Previous section: Inventory', exact: true }).click();
     await expect(menu.getByTestId('inventory-grid')).toBeVisible();
     expect(await noHorizontalScroll(page)).toBe(true);
   });

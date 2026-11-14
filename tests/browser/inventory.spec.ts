@@ -397,7 +397,7 @@ test('on a phone the chosen item’s card opens over the grid, closes with ×, E
   await expect(details).toBeHidden();
   await expect(menu).toBeVisible();
   // The Shops: a cell's card opens over the shop grid, and Buy works from it.
-  await strip.getByRole('button', { name: 'Next section: Shops', exact: true }).click();
+  await strip.getByRole('button', { name: 'Go to section: Shops', exact: true }).click();
   const shops = shopsRegion(menu), offers = offerDetails(shops);
   await expect(offers).toBeHidden();
   await tap(offerCell(shops, 'sword:1:common'));

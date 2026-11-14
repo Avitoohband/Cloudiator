@@ -37,12 +37,12 @@ Project folders under `D:\Avi\Projects\Animation\Cloudiator\`.
 - A new Settings menu (⚙) pins the menu to the left, bottom or right on desktop, and sets when names and titles show over the camp: Off, When zoomed in, or Always. It is remembered in this browser.
 - A new gold laurel marks renown, including in the corner chip.
 - Identical items show as one stack with a count. Sell lets you choose how many.
-- Mark messages and notifications as read, one by one or all at once.
+- Mark messages as read one by one or all at once, and notifications all at once.
 - An XP bar shows your progress and whether your next expedition can level you up.
 - Click or tap a camp NPC to hear a line from them, and again for the next. The Weaponsmith's and Armorer's stalls open the shops.
 - Resting gladiators lie straight on their beds, with an eye cover and a floating ZzZ, and take off their armor while they sleep.
 - My gladiator and gladiator cards show the extra damage of a critical hit, and how much renown armor and weapons add in the Arena.
-- Each Wiki topic shows its own YouTube video guide.
+- Wiki topics show their own YouTube video guide, with more guides on the way.
 - Compare your gladiator's stats with any other gladiator's from their card. Practice fights: test your build against a dummy with stats you choose, or spar a copy of any gladiator. No stamina, no slot, no rating, nothing saved.
 - See any gladiator's Arena, tournament and expedition history from their card and watch kept replays. Tournament fights look different: gold rows, a gold header and their own arena.
 - Phones scroll a tapped item's card into view, plus small fixes to the inventory, shops, messages, Settings and the Wiki list.

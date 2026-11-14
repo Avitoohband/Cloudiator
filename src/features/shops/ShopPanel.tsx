@@ -96,6 +96,8 @@ export function ShopPanel({ owner, busy, preview, buy, initialMerchant, clock, b
   const phoneCard = usePhoneCard(count > 0);
   // The card closes with the section (it opens again from a cell).
   useEffect(() => { if (!active) phoneCard.close(false); }, [active, phoneCard.close]);
+  // On a phone a closed card is not shown: Buy back's line then shows above the grid, never left in the hidden card (Codex review Minor 4).
+  const inCard = !(phoneCard.phone && count > 0) || phoneCard.open;
   // A search with no match under a chip that hides matches All would show says so ("No match for “sword” in Armor").
   const hiddenBy = !back && !choices.length && query.trim() && view !== 'All' && queryItems(shopChoices('All', currency), choiceView, query, sort).length ? view : undefined;
   // The first visible cell when nothing visible is chosen; remembered, so Buy never sends an offer the grid hides.
@@ -108,6 +110,10 @@ export function ShopPanel({ owner, busy, preview, buy, initialMerchant, clock, b
   const shopPaged = usePagedList(choices, { size: gridPage, resetKey: `${view}|${currency}|${query}|${sort}` });
   const backPaged = usePagedList(backCells, { size: gridPage, resetKey: `${query}|${backSort}` });
   const paged: { listRef: RefObject<HTMLElement | null>; goToIndex(index: number): void; rows: readonly unknown[] } = back ? backPaged : shopPaged;
+  // A page the grid turns under an open phone card (the bar's Next by keyboard, a page key pressed outside the card) closes the card, so it
+  // never lies over another page than its cell's (Codex review 6).
+  const shownPage = back ? backPaged.page : shopPaged.page;
+  useEffect(() => { phoneCard.close(false); }, [shownPage, back, phoneCard.close]);
   const fill = rowFill(paged.rows.length, gridColumns(gridPage));
   const pageIds = back ? backPaged.rows.map(cellId) : shopPaged.rows.map(choice => choice.id);
   // The grid's one Tab stop is on the page shown: the cell the arrow keys last reached, else the chosen one, else the first.
@@ -190,6 +196,7 @@ export function ShopPanel({ owner, busy, preview, buy, initialMerchant, clock, b
         <span><CurrencyIcon currency="renown" size={14} /> Available renown <b>{spendable(owner, 'renown')}</b></span>
       </p>
     </div>
+    {back && !inCard && buyBackOutcome && <div className={styles.outcome}>{buyBackOutcome}</div>}
     {/* On a phone the chosen cell's card lies over the grid once a cell is chosen; with no cell to choose, the card (empty or no match) shows below. */}
     <div ref={phoneCard.hostRef} className={inventory.columns} data-card={phoneCard.phone && count > 0 ? (phoneCard.open ? 'open' : 'closed') : undefined}>
       <div>
@@ -226,7 +233,7 @@ export function ShopPanel({ owner, busy, preview, buy, initialMerchant, clock, b
         onKeyDown={phoneCard.onKeyDown}>
         {phoneCard.phone && count > 0 && <button type="button" className={inventory.closeCard} aria-label="Close item card" onClick={() => phoneCard.close()}>×</button>}
         {back ? <>
-          {buyBackOutcome && <div className={styles.outcome}>{buyBackOutcome}</div>}
+          {inCard && buyBackOutcome && <div className={styles.outcome}>{buyBackOutcome}</div>}
           {sales.length === 0 ? <div className={styles.emptyCard}><p>{BUY_BACK_EMPTY_CARD}</p></div>
             : chosenSale ? <BuyBackCard key={chosenSale.saleId} entry={chosenSale} owner={owner} clock={clock} busy={busy} preview={preview} buyBack={buyBack} />
               : <p>Nothing to show. Clear the search to see every item.</p>}

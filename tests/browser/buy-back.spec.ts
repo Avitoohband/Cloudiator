@@ -426,6 +426,31 @@ test('nothing in the Shops or the card moves while the Retry of a refused buy ba
   expect(second.operationId).toBe(first.operationId);
 });
 
+// Codex review Minor 4: a buy back's line never stays in a closed phone card. Closed while the buy back is on its way, the line shows above
+// the grid, in view.
+test('on a phone a buy back’s line shows outside the card when the card is closed while it is on its way', async ({ page, context }) => {
+  await page.setViewportSize({ width: 360, height: 780 });
+  const flow = await shopFlow(context);
+  let release = () => {}, sent = 0;
+  const held = new Promise<void>(resolve => { release = resolve; });
+  await context.route(`${SUPABASE_URL}/functions/v1/game-command`, async route => {
+    const request = route.request();
+    if (request.method() === 'POST' && !isPresence(request) && (request.postDataJSON() as GameCommand).kind === 'buy-back') { sent++; await held; }
+    return route.fallback();
+  });
+  const { menu, shops } = await openBuyBack(page);
+  await card(shops).getByRole('button', { name: 'Buy back for 39 gold' }).click();
+  await expect.poll(() => sent).toBe(1);
+  await closeCard(menu);
+  await expect(card(shops)).toBeHidden();
+  release();
+  const line = shops.getByRole('status').filter({ hasText: 'Bought back. Sword is in your bag again.' });
+  await expect(line).toBeVisible();
+  await expect(line).toBeInViewport();
+  expect(await line.evaluate(element => !!element.closest('[aria-label="Offer details"]'))).toBe(false);
+  expect(buyBacks(flow.commands)).toHaveLength(1);
+});
+
 test('not enough gold turns Buy back off and says why', async ({ page, context }, info) => {
   await shopFlow(context, { money: 30 });
   const { menu, shops } = await openBuyBack(page);

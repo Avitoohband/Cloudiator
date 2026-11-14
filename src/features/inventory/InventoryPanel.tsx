@@ -158,8 +158,13 @@ export function InventoryPanel({ owner, gateway, refresh, clock, preview = false
   // Fix round 1 (review Important 1): on a phone the chosen item's card opens over the grid (`usePhoneCard`).
   const phoneCard = usePhoneCard(visibleTiles.length > 0);
   const covered = phoneCard.open;
-  // Another section hides the card's (it opens again from a tile).
+  // Another section hides the card's (it opens again from a tile). A page the grid turns under it (the bar's Next by keyboard, a page key
+  // pressed outside the card) closes it too, so the card never lies over another page than its tile's (Codex review 6).
   useEffect(() => { if (section !== 0) phoneCard.close(false); }, [section, phoneCard.close]);
+  useEffect(() => { phoneCard.close(false); }, [paged.page, phoneCard.close]);
+  // On a phone a closed card is not shown, so an outcome that belongs in it (a sale's, a piece's) shows at the section's end instead, never
+  // left in the hidden card when the player closes it while the command is on its way (Codex review Minor 4).
+  const inCard = !(phoneCard.phone && visibleTiles.length > 0) || phoneCard.open;
   const latest = useRef(selected?.key), visibleTilesRef = useRef(visibleTiles), gridPageRef = useRef(gridPage);
   latest.current = selected?.key; visibleTilesRef.current = visibleTiles; gridPageRef.current = gridPage;
   const changedView = useRef(false);
@@ -410,8 +415,8 @@ export function InventoryPanel({ owner, gateway, refresh, clock, preview = false
           <div className={styles.track} role="progressbar" aria-label="Sales completed" aria-valuemin={0} aria-valuemax={here.total} aria-valuenow={here.done}><i style={{ width: `${Math.round(100 * here.done / here.total)}%` }} /></div>
         </div>}
       </div>}
-      {place !== 'sale' && tile.items.some(piece => piece.id === place) && outcomes}
-      {held && held.place !== 'sale' && tile.items.some(piece => piece.id === held.place) && heldAt(held.place)}
+      {inCard && place !== 'sale' && tile.items.some(piece => piece.id === place) && outcomes}
+      {inCard && held && held.place !== 'sale' && tile.items.some(piece => piece.id === held.place) && heldAt(held.place)}
     </article>;
   }
   // The strip sits outside the panel's own box, so the panel's large button style (`.inventory-panel button`) leaves its circles alone.
@@ -463,8 +468,8 @@ export function InventoryPanel({ owner, gateway, refresh, clock, preview = false
         {/* A discard's or a material sale's line shows in the card while it lies over the grid (a phone), else at the section's end. */}
         {place === 'trade' && phoneCard.open && outcomes}
         {held?.place === 'trade' && phoneCard.open && heldAt('trade')}
-        {place === 'sale' && outcomes}
-        {heldAt('sale')}
+        {place === 'sale' && inCard && outcomes}
+        {inCard && heldAt('sale')}
         {selected ? itemCard(selected) : <p className="muted">{query.trim() ? 'Nothing to show. Clear the search to see every item.' : owner.inventory.length ? `No ${filter.toLowerCase()} in your inventory.` : 'Your inventory is empty.'}</p>}
       </section>
     </div>
@@ -492,6 +497,9 @@ export function InventoryPanel({ owner, gateway, refresh, clock, preview = false
     </section>
     {place === 'trade' && section !== SHOPS && !phoneCard.open && outcomes}
     {section !== SHOPS && !phoneCard.open && heldAt('trade')}
+    {/* A sale's or a piece's line while a phone's card is closed (see `inCard`). */}
+    {!inCard && section !== SHOPS && place !== 'trade' && place !== 'gear' && place !== 'buyback' && outcomes}
+    {!inCard && section !== SHOPS && held && held.place !== 'trade' && held.place !== 'gear' && held.place !== 'buyback' && heldAt(held.place)}
     </div>
     {section === 0 && !(visibleTiles.length === 0 && query.trim()) && <PanelFooter><Pager list={paged} /></PanelFooter>}
     </div>

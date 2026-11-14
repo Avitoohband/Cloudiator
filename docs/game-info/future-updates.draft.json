@@ -85,6 +85,11 @@
       "body": "A big, showy card you can open from a gladiator's card to show off gear, titles and achievements, and later skins and dyes. It shows nothing private, such as gold or loot."
     },
     {
+      "id": "crossovers",
+      "title": "Crossover skins and titles",
+      "body": "Special events made together with other games, YouTube creators or brands: skins in their style and a title you can earn during the event. Skins change looks only, with no combat bonuses. This comes after 2.0, once skins are in the game."
+    },
+    {
       "id": "inventory-shops",
       "title": "Inventory, shops and gladiator help",
       "body": "Shops show goods as icons with the inventory card, and you can search and sort. Identical items stack and you choose how many to sell. Choose gear from your Worn equipment slots. Renown gets a gold laurel. Mark messages and notifications as read. See your XP bar and level-up hint, and hover or tap any stat or attribute for help.",

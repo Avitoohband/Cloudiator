@@ -310,7 +310,9 @@ describe('tournament bracket', () => {
     const words = text(bracket('completed', 85, { credited }));
     expect(words).toContain('Completed');
     expect(words).toContain('Champion: Varro');
-    expect(words).toMatch(/Place Gladiator 1 Varro 2 Severus 3 Cassia 3 Decimus 5 Aster 5 Aurelia 5 Bellator 5 Corvina/);
+    // Task 31 fix round 1: the placements are paged, 6 a page: page 1 holds the first six; Bellator and Corvina (5th) are on page 2.
+    expect(words).toMatch(/Place Gladiator 1 Varro 2 Severus 3 Cassia 3 Decimus 5 Aster 5 Aurelia ‹ Back Page 1 of 2/);
+    expect(words).not.toContain('Bellator Corvina');
     expect(words).toContain('Your placement: 5th. Credited: +7 renown.');
     expect(count(words, 'renown')).toBe(1);
     expect(words).not.toMatch(/gold|money|\+80|\+52/);

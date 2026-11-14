@@ -35,8 +35,9 @@ export async function revealRail(page: Page) {
     const burger = page.getByRole('button', { name: 'Menus', exact: true });
     if ((await burger.getAttribute('aria-expanded')) !== 'true') await burger.click();
   } else {
-    // The pointer's entry into the edge strip is one event: one that lands while the page is busy (a heavy run) can be missed, and the
-    // rail then never shows (2026-11-14, stamina-notices). Move off and in again until the rail's own state says it is shown.
+    // Seen once, 2026-11-14 (stamina-notices, under a heavy run): the rail did not show after one move to the edge. The cause is not known (the
+    // pointer may already have been at x = 2, or the strip not ready); a real player moves the mouse again, so this does the same: move off and in
+    // again until the rail's own state says it is shown. The assertion is unchanged. A ruled change to a shared helper (Task 31 fix round 1).
     const y = page.viewportSize()!.height / 2;
     await expect(async () => {
       await page.mouse.move(120, y);

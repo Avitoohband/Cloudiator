@@ -15,6 +15,10 @@ describe('the paging arithmetic', () => {
   it('keeps the approved page sizes', () => {
     expect(PAGE_SIZES.gladiators).toBe(7);
     expect(PAGE_SIZES.market).toBe(3);
+    // Task 31 fix round 1: fewer notifications and messages a page so a page fits the popover; the Tournaments lists each have an id of their own.
+    expect([PAGE_SIZES.notifications, PAGE_SIZES.messages]).toEqual([6, 3]);
+    expect(PAGE_SIZES.titles).toBe(4);
+    expect([PAGE_SIZES.tournaments, PAGE_SIZES.tournamentBouts, PAGE_SIZES.placements]).toEqual([6, 6, 6]);
     expect(GRID_PAGE).toEqual({ desktop: 24, phone: 15 });
     expect(SHOW_CHOICES).toEqual([10, 25, 50]);
     expect(MAX_DOTS).toEqual({ desktop: 12, phone: 9, narrow: 7 });

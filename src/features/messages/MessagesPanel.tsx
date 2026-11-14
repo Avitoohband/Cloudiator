@@ -459,7 +459,7 @@ export function MessagesPanel({ id, inbox, load, loadNotifications, loadPatches,
                             {unread && <span className={styles.sr}>Unread: </span>}
                             <span className={unread ? styles.titleNew : styles.title} data-message-title>{message.title}</span>
                           </span>
-                          <span className={styles.preview}>{message.preview}</span>
+                          <span className={styles.preview} title={message.preview}>{message.preview}</span>
                           {unread && failedIds.has(message.id) && <span className={styles.rowError} data-mark-error>Could not mark. Try again.</span>}
                         </button>
                         {unread && <button type="button" className={styles.mark} data-mark-button={message.id} title="Mark as read" aria-label={`Mark ${message.title} as read`}

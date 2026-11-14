@@ -329,6 +329,31 @@ test.describe('patch numbers in live mode', () => {
     expect(keys.filter(key => key !== null)).toEqual(['lt.1005000']);
   });
 
+  test('a failed read of older patches is announced, keeps the page, and Next tries again', async ({ page, context }) => {
+    const live = await player(page);
+    live.setPatches(Array.from({ length: 25 }, (_, i) => ({ number: `1.${i}`, sortKey: 1_000_000 + i * 1_000, title: `Patch title ${i}`,
+      releasedAtMs: at(9, 1 + i), messageId: null, features: [`Feature of 1.${i}.`] })).reverse());
+    // The read of the older patches (the one with a sort key) fails once.
+    let failed = false;
+    await context.route(/\/rest\/v1\/patches\?/, route => {
+      if (!failed && decodeURIComponent(route.request().url()).includes('sort_key=lt.')) { failed = true; return route.fulfill({ status: 500, body: '{}', headers: { 'access-control-allow-origin': '*' } }); }
+      return route.fallback();
+    });
+    await openLive(page);
+    const panel = await openHistoryFromMenu(page);
+    const bar = panel.getByRole('navigation', { name: 'Pages' });
+    await bar.getByRole('button', { name: 'Next page', exact: true }).click();
+    await expect(bar.locator('b').first()).toHaveText('Page 2');
+    await bar.getByRole('button', { name: 'Next page', exact: true }).click();
+    await expect(bar.getByRole('status')).toHaveText(/Could not load more\. Try Next again\./);
+    await expect(bar.locator('b').first()).toHaveText('Page 2');
+    await bar.getByRole('button', { name: 'Previous page', exact: true }).click();
+    await expect(bar.locator('b').first()).toHaveText('Page 1');
+    await bar.getByRole('button', { name: 'Go to page 2', exact: true }).click();
+    await bar.getByRole('button', { name: 'Next page', exact: true }).click();
+    await expect(bar.locator('b').first()).toHaveText('Page 3 of 4');
+  });
+
   test('shows no notice when up to date or ahead', async ({ page }) => {
     const live = await player(page);
     await openLive(page);

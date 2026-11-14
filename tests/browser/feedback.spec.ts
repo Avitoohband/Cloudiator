@@ -402,6 +402,11 @@ test('My feedback shows 6 items a page, and a feedback just sent turns to page 1
   await bar.getByRole('button', { name: 'Next page', exact: true }).click();
   await expect(bar.locator('b').first()).toHaveText('Page 2 of 3');
   await expect(rows).toHaveCount(6);
+  await bar.getByRole('button', { name: 'Previous page', exact: true }).click();
+  await expect(bar.locator('b').first()).toHaveText('Page 1 of 3');
+  await bar.getByRole('button', { name: 'Go to page 3', exact: true }).click();
+  await expect(rows).toHaveCount(2);
+  await bar.getByRole('button', { name: 'Go to page 2', exact: true }).click();
   await panel.locator('[data-feedback-foot]').getByRole('button', { name: 'Send feedback', exact: true }).click();
   const dialog = feedbackDialog(page);
   await dialog.getByRole('textbox', { name: 'Your message' }).fill('A brand new idea that is the newest of all.');
@@ -410,6 +415,22 @@ test('My feedback shows 6 items a page, and a feedback just sent turns to page 1
   await sentDialog(page).getByRole('button', { name: 'Close', exact: true }).click();
   await expect(bar.locator('b').first()).toHaveText('Page 1 of 3');
   await expect(rows.first()).toContainText('A brand new idea');
+});
+
+// "See my feedback" (the sent dialog's button) opens My feedback on page 1, the newest first, for a long list.
+test('See my feedback opens a long list on page 1, with the newest feedback shown', async ({ page }) => {
+  const many: NonNullable<Setup['feedback']> = Array.from({ length: 14 }, (_, i) => ({ minutesAgo: (i + 2) * 24 * 60, category: 'idea' as const, status: 'new' as const, text: `Feedback number ${i + 1} about the game.` }));
+  await player(page, { feedback: many });
+  const settings = await openMenu(page, 'Settings');
+  await settings.getByRole('region', { name: 'Help' }).getByRole('button', { name: /^Send/ }).click();
+  const dialog = feedbackDialog(page);
+  await dialog.getByRole('textbox', { name: 'Your message' }).fill('The very newest feedback of all, sent from Settings.');
+  await dialog.getByRole('button', { name: 'Send', exact: true }).click();
+  await sentDialog(page).getByRole('button', { name: 'See my feedback' }).click();
+  const panel = panelOf(page);
+  await expect(panel.locator('[data-feedback-row]')).toHaveCount(6);
+  await expect(panel.locator('[data-feedback-row]').first()).toContainText('The very newest feedback');
+  await expect(panel.getByRole('navigation', { name: 'Pages' }).locator('b').first()).toHaveText('Page 1 of 3');
 });
 
 // The owner's Feedback list in Game Info: 6 items a page; New, Answered and All go back to page 1.
@@ -428,6 +449,9 @@ test('the owner’s Feedback list shows 6 items a page, and a chip goes back to 
   await expect(bar.locator('b').first()).toHaveText('Page 1 of 2');
   await bar.getByRole('button', { name: 'Next page', exact: true }).click();
   await expect(cards).toHaveCount(6);
+  await bar.getByRole('button', { name: 'Previous page', exact: true }).click();
+  await expect(bar.locator('b').first()).toHaveText('Page 1 of 2');
+  await bar.getByRole('button', { name: 'Go to page 2', exact: true }).click();
   await show.getByRole('button', { name: 'Answered', exact: true }).click();
   await expect(cards).toHaveCount(1);
   await show.getByRole('button', { name: 'All', exact: true }).click();

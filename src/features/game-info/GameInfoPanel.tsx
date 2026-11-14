@@ -17,6 +17,8 @@ const tabs = [{ id: 'wiki', label: 'Wiki' }, { id: 'future', label: 'Future Upda
 /** Patch 1.9: the owner's third tab, shown only when the editor read succeeds (a Game Info editor), with its count of New feedback. */
 const FEEDBACK_TAB = { id: 'feedback', label: 'Feedback' } as const;
 type ShownTab = typeof tabs[number] | typeof FEEDBACK_TAB;
+/** How long "Loading Game Info…" waits for the published pages before the built-in text shows. */
+const LOADING_MS = 4_000;
 const stopCopy = (event: ClipboardEvent) => event.preventDefault();
 const wikiFallback: GameInfoEntry[] = wikiTopics.map(({ text, ...entry }) => ({ ...entry, body: text }));
 
@@ -78,6 +80,11 @@ export function GameInfoPanel({ id, onClose, update, fixture, editorAccount, onD
   // Wiki topics 5 a page and Future Updates entries 8 a page (the article and each entry keep their scroll); a tab change goes back to page 1.
   const wikiPaged = usePagedList(wiki, { list: 'wikiTopics', resetKey: active });
   const futurePaged = usePagedList(future, { list: 'future', resetKey: active });
+  // The listbox's active option is always one on the page shown (fix round 1, I4): the one last moved to, else the chosen topic, else (after a page
+  // turn to a page with neither) the first topic of the page. It is not selected until a key or a click chooses it; the arrow keys step from it.
+  const [activeId, setActiveId] = useState<string | null>(null);
+  const onWikiPage = (id: string | null | undefined) => id != null && wikiPaged.rows.some(row => row.id === id);
+  const activeTopicId = onWikiPage(activeId) ? activeId : onWikiPage(article?.id) ? article!.id : wikiPaged.rows[0]?.id;
   /** The tab the editor works on (Wiki or Future Updates; the Feedback tab has no editor). */
   const editTab = currentTab.id === 'feedback' ? null : currentTab.id;
   const tabId = (key: string) => `${id}-${key}-tab`;
@@ -101,13 +108,21 @@ export function GameInfoPanel({ id, onClose, update, fixture, editorAccount, onD
   function moveTopic(event: KeyboardEvent<HTMLDivElement>) {
     // Alt, Ctrl or Meta with a key is the browser's or the system's (Alt+Up, Ctrl+End...), never a move in the list (Task 21).
     if (event.altKey || event.ctrlKey || event.metaKey) return;
-    const at = Math.max(0, wiki.findIndex(item => item.id === article?.id));
+    const at = Math.max(0, wiki.findIndex(item => item.id === activeTopicId));
     const next = event.key === 'ArrowDown' ? Math.min(at + 1, wiki.length - 1) : event.key === 'ArrowUp' ? Math.max(at - 1, 0)
       : event.key === 'Home' ? 0 : event.key === 'End' ? wiki.length - 1 : null;
     if (next === null || !wiki[next]) return;
     event.preventDefault();
     setTopic(wiki[next].id);
+    setActiveId(wiki[next].id);
   }
+
+  // A read that stalls does not hold the player at the loading line: after 4 s the built-in text shows, and a published read that lands later replaces it.
+  useEffect(() => {
+    if (settled) return;
+    const timer = window.setTimeout(() => setSettled(true), LOADING_MS);
+    return () => window.clearTimeout(timer);
+  }, [settled]);
 
   useEffect(() => {
     let alive = true;
@@ -208,23 +223,23 @@ export function GameInfoPanel({ id, onClose, update, fixture, editorAccount, onD
         </button>;
       })}
     </div>
-    <PagingScope className={styles.paged}>
+    <PagingScope className={styles.paged} bodyClassName={styles.pagedBody}>
     <section id={panelId('wiki')} role="tabpanel" aria-labelledby={tabId('wiki')} className={styles.body} hidden={active !== 0 || editing !== null} tabIndex={0}>
       {!settled ? active === 0 && <p role="status" className={styles.loading}>Loading Game Info…</p> : active === 0 && editing === null && <>
         <div ref={topics} role="listbox" aria-label="Wiki topics" tabIndex={0} className={styles.topics}
-          aria-activedescendant={article ? optionId(article.id) : undefined} onKeyDown={moveTopic}>
+          aria-activedescendant={activeTopicId ? optionId(activeTopicId) : undefined} onKeyDown={moveTopic}>
           <div ref={wikiPaged.listRef as RefObject<HTMLDivElement | null>} role="presentation">
             {wikiPaged.rows.map(item => {
               const chosen = item.id === article?.id;
               return <div key={item.id} id={optionId(item.id)} role="option" aria-selected={chosen} aria-label={item.video ? `${item.title}, video guide` : undefined} className={styles.topic}
-                data-page-row="" onClick={() => setTopic(item.id)}>
+                data-page-row="" onClick={() => { setTopic(item.id); setActiveId(item.id); }}>
                 <span aria-hidden="true" className={styles.mark}>{chosen ? '✓' : ''}</span>{item.title}
                 {item.video && <span aria-hidden="true" className={styles.pm} title="Has a video guide">▶</span>}
               </div>;
             })}
           </div>
         </div>
-        <PanelFooter><Pager list={wikiPaged} show /></PanelFooter>
+        <Pager list={wikiPaged} show />
         {article && <article className={`${styles.entry} ${styles.readText}`} onCopy={stopCopy} aria-labelledby={`${id}-article`}>
           <h3 id={`${id}-article`}>{article.title}</h3>
           {article.video ? <GuideCard key={article.video} title={article.title} video={article.video} length={article.videoLength} />

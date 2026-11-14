@@ -90,7 +90,7 @@ export function PatchHistory({ load, build, latest, open, notes, onReadNote }: {
       </p>
       {items === null ? (failed ? <div className={styles.state}>
         <p role="alert">Patch history could not be loaded.</p>
-        <button type="button" className={styles.retry} onClick={() => read()}>Try again</button>
+        <button type="button" className={styles.retry} onClick={() => { void read().catch(() => undefined); }}>Try again</button>
       </div> : <p role="status" className={styles.state}>Loading patches…</p>) : <>
         <ul className={styles.patches} ref={paged.listRef as RefObject<HTMLUListElement | null>}>
           {paged.rows.map(patch => {

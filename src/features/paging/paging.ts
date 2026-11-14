@@ -2,8 +2,10 @@
 // Pure: no React, no DOM. Rows per page are fixed per list (Avi's choice 1), sized so a page fits the panel without a scroll.
 
 /** Rows a page shows, per list (the Show choice "Fit (N)"). */
-export const PAGE_SIZES = { gladiators: 7, standings: 10, tournaments: 6, results: 8, bouts: 8, market: 3, notifications: 7, messages: 7,
-  patches: 8, future: 8, wikiTopics: 5, history: 6, titles: 8, feedback: 6, buyBack: 5 } as const;
+export const PAGE_SIZES = { gladiators: 7, standings: 10, tournaments: 6, results: 8, bouts: 8, market: 3, notifications: 6, messages: 3,
+  patches: 8, future: 8, wikiTopics: 5, history: 6, titles: 4, feedback: 6, buyBack: 5,
+  /** Task 31 fix round 1: the Tournaments panel's bouts and placements keep a Show choice of their own (the entrants use `tournaments`). */
+  tournamentBouts: 6, placements: 6 } as const;
 export type ListId = keyof typeof PAGE_SIZES;
 /** A grid's page: whole rows of tiles, 6x4 on desktop and 5x3 on a phone. */
 export const GRID_PAGE = { desktop: 24, phone: 15 } as const;

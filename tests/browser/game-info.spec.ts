@@ -273,13 +273,13 @@ test.describe('Wiki guide cards', () => {
     const marker = combat.locator('[aria-hidden="true"]', { hasText: '▶' });
     await expect(marker).toHaveCount(1);
     await expect(marker).toBeVisible();
-    // The page holding Combat shows its marker once; Start in camp is on page 1 (Task 31: topics are paged), with none.
+    // Task 31: the topics are paged, so Show 25 puts all 14 on one page, where exactly one carries the marker (as before) and Start in camp has none.
+    await panel.getByRole('combobox', { name: 'Rows per page' }).selectOption('25');
+    await expect(list.getByRole('option')).toHaveCount(14);
     await expect(list.getByText('▶')).toHaveCount(1);
     const start = list.getByRole('option', { name: 'Start in camp' });
-    await pageTo(panel, start);
     await expect(start).toHaveAccessibleName('Start in camp');
     await expect(start).not.toContainText('▶');
-    await expect(list.getByText('▶')).toHaveCount(0);
   });
 
   test('a thumbnail that fails to load leaves the dark frame and the play mark, without a broken image', async ({ page }) => {
@@ -352,6 +352,78 @@ test.describe('Game Info by the page', () => {
     await panel.getByRole('tab', { name: 'Wiki' }).click();
     await expect(panel.getByRole('article', { name: wiki.entries[5].title })).toBeVisible();
     await expect(pagesBar(panel).locator('b').first()).toHaveText(`Page 2 of ${Math.ceil(wiki.entries.length / 5)}`);
+  });
+
+  test('after a page turn the active topic is the first of the new page, and the arrow keys step from it', async ({ page }) => {
+    const wiki = draft('wiki');
+    await page.goto('/game/?mode=fixture&info=draft');
+    await cornerChip(page).getByRole('button', { name: 'Game Info', exact: true }).click();
+    const panel = page.getByRole('dialog', { name: 'Game Info' });
+    const list = panel.getByRole('listbox', { name: 'Wiki topics' });
+    const bar = pagesBar(panel);
+    const label = bar.locator('b').first();
+    // Combat (the 6th) is chosen, on page 2: the active option is Combat. PageDown turns to page 3 (topics 11-14): the active option is its first.
+    await expect(label).toHaveText('Page 2 of 3');
+    await expect(list).toHaveAttribute('aria-activedescendant', await list.getByRole('option', { selected: true }).getAttribute('id') as string);
+    await bar.getByRole('button', { name: 'Next page', exact: true }).click();
+    await expect(label).toHaveText('Page 3 of 3');
+    const first = list.getByRole('option').first();
+    await expect(list).toHaveAttribute('aria-activedescendant', await first.getAttribute('id') as string);
+    await expect(first).toContainText(wiki.entries[10].title);
+    await expect(panel.getByRole('article', { name: wiki.entries[5].title })).toBeVisible();
+    // ArrowDown steps from the active option: the second topic of the page is chosen, the page stays, and the active option is on it.
+    await list.focus();
+    await page.keyboard.press('ArrowDown');
+    await expect(label).toHaveText('Page 3 of 3');
+    await expect(panel.getByRole('article', { name: wiki.entries[11].title })).toBeVisible();
+    const second = list.getByRole('option').nth(1);
+    await expect(second).toHaveAttribute('aria-selected', 'true');
+    await expect(list).toHaveAttribute('aria-activedescendant', await second.getAttribute('id') as string);
+  });
+
+  test('the Wiki bar sits directly under the topic box and above the article', async ({ page }) => {
+    await page.goto('/game/?mode=fixture&info=draft');
+    await cornerChip(page).getByRole('button', { name: 'Game Info', exact: true }).click();
+    const panel = page.getByRole('dialog', { name: 'Game Info' });
+    const box = (await panel.getByRole('listbox', { name: 'Wiki topics' }).boundingBox())!;
+    const bar = (await pagesBar(panel).boundingBox())!;
+    const article = (await panel.getByRole('article').boundingBox())!;
+    expect(bar.y).toBeGreaterThanOrEqual(box.y + box.height - 1);
+    expect(bar.y + bar.height).toBeLessThanOrEqual(article.y + 1);
+  });
+
+  test('Future Updates: Back, a circle jump, and a tab change that goes back to page 1', async ({ page }) => {
+    await page.goto('/game/?mode=fixture&info=draft');
+    await cornerChip(page).getByRole('button', { name: 'Game Info', exact: true }).click();
+    const panel = page.getByRole('dialog', { name: 'Game Info' });
+    await panel.getByRole('tab', { name: 'Future Updates' }).click();
+    const bar = pagesBar(panel), label = bar.locator('b').first();
+    await bar.getByRole('button', { name: 'Go to page 4', exact: true }).click();
+    await expect(label).toHaveText('Page 4 of 5');
+    await bar.getByRole('button', { name: 'Previous page', exact: true }).click();
+    await expect(label).toHaveText('Page 3 of 5');
+    await panel.getByRole('tab', { name: 'Wiki' }).click();
+    await panel.getByRole('tab', { name: 'Future Updates' }).click();
+    await expect(label).toHaveText('Page 1 of 5');
+  });
+
+  test('a stalled read shows the built-in text after 4 s, and a published read that lands later replaces it', async ({ page, context }) => {
+    await quietArrivals(context);
+    const published = (title: string) => ({ version: 3, document: { entries: [{ id: 'zeta', title, body: 'Published text.' }] } });
+    await routeLiveReads(context, { world: worldFixture, gameInfo: [{ tab: 'wiki', ...published('Zeta guide') }, { tab: 'future', ...published('Zeta plan') }] });
+    let release!: () => void;
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    await context.route(`${SUPABASE_URL}/rest/v1/game_info_reads?**`, async route => { await gate; await route.fallback(); });
+    await page.goto('/game/');
+    await page.waitForFunction(revision => window.__cloudiatorCamp?.world()?.revision === revision, worldFixture.revision);
+    await cornerChip(page).getByRole('button', { name: 'Game Info', exact: true }).click();
+    const panel = page.getByRole('dialog', { name: 'Game Info' });
+    await expect(panel.getByText('Loading Game Info…')).toBeVisible();
+    await expect(panel.getByRole('article', { name: 'Combat' })).toBeVisible({ timeout: 8_000 });
+    await expect(panel.getByText('Loading Game Info…')).toHaveCount(0);
+    release();
+    await expect(panel.getByRole('option', { name: 'Zeta guide' })).toBeVisible();
+    await expect(panel.getByRole('option', { name: 'Combat' })).toHaveCount(0);
   });
 
   test('opens on a steady loading line, never the built-in Wiki before the published one', async ({ page, context }) => {

@@ -32,8 +32,8 @@
 // and an old tournament link whose view is gone (its id carries its slot) is "no longer kept" instead of missing.
 //
 // Patch 1.9 Task 31 (menus with Back and Next): the long lists of a bracket, up to 50 entrants and up to 32 bouts in a round, show 6 rows a page.
-// Each has its own bar right under it (a `PagingScope`: the panel is a long page of its own, so a bar at the menu's bottom edge could not say which
-// list it turns); the Show choice is shared. A round tab goes back to page 1 of its bouts. The panel unmounts with its menu, so a closed menu forgets both pages.
+// Each (entrants, a round's bouts, the placements) has its own bar right under it (a `PagingScope`: the panel is a long page of its own, so a bar at the menu's bottom edge could not say which
+// list it turns); each has a Show choice of its own (`tournaments`, `tournamentBouts`, `placements`). A round tab goes back to page 1 of its bouts. The panel unmounts with its menu, so a closed menu forgets both pages.
 //
 // Patch 1.6 (spec "Tournaments"): Registration's checklist and entry rules follow the active display rules of the revision read (`rules`,
 // RULES_V1 by default): under v2 entry costs no stamina and the last rule lists each league's prizes. A settled bracket's own credit stays
@@ -227,7 +227,8 @@ export function TournamentBracketView({ model, onRound, onWatch }: {
   const own = viewerText(state, !!model.viewerId, clockMode, timeZone);
   const kept = tournamentReplayKept(state.endsAtMs, state.displayNowMs);
   const entrantsPaged = usePagedList(state.entrants, { list: 'tournaments' });
-  const boutsPaged = usePagedList(round?.bouts ?? NO_BOUTS, { list: 'tournaments', resetKey: round?.round });
+  const boutsPaged = usePagedList(round?.bouts ?? NO_BOUTS, { list: 'tournamentBouts', resetKey: round?.round });
+  const placementsPaged = usePagedList(state.placements, { list: 'placements' });
 
   const onTabKey = (event: KeyboardEvent<HTMLDivElement>) => {
     if (!round) return;
@@ -291,15 +292,18 @@ export function TournamentBracketView({ model, onRound, onWatch }: {
       )}
 
       {state.placements.length > 0 && (
+        <PagingScope>
         <div className={styles.tableWrap}>
           <table className={styles.table}>
             <caption>Placements</caption>
             <thead><tr><th scope="col">Place</th><th scope="col">Gladiator</th></tr></thead>
-            <tbody>{state.placements.map(p => (
-              <tr key={p.gladiatorId} aria-current={p.gladiatorId === model.viewerId ? 'true' : undefined}><td>{p.place}</td><th scope="row">{p.name}</th></tr>
+            <tbody ref={placementsPaged.listRef as RefObject<HTMLTableSectionElement | null>}>{placementsPaged.rows.map(p => (
+              <tr key={p.gladiatorId} aria-current={p.gladiatorId === model.viewerId ? 'true' : undefined} data-page-row="" tabIndex={-1}><td>{p.place}</td><th scope="row">{p.name}</th></tr>
             ))}</tbody>
           </table>
         </div>
+        <PanelFooter><Pager list={placementsPaged} show /></PanelFooter>
+        </PagingScope>
       )}
     </article>
   );

@@ -300,13 +300,13 @@
   min-height: 11rem;
 }
 
-.paged > :first-child {
+.pagedBody {
   display: flex;
   flex-direction: column;
   overflow: hidden;
 }
 
-.paged > :first-child > .body {
+.pagedBody > .body {
   flex: 1 1 auto;
 }
 

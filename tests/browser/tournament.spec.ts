@@ -1076,6 +1076,11 @@ test.describe('the live Tournaments panel', () => {
     await entrantBar.getByRole('button', { name: 'Next page', exact: true }).click();
     await expect(entrantBar.locator('b').first()).toHaveText('Page 2 of 9');
     await expect(entrants.getByRole('listitem')).toHaveCount(6);
+    await entrantBar.getByRole('button', { name: 'Previous page', exact: true }).click();
+    await expect(entrantBar.locator('b').first()).toHaveText('Page 1 of 9');
+    await entrantBar.getByRole('button', { name: 'Go to page 5', exact: true }).click();
+    await expect(entrantBar.locator('b').first()).toHaveText('Page 5 of 9');
+    await entrantBar.getByRole('button', { name: 'Go to page 2', exact: true }).click();
     const bracket = panel.getByRole('region', { name: 'Bracket', exact: true });
     const boutBar = bracket.getByRole('navigation', { name: 'Pages' });
     const bouts = bracket.getByRole('tabpanel').getByRole('listitem');
@@ -1087,6 +1092,41 @@ test.describe('the live Tournaments panel', () => {
     await expect(boutBar.locator('b').first()).toHaveText(/^Page 1 of /);
     // The entrants' own page is not touched by the round tab.
     await expect(entrantBar.locator('b').first()).toHaveText('Page 2 of 9');
+  });
+
+  // Task 31 fix round 1 (I2, I3, minor 10): a settled 50-entrant bracket has 50 placements: 6 a page, with a bar of their own, and each list keeps its
+  // own Show choice.
+  test('a settled 50-entrant bracket pages its placements 6 a page, and each list keeps its own Show choice', async ({ page, context }) => {
+    const templates = Object.values(VIEWS).flatMap(v => v.bouts.flatMap(b => (b.revealedResult?.battleLog ? [b.revealedResult.battleLog] : [])));
+    const start = startOf('opening');
+    const { view: running, actors } = largeTournament(50, { startsAtMs: start, league: 'bronze', templates });
+    const view: TournamentView = { ...running, status: 'completed',
+      placements: running.entrants.map((e, i) => ({ gladiatorId: e.gladiatorId, place: i + 1, completion: { ...VIEWS.completed.placements[0].completion, activityId: crypto.randomUUID() } })) };
+    const at = view.endsAtMs + 5 * MIN;
+    await routeLiveReads(context, { world: { ...emptyWorld(at), actors }, tournaments: [view], serverNowMs: () => at });
+    await page.goto('/game/');
+    const panel = await tournamentsPanel(page);
+    const table = panel.getByRole('table', { name: 'Placements' });
+    const rows = table.locator('tbody tr');
+    const bar = table.locator('xpath=ancestor::*[@data-paging-scope][1]').getByRole('navigation', { name: 'Pages' });
+    const label = bar.locator('b').first();
+    await expect(rows).toHaveCount(6);
+    await expect(label).toHaveText('Page 1 of 9');
+    await bar.getByRole('button', { name: 'Next page', exact: true }).click();
+    await expect(label).toHaveText('Page 2 of 9');
+    await bar.getByRole('button', { name: 'Previous page', exact: true }).click();
+    await expect(label).toHaveText('Page 1 of 9');
+    await bar.getByRole('button', { name: 'Go to page 9', exact: true }).click();
+    await expect(rows).toHaveCount(2);
+    // A Show choice on the entrants' bar changes the entrants only.
+    const entrants = panel.getByRole('region', { name: 'Entrants' });
+    await entrants.getByRole('combobox', { name: 'Rows per page' }).selectOption('25');
+    await expect(entrants.getByRole('listitem')).toHaveCount(25);
+    await expect(label).toHaveText('Page 9 of 9');
+    const bouts = panel.getByRole('region', { name: 'Bracket', exact: true });
+    // (The settled bracket opens on its final, one bout: round 1 has the long list.)
+    await bouts.getByRole('tab').first().click();
+    await expect(bouts.getByRole('combobox', { name: 'Rows per page' })).toHaveValue('6');
   });
 
   test('a viewer joining late loads at most the logs of the current and next ring window', async ({ page, context }, testInfo) => {

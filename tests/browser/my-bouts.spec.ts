@@ -648,3 +648,108 @@ test.describe('My bouts for a signed-in player', () => {
     await expect(rows(results)).toHaveCount(0);
   });
 });
+
+// Patch 1.9 Task 32 (menus with Back and Next): My bouts shows eight a page of the twenty a server page holds; Next past the loaded bouts
+// reads the next twenty ("Page 3" with "more to see" while there are more), a chip goes back to page 1, a second Next during a read does
+// nothing, and Back from a replay lands on the page and row it was opened from. There is no More button.
+test.describe('My bouts in pages', () => {
+  test.skip(production, 'These checks use the routed transport.');
+  const reads = (live: LiveTransport) => boutReads(live).length;
+
+  async function openPaged(page: Page, context: Parameters<typeof quietArrivals>[0], count = 43) {
+    await quietArrivals(context); await seedSession(context);
+    const now = Date.now(), bouts = Array.from({ length: count }, (_, i) => liveBout(now, i + 1, i % 3 === 0 ? 'defeat' : 'victory'));
+    const live = await routeLiveReads(context, { world: emptyWorld(now), owner: ownerFixture, bouts });
+    await page.goto('/game/'); await expectOwnerShown(page, 'Aster');
+    const results = await openMenu(page, 'Results');
+    await expect(myBoutsTab(results)).toHaveAttribute('aria-selected', 'true', { timeout: 45_000 });
+    await expect(rows(results)).toHaveCount(8, { timeout: 45_000 });
+    return { live, results, bar: results.getByRole('navigation', { name: 'Pages' }) };
+  }
+
+  test('eight a page; Next past the twenty read reads the next twenty, once; a chip goes back to page 1', async ({ page, context }, testInfo) => {
+    const { live, results, bar } = await openPaged(page, context);
+    const label = bar.locator('b').first();
+    const next = bar.getByRole('button', { name: 'Next page', exact: true });
+    await expect(label).toHaveText('Page 1');
+    await expect(bar).toContainText('more to see');
+    await expect(results.getByRole('button', { name: 'More', exact: true })).toHaveCount(0);
+    await next.click();
+    await expect(label).toHaveText('Page 2');
+    await expect(rows(results).first()).toBeFocused();
+    await expect(rows(results)).toHaveCount(8);
+    // Page 3 holds rows 17 to 24; the twenty read hold only 4 of them, so Next reads the next twenty first (and a second Next while it reads does nothing).
+    const before = reads(live);
+    live.delay('activities', 800);
+    await next.click();
+    await next.dispatchEvent('click');
+    await expect(label).toHaveText('Page 3', { timeout: 15_000 });
+    expect(reads(live) - before).toBe(1);
+    await expect(rows(results)).toHaveCount(8);
+    // Page 5 is the last: 43 bouts, the third read ends the list and the label knows its end.
+    await bar.getByRole('button', { name: 'Go to page 5', exact: true }).click();
+    live.delay('activities', 0);
+    await expect(label).toHaveText(/^Page 5( of 6)?$/);
+    await next.click();
+    await expect(label).toHaveText('Page 6 of 6');
+    await expect(rows(results)).toHaveCount(3);
+    await expect(next).toHaveAttribute('aria-disabled', 'true');
+    // A chip is another list: back to page 1.
+    await chip(results, 'Lost').click();
+    await expect(chip(results, 'Lost')).toHaveAttribute('aria-pressed', 'true');
+    await expect(bar.locator('b').first()).toHaveText(/^Page 1/);
+    await settled(page);
+    await shot(page, testInfo, 'my-bouts-paged');
+  });
+
+  test('a page of eight fits the menu on page 1 and page 2, without a scroll (1280×720, and the 360×780 sheet on the phone project)', async ({ page, context }, info) => {
+    await page.setViewportSize(info.project.name === 'mobile' ? { width: 360, height: 780 } : { width: 1280, height: 720 });
+    const { results, bar } = await openPaged(page, context);
+    // The menu's body is the part that scrolls: a page of eight rows (the day groups, and the chips above them) fits it (Task 32 fix round 1, I3).
+    const fits = () => results.getByTestId('menu-body').evaluate(el => ({ scroll: el.scrollHeight, client: el.clientHeight }));
+    // On the 360×780 sheet eight rows with 44 px Watch buttons, 44 px chips and the tabs are 25 px (page 1) and 42 px (page 2, one more day heading) more than the
+    // body holds (the least the rows can take): the page scrolls that little, with the bar pinned (fix round 2: not compacted further, a touch target is not shrunk). Everywhere else it fits.
+    const touch = info.project.name === 'mobile';
+    const slack = touch ? 45 : 1;
+    await settled(page);
+    let measured = await fits();
+    expect(measured.scroll, 'page 1').toBeLessThanOrEqual(measured.client + slack);
+    await bar.getByRole('button', { name: 'Next page', exact: true }).click();
+    await expect(bar.locator('b').first()).toHaveText('Page 2');
+    measured = await fits();
+    expect(measured.scroll, 'page 2').toBeLessThanOrEqual(measured.client + slack);
+    await expect(bar).toBeInViewport();
+  });
+
+  test('a failed read of the next twenty keeps the page and says so; Next tries again', async ({ page, context }) => {
+    const { live, results, bar } = await openPaged(page, context);
+    const label = bar.locator('b').first();
+    const next = bar.getByRole('button', { name: 'Next page', exact: true });
+    await next.click();
+    await expect(label).toHaveText('Page 2');
+    live.fail('activities');
+    await next.click();
+    await expect(bar).toContainText('Could not load more. Try Next again.');
+    await expect(label).toHaveText('Page 2');
+    live.fail('activities', false);
+    await next.click();
+    await expect(label).toHaveText('Page 3');
+  });
+
+  test('Back from a replay lands on the page and the row it was opened from', async ({ page, context }) => {
+    const { results, bar } = await openPaged(page, context);
+    const label = bar.locator('b').first();
+    await bar.getByRole('button', { name: 'Next page', exact: true }).click();
+    await bar.getByRole('button', { name: 'Next page', exact: true }).click();
+    await expect(label).toHaveText('Page 3');
+    const opener = rows(results).nth(2).getByRole('button');
+    const name = (await opener.getAttribute('aria-label'))!;
+    await opener.click();
+    await expect(replayScene(page)).toBeVisible();
+    await page.getByRole('button', { name: 'Back to My bouts', exact: true }).click();
+    await expect(replayScene(page)).toHaveCount(0);
+    await expect(menuDialog(page, 'Results')).toBeVisible();
+    await expect(label).toHaveText('Page 3');
+    await expect(results.getByRole('button', { name, exact: true })).toBeVisible();
+  });
+});

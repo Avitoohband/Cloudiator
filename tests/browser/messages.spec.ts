@@ -203,6 +203,8 @@ const spills = (panel: Locator) => panel.evaluate(root => {
   return out;
 });
 
+/** Patch 1.9 Task 31: the Messages list is paged (3 a page); a test that reads every message chooses Show 10, which holds them on one page. */
+const showAllMessages = (panel: Locator) => panel.getByRole('combobox', { name: 'Rows per page' }).selectOption('10');
 const messagesButton = (page: Page) => cornerChip(page).getByRole('button', { name: /^Messages(, \d+ new)?$/ });
 const badge = (page: Page) => page.getByTestId('messages-badge');
 const panelOf = (page: Page) => page.getByRole('region', { name: 'Messages', exact: true });
@@ -326,8 +328,11 @@ test.describe('Watch from Notifications', () => {
     await openLive(page);
     const panel = await openPanel(page);
     await tab(panel, /^Notifications/).click();
-    await expect(panel.locator('[data-notification]')).toHaveCount(20);
-    await panel.locator('[data-notification]').nth(19).getByRole('button', { name: 'Watch: Arena victory', exact: true }).click();
+    // Patch 1.9 Task 31: 6 results a page; the 20th is the second row of page 4, and the return from its replay lands on that page.
+    await expect(panel.locator('[data-notification]')).toHaveCount(6);
+    await pagesBar(panel).getByRole('button', { name: 'Go to page 4', exact: true }).click();
+    await expect(panel.locator('[data-notification]')).toHaveCount(2);
+    await panel.locator('[data-notification]').nth(1).getByRole('button', { name: 'Watch: Arena victory', exact: true }).click();
     const scene = page.getByRole('dialog', { name: 'Replay', exact: true });
     await expect(scene.locator('[data-bout-counter]')).toHaveText(await touchLayout(page) ? '20 / 20+' : 'Bout 20 of 20+ in My bouts');
     await scene.getByRole('group', { name: 'Replay controls' }).getByRole('button', { name: 'Next bout', exact: true }).click();
@@ -338,6 +343,9 @@ test.describe('Watch from Notifications', () => {
     await page.goBack();
     await expect(scene).toHaveCount(0);
     await expect(tab(panel, /^Notifications/)).toBeFocused();
+    // The result it left from is on screen again: the panel came back on page 3.
+    await expect(pageLabel(panel)).toHaveText('Page 4 of 4');
+    await expect(panel.locator('[data-notification]').nth(1).getByRole('button', { name: 'Watch: Arena victory', exact: true })).toBeVisible();
   });
 
   test('drops a pending Notifications return when the session ends before the inbox arrives', async ({ page, context }) => {
@@ -502,6 +510,7 @@ test.describe('Watch from Notifications', () => {
     await player(page, { messages: [AVI, ...MESSAGES], readIds: [EVENING.id] });
     await openLive(page);
     const panel = await openPanel(page);
+    await showAllMessages(panel);
     await expect(rows(panel)).toHaveCount(5);
     // Newest first.
     expect(await rows(panel).evaluateAll(els => els.map(el => el.getAttribute('data-message-row')))).toEqual(['5', '3', '2', '1', '4']);
@@ -761,6 +770,7 @@ test.describe('Watch from Notifications', () => {
     await player(page, { messages: [long, AVI, ...MESSAGES], readIds: [EVENING.id], readDelayMs: 500, failReadOnce: [AVI.id], notifications: RESULTS });
     await openLive(page);
     const panel = await openPanel(page);
+    await showAllMessages(panel);
     await expect(panel.locator('[data-mark-button]')).toHaveCount(4);
     expect(await spills(panel), 'the list with its ✓ buttons').toEqual([]);
     await panel.locator('[data-mark-all]').click();
@@ -806,6 +816,7 @@ test.describe('Watch from Notifications', () => {
     await openLive(page);
     const button = messagesButton(page);
     let panel = await openPanel(page);
+    await showAllMessages(panel);
     await expect(button).toHaveAttribute('aria-expanded', 'true');
     // Opening a message moves the focus to Back (the row it came from is gone); Back returns to that row.
     await row(panel, /Evening Arena/).click();
@@ -886,6 +897,7 @@ test.describe('Watch from Notifications', () => {
     await openLive(page);
     await poll.idle();
     const panel = await openPanel(page);
+    await showAllMessages(panel);
     await expect(rows(panel)).toHaveCount(4);
     await expect(badge(page)).toHaveCount(0);
     const lists = live.count('game_messages');
@@ -941,6 +953,7 @@ test.describe('Watch from Notifications', () => {
     await expect(messagesButton(page)).toHaveAccessibleName('Messages');
     await expect(badge(page)).toHaveCount(0);
     const panel = await openPanel(page);
+    await showAllMessages(panel);
     await expect(rows(panel)).toHaveCount(4);
     await expect(panel.locator('[data-unread-dot]')).toHaveCount(0);
     for (const title of [/Messages, gold/, /New: choose your gladiator/, /Evening Arena/, /Welcome/]) await expect(row(panel, title)).not.toHaveAccessibleName(/Unread/);
@@ -953,6 +966,7 @@ test.describe('Watch from Notifications', () => {
     await expect(messagesButton(page)).toHaveAccessibleName('Messages, 3 new');
     await expect(badge(page)).toHaveText('3');
     const panel = await openPanel(page);
+    await showAllMessages(panel);
     await expect(panel.locator('[data-unread-dot]')).toHaveCount(3);
     await expect(row(panel, /Welcome/)).not.toHaveAccessibleName(/Unread/);
   });
@@ -965,6 +979,7 @@ test.describe('Watch from Notifications', () => {
     await expect(panel.getByRole('alert')).toHaveText(/could not be loaded/i);
     live.fail('game_messages', false);
     await panel.getByRole('button', { name: 'Try again' }).click();
+    await showAllMessages(panel);
     await expect(rows(panel)).toHaveCount(4);
     await expect(panel.getByRole('alert')).toHaveCount(0);
   });
@@ -1047,6 +1062,9 @@ test.describe('Watch from Notifications', () => {
     await expect(badge(page)).toHaveText('9+');
     const panel = await openPanel(page);
     await expect(tab(panel, /^Notifications/)).toHaveAccessibleName('Notifications');
+    // Patch 1.9 Task 31: 6 a page; Show 25 puts the 20 read results on one page.
+    await expect(panel.locator('[data-notification]')).toHaveCount(6);
+    await panel.getByRole('combobox', { name: 'Rows per page' }).selectOption('25');
     await expect(panel.locator('[data-notification]')).toHaveCount(20);
     // Everything up to the newest shown is seen, which clears the older ones too.
     await expect.poll(() => sent(commands, 'see-notifications').length).toBe(1);
@@ -1799,6 +1817,81 @@ test.describe('in the fixture preview', () => {
     await dialog.getByRole('button', { name: 'Cancel', exact: true }).click();
     await expect(dialog).toBeHidden();
     await expect(messagesButton(page)).toBeFocused();
+  });
+});
+
+// Patch 1.9 Task 31 (menus with Back and Next): Messages and Notifications show 7 rows a page inside the popover; a tab change goes back to
+// page 1; Back from a message returns to its page; a Watch returns to the page that holds its result.
+const pagesBar = (panel: Locator) => panel.getByRole('navigation', { name: 'Pages' });
+const pageLabel = (panel: Locator) => pagesBar(panel).locator('b').first();
+test.describe('Messages and Notifications by the page', () => {
+  test.skip(production, 'Live mode uses the development-only intercepted Supabase transport.');
+  test.beforeEach(async ({ context }) => { await quietArrivals(context); });
+  const lots = Array.from({ length: 16 }, (_, i) => settled(200 + i, 'training', 'completed', 5 + i, { attributePoints: 1 }));
+  const notes = Array.from({ length: 16 }, (_, i): GameMessage => ({ id: 100 + i, kind: 'admin', title: `Note ${i}`, preview: `Preview ${i}`, body: [{ p: `Body ${i}` }],
+    action: null, publishedAtMs: at(9, 2) + i * 60_000 }));
+
+  test('each tab shows a page of rows (3 messages, 6 results), Next turns, and a tab change goes back to page 1', async ({ page }) => {
+    await player(page, { messages: notes, notifications: lots, readIds: [] });
+    await openLive(page);
+    const panel = await openPanel(page);
+    await expect(rows(panel)).toHaveCount(3);
+    await expect(pageLabel(panel)).toHaveText('Page 1 of 6');
+    await expect(rows(panel).first()).toContainText('Note 15');
+    await pagesBar(panel).getByRole('button', { name: 'Next page', exact: true }).click();
+    await expect(pageLabel(panel)).toHaveText('Page 2 of 6');
+    await expect(rows(panel)).toHaveCount(3);
+    await expect(rows(panel).first()).toContainText('Note 12');
+    // Back, and a circle that jumps.
+    await pagesBar(panel).getByRole('button', { name: 'Previous page', exact: true }).click();
+    await expect(pageLabel(panel)).toHaveText('Page 1 of 6');
+    await pagesBar(panel).getByRole('button', { name: 'Go to page 3', exact: true }).click();
+    await expect(rows(panel).first()).toContainText('Note 9');
+    await pagesBar(panel).getByRole('button', { name: 'Next page', exact: true }).click();
+    await expect(rows(panel).first().locator('xpath=..')).toBeFocused();
+    // Notifications: its own list, from page 1.
+    await tab(panel, /^Notifications/).click();
+    await expect(panel.locator('[data-notification]')).toHaveCount(6);
+    await expect(pageLabel(panel)).toHaveText('Page 1 of 3');
+    await pagesBar(panel).getByRole('button', { name: 'Go to page 3', exact: true }).click();
+    await expect(panel.locator('[data-notification]')).toHaveCount(4);
+    // Back to Messages: page 1 again.
+    await tab(panel, /^Messages/).click();
+    await expect(pageLabel(panel)).toHaveText('Page 1 of 6');
+    await expect(rows(panel)).toHaveCount(3);
+  });
+
+  // Task 31 fix round 1 (I1): a full page of Fit rows does not scroll at the reference sizes (1280x720 and the 360x780 phone).
+  for (const [name, size] of [['desktop 1280x720', { width: 1280, height: 720 }], ['phone 360x780', { width: 360, height: 780 }]] as const) {
+    test(`a full page of Notifications and of Messages fits the popover (${name})`, async ({ page }, testInfo) => {
+      test.skip((testInfo.project.name === 'mobile') !== (size.width === 360), 'Each reference size runs in its own project: the touch layout at 360 x 780, the pointer layout at 1280 x 720.');
+      await page.setViewportSize(size);
+      await player(page, { messages: notes, notifications: lots, readIds: [] });
+      await openLive(page);
+      const panel = await openPanel(page);
+      const scroller = panel.locator('[data-paging-scope] > div').first();
+      const room = () => scroller.evaluate(el => ({ scroll: el.scrollHeight, client: el.clientHeight }));
+      await expect(rows(panel)).toHaveCount(3);
+      const messagesFit = await room();
+      expect(messagesFit.scroll, `Messages: ${JSON.stringify(messagesFit)}`).toBeLessThanOrEqual(messagesFit.client + 1);
+      await tab(panel, /^Notifications/).click();
+      await expect(panel.locator('[data-notification]')).toHaveCount(6);
+      const notesFit = await room();
+      expect(notesFit.scroll, `Notifications: ${JSON.stringify(notesFit)}`).toBeLessThanOrEqual(notesFit.client + 1);
+    });
+  }
+
+  test('Back from an opened message returns to the page that holds it', async ({ page }) => {
+    await player(page, { messages: notes, readIds: [] });
+    await openLive(page);
+    const panel = await openPanel(page);
+    await pagesBar(panel).getByRole('button', { name: 'Go to page 5', exact: true }).click();
+    await row(panel, 'Note 3').click();
+    await expect(panel.getByRole('heading', { name: 'Note 3', exact: true })).toBeVisible();
+    await panel.getByRole('button', { name: /Back to messages/ }).click();
+    await expect(pageLabel(panel)).toHaveText('Page 5 of 6');
+    await expect(row(panel, 'Note 3')).toBeVisible();
+    await expect(row(panel, 'Note 3')).toBeFocused();
   });
 });
 

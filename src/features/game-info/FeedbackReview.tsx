@@ -17,15 +17,19 @@
 // Only an item known to be answered closes its box. When the reloaded list cannot say why (the item left the list shown, or the reload
 // failed), the box and draft stay and the alert says so in neutral words (fix round 1); an alert for an item no longer listed shows above
 // the list.
-import { useCallback, useEffect, useId, useRef, useState } from 'react';
+import { useCallback, useEffect, useId, useRef, useState, type RefObject } from 'react';
 import type { OwnerFeedbackItem } from '@contracts/reads';
 import { useClockMode } from '../../lib/clock-setting';
 import { categoryLabel, feedbackDate, ownerDetails, ownerStatus } from '../messages/feedback';
 import feedbackStyles from '../messages/feedback.module.css';
 import { answerFeedback, listFeedback, markFeedbackRead, type FeedbackFilter } from './feedback-review';
+import { Pager } from '../paging/Pager';
+import { PanelFooter } from '../paging/PanelFooter';
+import { usePagedList } from '../paging/usePagedList';
 import styles from './game-info.module.css';
 
 const FILTERS: readonly { id: FeedbackFilter; label: string }[] = [{ id: 'new', label: 'New' }, { id: 'answered', label: 'Answered' }, { id: 'all', label: 'All' }];
+const NO_ITEMS: readonly OwnerFeedbackItem[] = [];
 const STATUS_CLASS = { new: feedbackStyles.statusNew, read: feedbackStyles.statusRead, answered: feedbackStyles.statusAnswered } as const;
 /** The answer box's limit (the mockup's; the server takes up to 2,000, the limit of an edited suggestion). */
 const ANSWER_MAXIMUM = 1000;
@@ -54,6 +58,8 @@ export function FeedbackReview({ onCount }: {
   const ticket = useRef(0);
   const box = useRef<HTMLTextAreaElement>(null);
   const filters = useRef<HTMLDivElement>(null);
+  // Patch 1.9 Task 31: 6 items a page; New, Answered and All go back to page 1.
+  const paged = usePagedList(items ?? NO_ITEMS, { list: 'feedback', resetKey: filter });
 
   // Only the latest read lands, and nothing after the tab is gone. It answers the items it showed (null when it did not land).
   const load = useCallback(async (which: FeedbackFilter): Promise<OwnerFeedbackItem[] | null> => {
@@ -131,14 +137,14 @@ export function FeedbackReview({ onCount }: {
       {failed && <p role="alert" className={styles.feedbackState}>Feedback could not be loaded again. <button type="button" onClick={() => void load(filter)}>Try again</button></p>}
       {problem && !items.some(item => item.id === problem.id) && <p role="alert" className={styles.feedbackProblem} data-feedback-problem="">{problem.text}</p>}
       {items.length === 0 ? <p className={styles.feedbackState}>Nothing here. New feedback from players shows up in this list.</p>
-        : <ul className={styles.feedbackList} aria-label="Feedback">
-          {items.map(item => {
+        : <><ul className={styles.feedbackList} aria-label="Feedback" ref={paged.listRef as RefObject<HTMLUListElement | null>}>
+          {paged.rows.map(item => {
             const details = ownerDetails(item.details, clock);
             const who = item.gladiatorName;
             const textId = `${ids}-answer-${item.id}`;
             const editing = answering === item.id && suggestionAt !== null;
             const limit = editing ? SUGGESTION_MAXIMUM : ANSWER_MAXIMUM;
-            return <li key={item.id}>
+            return <li key={item.id} data-page-row="" tabIndex={-1}>
               <article className={styles.feedbackItem} data-feedback-item={item.id} data-new={item.status === 'new' ? '' : undefined}>
                 <div className={styles.feedbackTop}>
                   <span className={`${feedbackStyles.pill} ${feedbackStyles[item.category]}`}>{categoryLabel(item.category)}</span>
@@ -176,7 +182,8 @@ export function FeedbackReview({ onCount }: {
               </article>
             </li>;
           })}
-        </ul>}
+        </ul>
+        <PanelFooter><Pager list={paged} show /></PanelFooter></>}
     </>}
   </div>;
 }

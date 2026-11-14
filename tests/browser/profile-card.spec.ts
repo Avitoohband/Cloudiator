@@ -2,6 +2,7 @@ import { expect, test, type Page, type TestInfo } from './fixtures';
 import { contrastIssues, expectNamedControls, noHorizontalScroll } from './a11y-helpers';
 import { reviewShot } from './review-shots';
 import { openMenu, quietArrivals, touchLayout, pageTo } from './shell-helpers';
+import { showChoice } from './show-choice';
 
 // Task 11c (Patch A spec, "A richer profile card"; Avi approved the mockup, 2026-10-29): the card a gladiator's name opens, filled in
 // sections: the look, the class chips, the attributes, the stats, the gear and the record. The fixture preview's profiles carry sample
@@ -28,6 +29,9 @@ async function openFromList(page: Page, name: string) {
   return card(page, name);
 }
 const shot = (page: Page, testInfo: TestInfo, name: string) => reviewShot(page, testInfo, `card-${name}`);
+
+// These cases look for a row by its name, not for how the list pages: Show 50 puts the rows read on the page (Patch 1.9 Task 32).
+test.beforeEach(async ({ context }) => { await showChoice(context, { standings: 50 }); });
 
 test.describe('the richer profile card', () => {
   test.skip(production, 'These checks use the fixture preview.');

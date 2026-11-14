@@ -5,7 +5,7 @@
 import { expect, test, type Locator, type Page } from './fixtures';
 import { MENU_PREFS_KEY } from '../../src/features/shell/menu-prefs';
 import { PAGE_SIZE_KEY } from '../../src/features/paging/page-size-prefs';
-import { noHorizontalScroll } from './a11y-helpers';
+import { contrastIssues, noHorizontalScroll } from './a11y-helpers';
 import { createDemoWorld } from '../../src/game/demo-world';
 import { openMenu, quietArrivals, touchLayout } from './shell-helpers';
 import { routeLiveReads } from './live-routes';
@@ -15,6 +15,8 @@ const production = process.env.PLAYWRIGHT_STATIC === 'true';
 const SHOTS = '.superpowers/sdd/2026-11-12-1.9-additions';
 
 async function openCamp(page: Page) {
+  // The arrival banner (Task 30 fix round 3) shortens the phone's tall sheet while it shows: these cases measure the sheet without it.
+  await quietArrivals(page.context());
   await page.goto('/game/?mode=fixture');
   await page.waitForFunction(() => window.__cloudiatorCamp?.state()?.ready === true, null, { timeout: 45_000 });
 }
@@ -346,5 +348,34 @@ test.describe('menus with Back and Next: the Gladiators list', () => {
     const again = await gladiators(page);
     await expect(label(again)).toHaveText('Page 1 of 8');
     await expect(again.locator('[data-page-row]').filter({ hasText: '(you)' })).toBeVisible();
+  });
+});
+
+// Patch 1.9 Task 31 (found while filming): the BOT badge in the Gladiators list was a wide pale bar (the list's `.who span` rule made it a block)
+// with pale text. It is a compact badge sized to its text, with text contrast of at least 4.5:1, as the NEW pill is.
+test.describe('the BOT badge in the Gladiators list', () => {
+  test.skip(production, 'Live mode uses the development-only intercepted Supabase transport.');
+  test('is compact, sized to its text, readable, and 7 rows still fit a page', async ({ page, context }) => {
+    await quietArrivals(context);
+    const world = createDemoWorld(worldFixture.serverNowMs, 10, 0);
+    world.actors = world.actors.map((actor, i) => (i >= 7 ? { ...actor, botTeam: 'ludus-nimbus' as const, botDuty: 'off-duty' as const, location: 'orientation' as const, activityId: null } : actor));
+    await routeLiveReads(context, { world });
+    await page.goto('/game/');
+    const menu = await openMenu(page, 'Gladiators');
+    await expect(rows(menu).first()).toBeVisible({ timeout: 45_000 });
+    await expect(rows(menu)).toHaveCount(7);
+    await pager(menu).getByRole('button', { name: 'Next page', exact: true }).click();
+    const team = menu.getByRole('list', { name: 'Ludus Nimbus' });
+    const badge = team.getByLabel('Bot', { exact: true }).first();
+    await expect(badge).toBeVisible();
+    const box = await badge.evaluate(el => {
+      const row = el.closest('li')!.getBoundingClientRect(), tag = el.getBoundingClientRect(), style = getComputedStyle(el);
+      return { tag: tag.width, row: row.width, display: style.display };
+    });
+    expect(box.display).toBe('inline-block');
+    expect(box.tag, 'the badge is as wide as "BOT", not the row').toBeLessThan(60);
+    expect(box.tag).toBeLessThan(box.row / 4);
+    expect(await contrastIssues(team)).toEqual([]);
+    expect(await fits(menu), 'the page with the bots still fits').toBe(true);
   });
 });

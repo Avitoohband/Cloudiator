@@ -158,6 +158,10 @@ test.describe('Patch A: a new player is announced', () => {
       await page.goto('/game/');
       await expect(banner(page)).toBeVisible();
       await page.clock.pauseAt(await page.evaluate(() => Date.now() + 100));
+      // Find is off until the camp scene is ready (its `findReason`), and an off button cannot take the focus. The clock stays paused while the scene
+      // gets ready (its loading is network and promises, not timers), so no banner time is spent waiting: the checks below count from the first
+      // visible banner and run from here (arrivals:150 failed about 1 run in 8 when a focus was made too early, Task 30 fix round 3).
+      await expect(page.getByRole('button', { name: 'Find Ursa', exact: true })).toBeEnabled({ timeout: 45_000 });
     };
     const showingFor = (seconds: number) => showingForOn(page, seconds);
 

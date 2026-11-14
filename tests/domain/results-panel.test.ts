@@ -167,10 +167,12 @@ describe('Results', () => {
     expect(list.rows.map(r => r.summary.activityId)).toEqual(ROWS.slice(0, 50).map(r => r.summary.activityId));
     expect(list.nextCursor).toBe('50');
     let html = view({ ...list, status: 'ready' });
-    expect(html.match(/<li/g)).toHaveLength(50);
-    expect(text(html)).toContain('More');
+    // Eight a page (Patch 1.9 Task 32); with more to read the pager says "more to see", and there is no More button.
+    expect(html.match(/<li/g)).toHaveLength(8);
+    expect(text(html)).toContain('more to see');
+    expect(text(html)).not.toContain('More');
     // "You" marks exactly the viewer's own rows; a visitor (no viewer) sees none.
-    expect(text(html).match(/\bYou\b/g)).toHaveLength(ROWS.slice(0, 50).filter(r => r.gladiatorId === MINE).length);
+    expect(text(html).match(/\bYou\b/g)).toHaveLength(ROWS.slice(0, 8).filter(r => r.gladiatorId === MINE).length);
     expect(text(view({ ...list, status: 'ready' }, null))).not.toMatch(/\bYou\b/);
 
     list = await readResults(reads, list);
@@ -180,9 +182,11 @@ describe('Results', () => {
     expect(list.nextCursor).toBeNull();
     expect(reads.cursors).toEqual([undefined, '50', '100']);
     html = view({ ...list, status: 'ready' });
-    expect(html.match(/<li/g)).toHaveLength(120);
-    expect(text(html)).not.toContain('More');
-    expect(text(html).match(/\bYou\b/g)).toHaveLength(ROWS.filter(r => r.gladiatorId === MINE).length);
+    // All read: 120 rows are fifteen pages of eight, and the label knows its end.
+    expect(html.match(/<li/g)).toHaveLength(8);
+    expect(text(html)).toContain('Page 1 of 15');
+    expect(text(html)).not.toContain('more to see');
+    expect(text(html).match(/\bYou\b/g)).toHaveLength(ROWS.slice(0, 8).filter(r => r.gladiatorId === MINE).length);
   });
 
   it('keeps at most 50 new rows a page, never repeats one, and ends a list whose reader ignores the cursor', async () => {

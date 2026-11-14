@@ -9,7 +9,8 @@ import { worldToScreen } from '../../src/game/iso';
 import { emptyWorld, routeLiveReads, seedSession } from './live-routes';
 import { forbidRemote, remoteRequest } from './remote';
 import { reviewShot360 } from './review-shots';
-import { closeMenu, expectOwnerShown, menuDialog, openMenu } from './shell-helpers';
+import { closeMenu, expectOwnerShown, menuDialog, openMenu, pageTo } from './shell-helpers';
+import { showChoice } from './show-choice';
 import { expectTimeOnOneLine, slotTime } from './slot-time';
 
 const production = process.env.PLAYWRIGHT_STATIC === 'true';
@@ -817,32 +818,79 @@ test.describe('the Arena card and league standings', () => {
     expect((await arenaState(page))!.activityId).toBe(arenaActivityId('lucilla'));
   });
 
-  test('pages league standings and shows the owner’s rating, renown and current strength apart from them', { tag: '@render' }, async ({ page, baseURL }, testInfo) => {
+  test('pages league standings ten a page and shows the owner’s rating, renown and current strength apart from them', { tag: '@render' }, async ({ page, baseURL }, testInfo) => {
     const remote = forbidRemote(page, baseURL);
     await openGame(page);
-    // The standings live in the Arena menu, below the Arena card (Task 13.5).
-    await openMenu(page, 'Arena');
+    // The standings live in the Arena menu, below the Arena card (Task 13.5). Patch 1.9 Task 32: ten rows a page, "Page 1" with "more to see"
+    // while the server has more to read, Next past the fifty read reads the next fifty, and there is no More button.
+    const menu = await openMenu(page, 'Arena');
     const table = page.getByRole('table', { name: 'Bronze league standings' });
-    await expect(table.locator('tbody tr')).toHaveCount(50);
+    const bar = menu.getByRole('navigation', { name: 'Pages' });
+    const label = bar.locator('b').first();
+    const next = bar.getByRole('button', { name: 'Next page', exact: true });
+    await expect(table.locator('tbody tr')).toHaveCount(10);
+    await expect(label).toHaveText('Page 1');
+    await expect(bar).toContainText('more to see');
+    await expect(menu.getByRole('button', { name: 'More', exact: true })).toHaveCount(0);
+    // The markers and the owner's row are on the pages that hold them.
+    await pageTo(menu, table.getByText('Promoted').first());
     await expect(table).toContainText('Promoted');
+    await pageTo(menu, table.getByText('Inactive').first());
     await expect(table).toContainText('Inactive');
+    await pageTo(menu, table.locator('tr[aria-current="true"]'));
     await expect(table.locator('tr[aria-current="true"]')).toContainText('Aster');
-    await page.getByRole('button', { name: 'More', exact: true }).click();
-    await expect(table.locator('tbody tr')).toHaveCount(58);
-    await expect(page.getByRole('button', { name: 'More', exact: true })).toHaveCount(0);
+    // Next to the end of the fifty read: still "Page 5 / more to see"; the next Next reads the last eight and the end is known.
+    await bar.getByRole('button', { name: 'Go to page 5', exact: true }).click();
+    await expect(label).toHaveText('Page 5');
+    await expect(table.locator('tbody tr')).toHaveCount(10);
+    await expect(bar).toContainText('more to see');
+    await next.click();
+    await expect(label).toHaveText('Page 6 of 6');
+    await expect(table.locator('tbody tr')).toHaveCount(8);
+    await expect(next).toHaveAttribute('aria-disabled', 'true');
+    await expect(menu.getByRole('button', { name: 'More', exact: true })).toHaveCount(0);
     const own = page.getByRole('region', { name: 'Your standing' });
     // Task 21.4 adds the owner's season rank and human bouts (2–1 this season) after the four figures.
     const asterRank = ARENA_STANDINGS.bronze.find(row => row.name === 'Aster')!.rank;
     await expect(own.getByRole('definition')).toHaveText(['Bronze', '1015', '25', '412', `#${asterRank}`, '3 of 5']);
     const rules = page.getByRole('region', { name: 'How leagues work' });
     for (const range of ['index below 25', 'index 25–59', 'index 60–119', 'index 120 and above']) await expect(rules).toContainText(range);
+    // A league goes back to page 1 (Silver has twelve rows: two pages).
     await page.getByRole('group', { name: 'League' }).getByRole('button', { name: 'Silver' }).click();
-    await expect(page.getByRole('table', { name: 'Silver league standings' }).locator('tbody tr')).toHaveCount(12);
+    await expect(page.getByRole('table', { name: 'Silver league standings' }).locator('tbody tr')).toHaveCount(10);
+    await expect(label).toHaveText('Page 1 of 2');
     await page.getByRole('group', { name: 'League' }).getByRole('button', { name: 'Champion' }).click();
     await expect(page.getByText('No standings in the Champion league yet.')).toBeVisible();
+    await expect(bar).toHaveCount(0);
     await page.getByRole('group', { name: 'League' }).getByRole('button', { name: 'Bronze' }).click();
-    await expect(table.locator('tbody tr')).toHaveCount(50);
+    await expect(table.locator('tbody tr')).toHaveCount(10);
+    await expect(label).toHaveText('Page 1');
+    // Closing the menu forgets the page (the Arena panel stays mounted while its menu is closed).
+    await next.click();
+    await expect(label).toHaveText('Page 2');
+    await closeMenu(page);
+    const again = await openMenu(page, 'Arena');
+    await expect(again.getByRole('navigation', { name: 'Pages' }).locator('b').first()).toHaveText('Page 1');
     await menuDialog(page, 'Arena').screenshot({ path: testInfo.outputPath('standings-bronze.png') });
+    expect(remote).toEqual([]);
+  });
+
+  test('after Next all ten rows of the page are inside the menu body (the table’s top goes to the top of the body)', async ({ page, baseURL }) => {
+    const remote = forbidRemote(page, baseURL);
+    await openGame(page);
+    const menu = await openMenu(page, 'Arena');
+    const table = page.getByRole('table', { name: 'Bronze league standings' });
+    const bar = menu.getByRole('navigation', { name: 'Pages' });
+    await expect(table.locator('tbody tr')).toHaveCount(10);
+    for (const target of ['Next page', 'Next page', 'Previous page']) {
+      await bar.getByRole('button', { name: target, exact: true }).click();
+      // The turn's scroll settles (the focus's own nearest-scroll first, then the table's top to the top of the body).
+      await expect.poll(async () => {
+        const body = (await menu.getByTestId('menu-body').boundingBox())!;
+        const boxes = await table.locator('tbody tr').evaluateAll(rows => rows.map(row => { const r = row.getBoundingClientRect(); return [r.top, r.bottom]; }));
+        return boxes.length === 10 && boxes.every(([top, bottom]) => top >= body.y - 1 && bottom <= body.y + body.height + 1);
+      }, { message: `all ten rows after ${target}` }).toBe(true);
+    }
     expect(remote).toEqual([]);
   });
 
@@ -900,7 +948,9 @@ test.describe('the Arena card and league standings', () => {
     await expect(watch).toBeFocused();
   });
 
-  test('fits a 360 px phone with reduced motion', async ({ page }, testInfo) => {
+  test('fits a 360 px phone with reduced motion', async ({ page, context }, testInfo) => {
+    // Show 50 puts the widest table the panel can hold on the page: the width check covers every row read.
+    await showChoice(context, { standings: 50 });
     await page.setViewportSize({ width: 360, height: 760 });
     await page.emulateMedia({ reducedMotion: 'reduce' });
     await arenaFlow.openAtMinute(page, 80, 'ownerHumanWin');
@@ -962,23 +1012,56 @@ test.describe('live league standings', () => {
     expect(live.requests.filter(r => r.table === 'arena_standing_reads').every(r => r.reader === user.id)).toBe(true);
   });
 
-  test('keeps the rows loaded with More when a new revision re-reads them', async ({ page, context }) => {
+  test('Next past the fifty read reads once, says so when the read fails, and tries again', async ({ page, context }) => {
+    const world = emptyWorld();
+    const live = await routeLiveReads(context, { world, standings: [standingsPage(ARENA_STANDINGS.bronze)] });
+    await page.goto('/game/');
+    const menu = await openMenu(page, 'Arena');
+    const table = page.getByRole('table', { name: 'Bronze league standings' });
+    const bar = menu.getByRole('navigation', { name: 'Pages' });
+    const label = bar.locator('b').first();
+    const next = bar.getByRole('button', { name: 'Next page', exact: true });
+    await expect(table.locator('tbody tr')).toHaveCount(10);
+    await bar.getByRole('button', { name: 'Go to page 5', exact: true }).click();
+    // A failed read keeps the page and the rows, and says so.
+    live.fail('arena_standing_reads');
+    await next.click();
+    await expect(bar).toContainText('Could not load more. Try Next again.');
+    await expect(label).toHaveText('Page 5');
+    await expect(table.locator('tbody tr')).toHaveCount(10);
+    // Served again: Next reads the last page; a second Next while it reads does nothing (one read).
+    live.fail('arena_standing_reads', false);
+    live.delay('arena_standing_reads', 1500);
+    const before = live.count('arena_standing_reads');
+    await next.click();
+    await next.dispatchEvent('click');
+    await expect(label).toHaveText('Page 6 of 6', { timeout: 15_000 });
+    expect(live.count('arena_standing_reads') - before).toBe(1);
+    await expect(table.locator('tbody tr')).toHaveCount(ARENA_STANDINGS.bronze.length - 50);
+  });
+
+  test('keeps the rows and the page loaded with Next when a new revision re-reads them', async ({ page, context }) => {
     const world = emptyWorld();
     const live = await routeLiveReads(context, { world, standings: [standingsPage(ARENA_STANDINGS.bronze)] });
     await page.clock.install();
     await page.goto('/game/');
-    await openMenu(page, 'Arena');
+    const menu = await openMenu(page, 'Arena');
     const table = page.getByRole('table', { name: 'Bronze league standings' });
-    await expect(table.locator('tbody tr')).toHaveCount(50);
-    await page.getByRole('button', { name: 'More', exact: true }).click();
-    await expect(table.locator('tbody tr')).toHaveCount(ARENA_STANDINGS.bronze.length);
+    const bar = menu.getByRole('navigation', { name: 'Pages' });
+    const label = bar.locator('b').first();
+    await expect(table.locator('tbody tr')).toHaveCount(10);
+    await bar.getByRole('button', { name: 'Go to page 5', exact: true }).click();
+    await bar.getByRole('button', { name: 'Next page', exact: true }).click();
+    await expect(label).toHaveText('Page 6 of 6');
+    await expect(table.locator('tbody tr')).toHaveCount(ARENA_STANDINGS.bronze.length - 50);
     const reads = live.count('arena_standing_reads');
     live.setWorld({ ...world, revision: 'empty-2' });
     await page.clock.fastForward(30_000);
-    // Both loaded pages are read again, and every row stays.
+    // Both loaded server pages are read again, every row stays, and so does the page the viewer was on.
     await expect.poll(() => live.count('arena_standing_reads')).toBe(reads + 2);
     await page.waitForTimeout(500);
-    await expect(table.locator('tbody tr')).toHaveCount(ARENA_STANDINGS.bronze.length);
+    await expect(label).toHaveText('Page 6 of 6');
+    await expect(table.locator('tbody tr')).toHaveCount(ARENA_STANDINGS.bronze.length - 50);
     await expect(page.getByRole('button', { name: 'More', exact: true })).toHaveCount(0);
     // A visitor's standings reads are anonymous.
     expect(live.requests.every(r => r.reader === null)).toBe(true);

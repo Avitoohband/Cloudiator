@@ -11,6 +11,8 @@ import { usePageKeys } from './usePageKeys';
 import type { PagedList } from './usePagedList';
 import styles from './paging.module.css';
 
+const FAILED = 'Could not load more. Try Next again.';
+
 export function Pager<T>({ list, show = false }: { list: PagedList<T>; show?: boolean }) {
   const nav = useRef<HTMLElement>(null);
   const visible = list.total > list.fit || list.pages === null;
@@ -21,6 +23,8 @@ export function Pager<T>({ list, show = false }: { list: PagedList<T>; show?: bo
     last.current = list.page;
     setStatus(pagerLabel(list.page, list.pages).main);
   }, [list.page, list.pages]);
+  // A failed read is said too (fix round 1, Task 31): the bar's own polite status carries it, since the line under the label is not a live region.
+  useEffect(() => { if (list.failed) setStatus(previous => (previous === FAILED ? `${FAILED} ` : FAILED)); }, [list.failed]);
   const back = () => { if (list.canBack) list.back(); };
   const next = () => { if (list.canNext) list.next(); };
   usePageKeys(nav, { PageDown: next, PageUp: back }, visible);
@@ -40,7 +44,7 @@ export function Pager<T>({ list, show = false }: { list: PagedList<T>; show?: bo
             </select>
           </label>}
         </span>
-        {(list.failed || list.busy || sub) && <span className={styles.sub}>{list.failed ? 'Could not load more. Try Next again.' : list.busy ? 'Loading…' : sub}</span>}
+        {(list.failed || list.busy || sub) && <span className={styles.sub}>{list.failed ? FAILED : list.busy ? 'Loading…' : sub}</span>}
       </div>
       <PageDots count={list.knownPages} current={list.page} more={list.pages === null} onGo={list.go} onMore={() => list.go(list.knownPages + 1)} />
       <button type="button" className={styles.next} aria-label="Next page" aria-disabled={!list.canNext} aria-busy={list.busy || undefined} onClick={next}>Next ›</button>

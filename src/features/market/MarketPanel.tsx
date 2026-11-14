@@ -3,7 +3,8 @@
 // The 💰 Marketplace menu (Task 18 plan Decision 11; full-screen camp spec "Menus": a player buys, sells, lists and cancels;
 // a visitor browses listings only). Patch 1.9, Task 26 (Avi approved the revised mockup on 2026-11-13: "big icon like the other tabs,
 // but the seller should have more emphasis; still a list with all the details"): two tabs for a player.
-// - Browse: the open offers, newest first, 50 at a time with "More", as a list. Each row has a big icon tile in the Inventory's style
+// - Browse: the open offers, newest first, read 50 at a time and shown three cards a page with Back and Next (Patch 1.9 Task 32: Next past the
+//   loaded offers reads the next 50), as a list. Each row has a big icon tile in the Inventory's style
 //   (its level, rarity, "Yours" or "Expired"), the name, the level line, the stat chips, when it was listed, the time left and the NPC
 //   sale value, the price with Buy (others' offers, after a confirmation) or Cancel listing (the player's own), and under them a seller
 //   band: an initial, "Sold by", the name, the class, league and level when the listing carries them (optional until the read selects
@@ -23,7 +24,7 @@
 // refreshed (Review Focus 4). Offers load on demand: each time the menu opens, a tab or My listings is shown, a command settles
 // or Refresh is pressed. A trader's owner is read when the menu opens and on each Refresh too, because a sale or an expiry changes
 // the seller's wallet and inventory without a new world revision (final review I1). Names render as React text.
-import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState, type KeyboardEvent } from 'react';
+import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState, type KeyboardEvent, type RefObject } from 'react';
 import type { GameCommand } from '@contracts/commands';
 import type { ItemInstance, MarketListing, OwnerState } from '@contracts/reads';
 import { RULES_V1 } from '@domain/rules-v1';
@@ -40,6 +41,9 @@ import { revealCard } from '../inventory/reveal-card';
 import { groupStacks, isStackable, type StackTile } from '../inventory/stacks';
 import inventory from '../inventory/InventoryPanel.module.css';
 import { useOutcomeFocus } from '../shell/focus-lost';
+import { usePagedList } from '../paging/usePagedList';
+import { Pager } from '../paging/Pager';
+import { PanelFooter } from '../paging/PanelFooter';
 import { CurrencyIcon } from '../shops/ShopArt';
 import {
   ITEM_FILTERS, LOWEST_PRICE_TEXT, MARKET_FEE_PERCENT, MARKET_FEE_TERMS, MARKET_MINIMUM_FEE, MARKET_SORTS, MAXIMUM_LISTINGS, MAXIMUM_PRICE, MINIMUM_PRICE,
@@ -138,12 +142,12 @@ function SellerBand({ listing, own, onProfile }: { listing: MarketListing; own: 
 }
 
 /**
- * Pure view of a list of offers (Task 26): the rows a chip, a search and a sort leave, the count under them with Refresh, More, and the
+ * Pure view of a list of offers (Task 26): the rows a chip, a search and a sort leave, the count under them with Refresh, the pager, and the
  * foot. `access` decides each row's action: a trader's Buy (others' offers) or Cancel listing (their own), a visitor's "Sign in to buy.",
  * or none. `mine` is My listings (the seller's own read).
  */
 export function MarketOffers({ model, access, ownerId, now, busy, onBuy, onCancel, onProfile, onMore, onRetry, onRefresh, onSell, onClearQuery,
-  query = '', sort = 'newest', filter = 'All', mine = false, loadingMore = false, moreFailed = false, available = null, full = false, rules = RULES_V1 }: {
+  query = '', sort = 'newest', filter = 'All', mine = false, available = null, full = false, rules = RULES_V1 }: {
   model: OffersModel;
   access: MarketAccess;
   /** The viewer's gladiator, whose own offers say "Your listing" and offer Cancel listing, never Buy; null for a visitor. */
@@ -155,7 +159,8 @@ export function MarketOffers({ model, access, ownerId, now, busy, onBuy, onCance
   onCancel(listing: MarketListing): void;
   /** Opens the seller's profile card; without it the band has no View profile. */
   onProfile?(listing: MarketListing): void;
-  onMore(): void;
+  /** Reads the next page of offers: resolves once the rows have grown, rejects when the read fails (Next past the loaded offers). */
+  onMore(): Promise<unknown> | void;
   onRetry(): void;
   onRefresh(): void;
   /** My listings with nothing listed offers "List an item" (the Sell tab). */
@@ -165,8 +170,6 @@ export function MarketOffers({ model, access, ownerId, now, busy, onBuy, onCance
   sort?: SortKey;
   filter?: ItemFilter;
   mine?: boolean;
-  loadingMore?: boolean;
-  moreFailed?: boolean;
   /** A buyer's available gold: a dearer offer cannot be bought. */
   available?: number | null;
   /** A buyer's inventory has no free slot. */
@@ -182,6 +185,13 @@ export function MarketOffers({ model, access, ownerId, now, busy, onBuy, onCance
   const hiddenBy = !shown.length && searched && filter !== 'All' && queryItems(rows, offerView, query, sort).length ? filter : undefined;
   const count = searched ? `${shown.length} listing${shown.length === 1 ? '' : 's'} match “${searched}”`
     : mine ? `${shown.length} of your ${MAXIMUM_LISTINGS} listings` : marketCountLine(shown.length, sort);
+  // Three cards a page (Patch 1.9 Task 32): a chip, a search, a sort or My listings goes back to page 1; a refresh keeps the page.
+  const paged = usePagedList(shown, {
+    // Under a sort that re-orders the loaded offers, a read starts again at page 1 of the new order (Task 32 fix round 1, I4): the loaded count joins
+    // the key, or the page asked for would skip and repeat offers. Newest keeps the load order, so it pages on.
+    list: 'market', resetKey: `${filter}|${query}|${sort}|${mine}|${model.nextCursor !== null && sort !== 'newest' ? rows.length : ''}`,
+    more: model.nextCursor ? { hasMore: true, load: async () => { await onMore(); } } : undefined,
+  });
   const partial = model.nextCursor !== null && (sort !== 'newest' || searched !== '');
   const foot = mine ? `A listing lasts ${LISTING_DAYS} days. Cancel it, or let it expire, to return the item to your inventory.`
     : access === 'trade' ? "Red price: not enough available gold. L = the item's level." : "L = the item's level.";
@@ -197,7 +207,7 @@ export function MarketOffers({ model, access, ownerId, now, busy, onBuy, onCance
           {mine && onSell && <button type="button" className={styles.ghost} onClick={onSell}>List an item</button>}
         </div>
           : !shown.length ? <NoMatch query={query} clear={() => onClearQuery?.()} filter={hiddenBy} />
-            : <ul className={styles.list} aria-label={mine ? 'Your open listings' : 'Open listings'}>{shown.map(row => {
+            : <ul ref={paged.listRef as RefObject<HTMLUListElement | null>} className={styles.list} aria-label={mine ? 'Your open listings' : 'Open listings'}>{paged.rows.map(row => {
               const name = offerName(row.item), { tier, rarity, quantity } = row.item;
               const own = ownerId !== null && row.seller.gladiatorId === ownerId, expired = row.expiresAtMs <= now, trade = access === 'trade';
               const poor = trade && !own && !expired && available !== null && row.price > available;
@@ -205,7 +215,7 @@ export function MarketOffers({ model, access, ownerId, now, busy, onBuy, onCance
               // A disabled Buy says why: the reason describes it (Task 23.5, C18).
               const blockedId = `${ids}-${row.listingId}`;
               const label = [name, `level ${tier}`, rarity, `sold by ${row.seller.name}`, money(row.price), own && 'your listing', expired && 'expired'].filter(Boolean).join(', ');
-              return <li key={row.listingId} className={styles.row} data-testid={`listing-${row.listingId}`} data-rarity={rarity} data-mine={own ? '' : undefined}
+              return <li key={row.listingId} className={styles.row} data-page-row="" tabIndex={-1} data-testid={`listing-${row.listingId}`} data-rarity={rarity} data-mine={own ? '' : undefined}
                 data-poor={poor ? '' : undefined} data-expired={expired ? '' : undefined} aria-label={label}>
                 <div className={styles.tile} data-part="icon" aria-hidden="true">
                   <ItemIcon catalogId={row.item.catalogId} size={64} />
@@ -243,8 +253,7 @@ export function MarketOffers({ model, access, ownerId, now, busy, onBuy, onCance
       <p role="status">{rows.length > 0 ? count : ''}</p>
       <button type="button" className={styles.refresh} onClick={onRefresh} disabled={status === 'loading'}>Refresh</button>
     </div>
-    {model.nextCursor && <button type="button" className={styles.more} onClick={onMore} disabled={loadingMore}>More</button>}
-    {moreFailed && <p className={styles.failedNote} role="alert">More listings could not be loaded. Please try again.</p>}
+    <PanelFooter><Pager list={paged} show /></PanelFooter>
     <p className={styles.foot}>{foot}{partial && ' Sort and search apply to the listings loaded so far.'}</p>
   </div>;
 }
@@ -255,20 +264,19 @@ export function MarketOffers({ model, access, ownerId, now, busy, onBuy, onCance
  */
 function OfferList({ reads, seller, version, onRefresh, ...view }: {
   reads: MarketReader; seller: string | null; version: number; onRefresh?(): void;
-} & Omit<Parameters<typeof MarketOffers>[0], 'model' | 'onMore' | 'onRetry' | 'onRefresh' | 'loadingMore' | 'moreFailed'>) {
+} & Omit<Parameters<typeof MarketOffers>[0], 'model' | 'onMore' | 'onRetry' | 'onRefresh'>) {
   const [list, setList] = useState<OffersList | null>(null);
   const [status, setStatus] = useState<OffersModel['status']>('loading');
   const [attempt, setAttempt] = useState(0);
-  const [loadingMore, setLoadingMore] = useState(false);
-  const [moreFailed, setMoreFailed] = useState(false);
+  /** The next page being read (a second Next while it reads does nothing). */
+  const loadingMore = useRef(false);
   /** The current read generation: a page that arrives for an older one (a refresh, another seller) is dropped. */
   const generation = useRef(0);
 
   useEffect(() => {
     const mine = ++generation.current;
     setStatus('loading');
-    setLoadingMore(false);
-    setMoreFailed(false);
+    loadingMore.current = false;
     readOffers(reads, seller, null).then(
       next => { if (mine === generation.current) { setList(next); setStatus('ready'); } },
       () => { if (mine === generation.current) setStatus('failed'); },
@@ -277,23 +285,22 @@ function OfferList({ reads, seller, version, onRefresh, ...view }: {
   }, [reads, seller, version, attempt]);
 
   const more = useCallback(async () => {
-    if (!list?.nextCursor || loadingMore) return;
+    if (!list?.nextCursor || loadingMore.current) return;
     const mine = generation.current;
-    setLoadingMore(true);
-    setMoreFailed(false);
+    loadingMore.current = true;
     try {
       const next = await readOffers(reads, seller, list);
       if (mine === generation.current) setList(next);
-    } catch {
-      // The offers already shown stay, and More stays for another try.
-      if (mine === generation.current) setMoreFailed(true);
+    } catch (error) {
+      // The offers already shown stay, and Next tries again: the pager says so (its failure line is the one line).
+      throw error;
     } finally {
-      if (mine === generation.current) setLoadingMore(false);
+      if (mine === generation.current) loadingMore.current = false;
     }
-  }, [list, loadingMore, reads, seller]);
+  }, [list, reads, seller]);
 
-  return <MarketOffers {...view} model={{ rows: list?.rows ?? [], nextCursor: list?.nextCursor ?? null, status }} onMore={() => void more()}
-    onRetry={() => setAttempt(n => n + 1)} onRefresh={() => { setAttempt(n => n + 1); onRefresh?.(); }} loadingMore={loadingMore} moreFailed={moreFailed} />;
+  return <MarketOffers {...view} model={{ rows: list?.rows ?? [], nextCursor: list?.nextCursor ?? null, status }} onMore={more}
+    onRetry={() => setAttempt(n => n + 1)} onRefresh={() => { setAttempt(n => n + 1); onRefresh?.(); }} />;
 }
 
 /**

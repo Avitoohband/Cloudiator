@@ -35,10 +35,9 @@ Project folders under `D:\Avi\Projects\Animation\Cloudiator\`.
 - In My gladiator, hover, focus or tap worn gear and replacements to see stats, attribute bonuses and weight, and any attribute or stat to see what it does. Wear or replace gear straight from the Worn equipment slots in My gladiator.
 - Shops are an icon grid with the same detail card as your inventory. Search and sort both. The Marketplace is a list with big item icons, every detail on the row and the seller in front.
 - A new Settings menu (⚙) pins the menu to the left, bottom or right on desktop, and sets when names and titles show over the camp: Off, When zoomed in, or Always. It is remembered in this browser.
-- A new gold laurel marks renown, including in the corner chip.
+- A gold laurel marks renown, including in the corner chip, and an XP bar shows your progress and whether your next expedition can level you up.
 - Identical items show as one stack with a count. Sell lets you choose how many.
 - Mark messages as read one by one or all at once, and notifications all at once.
-- An XP bar shows your progress and whether your next expedition can level you up.
 - Click or tap a camp NPC to hear a line from them, and again for the next. The Weaponsmith's and Armorer's stalls open the shops.
 - Resting gladiators lie straight on their beds, with an eye cover and a floating ZzZ, and take off their armor while they sleep.
 - My gladiator and gladiator cards show the extra damage of a critical hit, and how much renown armor and weapons add in the Arena.
@@ -50,6 +49,7 @@ Project folders under `D:\Avi\Projects\Animation\Cloudiator\`.
 - Buy back any of the last 10 pieces of gear you sold to a merchant, until the next game day, for the gold you got.
 - The schedule warns when your gladiator will not have the stamina for a planned activity, and says when he rested instead.
 - Long menus turn into pages with Back and Next: jump with the circles, choose how many rows a page shows; My gladiator and Inventory open as named sections.
+- When you come back, a pop-up sums up what your gladiators gained since your last visit: XP and levels, gold and renown, items, and fight, tournament and expedition results.
 
 ## 1.8.1 — Clearer gladiator stats (2026-11-11)
 

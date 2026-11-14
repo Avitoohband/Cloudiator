@@ -127,6 +127,7 @@ test.describe('patch numbers in live mode', () => {
     await expect(panel.getByRole('heading', { name: 'Messages, gold, fixed builds and bigger beds', exact: true })).toBeVisible();
     await expect(panel.getByRole('button', { name: /Back to messages/ })).toBeFocused();
     await panel.getByRole('button', { name: /Back to messages/ }).click();
+    await panel.getByRole('combobox', { name: 'Rows per page' }).selectOption('10');
     await expect(panel.locator('[data-message-row]')).toHaveCount(5);
     // Escape closes the panel and gives the focus back to the account button the history was opened from.
     await page.keyboard.press('Escape');
@@ -140,6 +141,8 @@ test.describe('patch numbers in live mode', () => {
     await openLive(page);
     await messagesButton(page).click();
     const panel = panelOf(page);
+    // Patch 1.9 Task 31: Messages is paged (3 a page); Show 10 holds all five on one page.
+    await panel.getByRole('combobox', { name: 'Rows per page' }).selectOption('10');
     await expect(panel.locator('[data-message-row]')).toHaveCount(5);
     const item = (id: number) => panel.getByRole('listitem').filter({ has: page.locator(`[data-message-row="${id}"]`) });
     await expect(item(3)).toContainText('Patch 1.3');
@@ -235,6 +238,7 @@ test.describe('patch numbers in live mode', () => {
     await openLive(page);
     await expect(notice(page)).toContainText(`Patch ${NEWER_PATCH}`);
     await messagesButton(page).click();
+    await panelOf(page).getByRole('combobox', { name: 'Rows per page' }).selectOption('10');
     await panelOf(page).locator('[data-message-row="2"]').click();
     await panelOf(page).getByRole('button', { name: 'Change look', exact: true }).click();
     const dialog = page.getByRole('dialog', { name: 'Change your look', exact: true });
@@ -298,7 +302,7 @@ test.describe('patch numbers in live mode', () => {
     expect((await notice(page).boundingBox())!.width).toBeGreaterThan(100);
   });
 
-  test('reads older patches 20 at a time', async ({ page }) => {
+  test('reads older patches 20 at a time, 8 to a page: Next past the loaded ones reads the next 20', async ({ page }) => {
     const live = await player(page);
     // 25 patches, 1.0 to 1.24: the history reads the newest 20, then the 5 older ones.
     live.setPatches(Array.from({ length: 25 }, (_, i) => ({ number: `1.${i}`, sortKey: 1_000_000 + i * 1_000, title: `Patch title ${i}`,
@@ -306,17 +310,52 @@ test.describe('patch numbers in live mode', () => {
     await openLive(page);
     const panel = await openHistoryFromMenu(page);
     const buttons = panel.locator('[data-patch]');
-    await expect(buttons).toHaveCount(20);
+    const bar = panel.getByRole('navigation', { name: 'Pages' });
+    await expect(buttons).toHaveCount(8);
     await expect(disclosure(panel, '1.24')).toHaveAttribute('aria-expanded', 'true');
-    await panel.getByRole('button', { name: 'Older patches', exact: true }).click();
-    await expect(buttons).toHaveCount(25);
-    expect(await buttons.evaluateAll(els => els.map(el => el.getAttribute('data-patch')))).toEqual(Array.from({ length: 25 }, (_, i) => `1.${24 - i}`));
+    await expect(bar).toContainText('Page 1');
+    await expect(bar).toContainText('more to see');
+    await bar.getByRole('button', { name: 'Next page', exact: true }).click();
+    await expect(bar.locator('b').first()).toHaveText('Page 2');
+    await expect(buttons).toHaveCount(8);
+    // Page 3 is only partly loaded (4 of 8 rows): Next reads the older 5, then page 3 shows 8 rows.
+    await bar.getByRole('button', { name: 'Next page', exact: true }).click();
+    await expect(bar.locator('b').first()).toHaveText('Page 3 of 4');
+    await expect(buttons).toHaveCount(8);
+    await bar.getByRole('button', { name: 'Next page', exact: true }).click();
+    await expect(buttons).toHaveCount(1);
+    expect(await buttons.evaluateAll(els => els.map(el => el.getAttribute('data-patch')))).toEqual(['1.0']);
     await expect(panel.getByRole('button', { name: 'Older patches', exact: true })).toHaveCount(0);
     const reads = live.requests.filter(r => r.table === 'patches' && r.query.get('select')?.includes('patch_features'));
     // The first page asks for no key (React's development double mount may ask twice), the next one for patches older than 1.5.
     const keys = reads.map(r => r.query.get('sort_key'));
     expect([...new Set(keys)]).toEqual([null, 'lt.1005000']);
     expect(keys.filter(key => key !== null)).toEqual(['lt.1005000']);
+  });
+
+  test('a failed read of older patches is announced, keeps the page, and Next tries again', async ({ page, context }) => {
+    const live = await player(page);
+    live.setPatches(Array.from({ length: 25 }, (_, i) => ({ number: `1.${i}`, sortKey: 1_000_000 + i * 1_000, title: `Patch title ${i}`,
+      releasedAtMs: at(9, 1 + i), messageId: null, features: [`Feature of 1.${i}.`] })).reverse());
+    // The read of the older patches (the one with a sort key) fails once.
+    let failed = false;
+    await context.route(/\/rest\/v1\/patches\?/, route => {
+      if (!failed && decodeURIComponent(route.request().url()).includes('sort_key=lt.')) { failed = true; return route.fulfill({ status: 500, body: '{}', headers: { 'access-control-allow-origin': '*' } }); }
+      return route.fallback();
+    });
+    await openLive(page);
+    const panel = await openHistoryFromMenu(page);
+    const bar = panel.getByRole('navigation', { name: 'Pages' });
+    await bar.getByRole('button', { name: 'Next page', exact: true }).click();
+    await expect(bar.locator('b').first()).toHaveText('Page 2');
+    await bar.getByRole('button', { name: 'Next page', exact: true }).click();
+    await expect(bar.getByRole('status')).toHaveText(/Could not load more\. Try Next again\./);
+    await expect(bar.locator('b').first()).toHaveText('Page 2');
+    await bar.getByRole('button', { name: 'Previous page', exact: true }).click();
+    await expect(bar.locator('b').first()).toHaveText('Page 1');
+    await bar.getByRole('button', { name: 'Go to page 2', exact: true }).click();
+    await bar.getByRole('button', { name: 'Next page', exact: true }).click();
+    await expect(bar.locator('b').first()).toHaveText('Page 3 of 4');
   });
 
   test('shows no notice when up to date or ahead', async ({ page }) => {

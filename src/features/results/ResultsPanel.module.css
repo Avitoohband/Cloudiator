@@ -1,7 +1,13 @@
 /* Recent results in the Results menu (the approved mockup's rows): what happened, its kind and time, and a Replay button. */
 .results {
   min-width: 0;
-  margin-bottom: 1rem;
+  margin-bottom: 0.3rem;
+}
+
+/* Patch 1.9 Task 32: a page of eight fits the panel, so the retention line and the eyebrow sit close above it. */
+.results > p {
+  margin-top: 0;
+  margin-bottom: 4px;
 }
 
 .list {
@@ -16,7 +22,7 @@
   justify-content: space-between;
   gap: 10px;
   min-width: 0;
-  padding: 7px 0;
+  padding: 4px 0;
   border-bottom: 1px solid rgba(255, 255, 255, 0.06);
 }
 
@@ -53,7 +59,6 @@
 }
 
 .watch,
-.more,
 .failed button {
   flex: none;
   min-height: 36px;
@@ -66,20 +71,14 @@
 }
 
 .watch:hover,
-.more:hover,
 .failed button:hover {
   background: rgba(255, 255, 255, 0.15);
 }
 
 .watch:focus-visible,
-.more:focus-visible,
 .failed button:focus-visible {
   outline: 2px solid var(--gold);
   outline-offset: 2px;
-}
-
-.more {
-  margin-top: 10px;
 }
 
 .failed {
@@ -90,8 +89,7 @@
   font-size: 0.8rem;
 }
 
-.failed p,
-.moreFailed {
+.failed p {
   margin: 0;
   font-size: 0.8rem;
 }
@@ -108,7 +106,7 @@
   display: flex;
   gap: 18px;
   min-width: 0;
-  margin: 0 0 9px;
+  margin: 0 0 3px;
   border-bottom: 1px solid rgba(255, 255, 255, 0.11);
 }
 
@@ -156,4 +154,11 @@
 .row[data-rested] {
   padding-left: 8px;
   box-shadow: inset 3px 0 0 #f2a63b;
+}
+
+/* A phone (and any touch screen): eight rows fit the tall sheet under the tabs and the retention line (Task 32 fix round 1, I3). */
+@media (hover: none), (max-width: 480px) {
+  .row {
+    padding: 3px 0;
+  }
 }

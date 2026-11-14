@@ -2,18 +2,24 @@
 
 // Patch 1.9 Task 27 (Avi, 2026-11-12: "option to see gladiators arena match history\expedition history and tournaments battles history"; the
 // approved mockup `.superpowers/design/2026-11-12-gladiator-history/`): a gladiator's History, in place of its card's sections. ← goes back to
-// the card; the chips Arena (won–lost) · 🏆 Tournament fights (n) · Expeditions (n) each show a list of their own, newest first by day, 20 a
-// page with Show more; the line under the chips says how long replays are kept. ▶ Watch opens a kept replay in the existing viewer for
+// the card; the chips Arena (won–lost) · 🏆 Tournament fights (n) · Expeditions (n) each show a list of their own, newest first by day, read 20
+// at a time and shown six a page (four on the touch layout) with Back and Next (Patch 1.9 Task 32: Next past the loaded rows reads the next 20, and Back from a replay
+// reopens the page and row it was opened from); the line under the chips says how long replays are kept. ▶ Watch opens a kept replay in the existing viewer for
 // anyone; a row whose replay is gone is dimmed with Result. Tournament fights are gold rows (Avi: "should be fancier, so people can
 // distinguish"): a gold double-trimmed frame, a trophy medallion with laurels, the round in gold small caps, the tournament's name, a WON
 // or LOST pill. Rewards show only on the viewer's own card (`own`, from its own rewards); the foot says whose rewards show. Every word
 // is `history-text`'s, rendered as text.
-import { Fragment, useEffect, useId, useMemo, useRef, type Ref } from 'react';
+import { Fragment, useEffect, useId, useMemo, useRef, useState, type Ref, type RefObject } from 'react';
 import type { HistoryEntry, HistoryKind } from '@contracts/reads';
 import { useClockMode } from '../../lib/clock-setting';
 import type { SceneView } from '../shell/scene-url';
 import { BotTag } from './BotTag';
 import { useHistory, type HistoryStore } from './history-store';
+import { landingStep, rememberHistoryRow, takeHistoryRow, type Landing } from './history-return';
+import { useCompactLayout } from './useCompactLayout';
+import { usePagedList } from '../paging/usePagedList';
+import { Pager } from '../paging/Pager';
+import { PanelFooter } from '../paging/PanelFooter';
 import {
   EVERYTHING, HISTORY_KINDS, HISTORY_SUBTITLE, chipCount, chipText, emptyHistory, footerText, historyDays, historyRow, historyScene, historyTitle, retentionText, runLastRows,
   type HistoryRowText,
@@ -45,9 +51,9 @@ function Action({ text, onWatch }: { text: HistoryRowText; onWatch(): void }) {
 
 function Row({ entry, text, onWatch }: { entry: HistoryEntry; text: HistoryRowText; onWatch(): void }) {
   const gone = text.kept ? undefined : '';
-  // A row can take the focus from a Show more that goes away (fix round 1); it is not a tab stop.
+  // A row takes the focus after a page turn (Patch 1.9 Task 32); it is not a tab stop.
   if (entry.kind === 'tournament') {
-    return <li className={`${styles.trow} ${text.kept ? '' : styles.gone}`} data-history-row="tournament" data-gone={gone} tabIndex={-1}>
+    return <li className={`${styles.trow} ${text.kept ? '' : styles.gone}`} data-history-row="tournament" data-page-row="" data-gone={gone} tabIndex={-1}>
       <span className={styles.medal} data-medal="" aria-hidden="true">🏆</span>
       <span className={styles.who}>
         <span className={styles.round} data-round="">{text.round}</span>
@@ -59,7 +65,7 @@ function Row({ entry, text, onWatch }: { entry: HistoryEntry; text: HistoryRowTe
       <Action text={text} onWatch={onWatch} />
     </li>;
   }
-  return <li className={`${styles.row} ${text.kept ? '' : styles.gone}`} data-history-row={entry.kind} data-gone={gone} tabIndex={-1}>
+  return <li className={`${styles.row} ${text.kept ? '' : styles.gone}`} data-history-row={entry.kind} data-page-row="" data-gone={gone} tabIndex={-1}>
     <span className={`${styles.badge} ${text.badge.won ? styles.won : styles.lost}`}>
       <span aria-hidden="true">{text.badge.text}</span><span className={styles.sr}>{text.badge.name}</span>
     </span>
@@ -71,7 +77,7 @@ function Row({ entry, text, onWatch }: { entry: HistoryEntry; text: HistoryRowTe
   </li>;
 }
 
-export function GladiatorHistory({ store, kind, onKind, name, own, nowMs, onBack, onWatch, backRef, timeZone }: {
+export function GladiatorHistory({ store, kind, onKind, name, own, nowMs, onBack, onWatch, backRef, timeZone, gladiatorId }: {
   store: HistoryStore;
   kind: HistoryKind;
   onKind(kind: HistoryKind): void;
@@ -85,6 +91,8 @@ export function GladiatorHistory({ store, kind, onKind, name, own, nowMs, onBack
   /** ▶ Watch: the scene to open (`historyScene`). */
   onWatch(view: Exclude<SceneView, { kind: 'bout' }>): void;
   backRef?: Ref<HTMLButtonElement>;
+  /** The card's gladiator: with it, Back from a replay opened from a row reopens the page and row it was opened from. */
+  gladiatorId?: string;
   /** Tests only: the time zone of the days and times (the viewer's own otherwise). */
   timeZone?: string;
 }) {
@@ -94,24 +102,38 @@ export function GladiatorHistory({ store, kind, onKind, name, own, nowMs, onBack
   const last = useMemo(() => runLastRows(list.rows), [list.rows]);
   const empty = emptyHistory(kind, name);
   const chipRefs = useRef(new Map<HistoryKind, HTMLButtonElement>());
-  const listRef = useRef<HTMLDivElement>(null);
-  // Fix round 1: Try again goes away as it reads, so the focus moves to the chip shown first; a Show more that lands the last page goes away
-  // too, so the focus moves to the first new row (or the list, when nothing new came).
+  // Six a page (Patch 1.9 Task 32); a chip goes back to page 1. Next past the loaded rows reads the next server page; a failed read
+  // rejects, so the pager says so and Next tries again.
+  // On the touch layout the sheet holds four of its rows, so a page is four there (the hook's `size`, as a grid passes its layout's): no Show.
+  const compact = useCompactLayout();
+  const paged = usePagedList(list.rows, {
+    list: 'history', resetKey: kind, size: compact ? 4 : undefined,
+    more: list.nextCursor ? { hasMore: true, load: async () => {
+      const done = await store.more(kind);
+      if (!done && store.list(kind).moreFailed) throw new Error('More could not be loaded.');
+    } } : undefined,
+  });
+  // Try again goes away as it reads, so the focus moves to the chip shown first.
   const retry = () => { chipRefs.current.get(kind)?.focus({ preventScroll: true }); store.load(kind); };
-  const moreFrom = useRef<number | null>(null);
-  const showMore = () => {
-    if (list.loadingMore) return;
-    moreFrom.current = list.rows.length;
-    void store.more(kind);
-  };
+  // Back from a replay this card opened: the page and row it was opened from (kept in `history-return`, taken once). Rows not read yet are
+  // read first, a page at a time, and a row on the partly read last page waits for the rest of it.
+  const landing = useRef<Landing | null>(null);
+  // The read for the landing failed: the page stays where it is and says so, as the pager does for a Next that fails (it knows nothing of this read).
+  const [landingFailed, setLandingFailed] = useState(false);
   useEffect(() => {
-    const from = moreFrom.current;
-    if (from === null || list.loadingMore) return;
-    moreFrom.current = null;
-    if (list.nextCursor) return;
-    const rows = listRef.current?.querySelectorAll<HTMLElement>('[data-history-row]');
-    (rows && rows.length > from ? rows[from] : listRef.current)?.focus({ preventScroll: false });
-  }, [list.loadingMore, list.nextCursor, list.rows.length]);
+    const found = gladiatorId ? takeHistoryRow(gladiatorId, kind) : null;
+    if (found) landing.current = { kind, entryId: found };
+  }, [gladiatorId, kind]);
+  useEffect(() => {
+    const wanted = landing.current;
+    if (!wanted || list.status !== 'ready') return;
+    const next = landingStep(wanted, { kind, ids: list.rows.map(row => row.entryId), hasMore: list.nextCursor !== null, failed: list.moreFailed, size: paged.size });
+    if (next.step === 'jump') { landing.current = null; paged.goToIndex(next.index); }
+    else if (next.step === 'read') { if (!list.loadingMore) void store.more(kind); }
+    else if (next.step === 'failed') { landing.current = null; setLandingFailed(true); }
+    else landing.current = null;
+  });
+  useEffect(() => { setLandingFailed(false); }, [kind]);
   return (
     <section className={styles.history} aria-labelledby={`${ids}-title`} data-history={kind}>
       <div className={styles.head}>
@@ -130,7 +152,7 @@ export function GladiatorHistory({ store, kind, onKind, name, own, nowMs, onBack
           </button>;
         })}
       </div>
-      <p className={styles.keep}>{retentionText(kind)}</p>
+      <p className={styles.keep} title={retentionText(kind)}>{retentionText(kind)}</p>
       {list.rows.length === 0
         ? list.status === 'failed'
           ? <div className={styles.failed} role="alert"><p>This history could not be loaded right now.</p>
@@ -139,21 +161,21 @@ export function GladiatorHistory({ store, kind, onKind, name, own, nowMs, onBack
             ? <div className={styles.empty} data-history-empty=""><b>{empty.title}</b><p>{empty.line}</p></div>
             : <p className={styles.state} role="status">Loading the history…</p>
         : <>
-          <div ref={listRef} className={styles.list} data-history-list="" tabIndex={-1}>
-            {historyDays(list.rows, nowMs, timeZone).map((group, n) => (
+          <div ref={paged.listRef as RefObject<HTMLDivElement | null>} className={styles.list} data-history-list="" tabIndex={-1}>
+            {historyDays(paged.rows, nowMs, timeZone).map((group, n) => (
               <section key={group.label} className={styles.group} aria-labelledby={`${ids}-day-${n}`}>
                 <p id={`${ids}-day-${n}`} className={styles.day} data-history-day="">{group.label}</p>
                 <ul className={styles.rows}>
-                  {group.entries.map(entry => <Row key={entry.entryId} entry={entry} onWatch={() => onWatch(historyScene(entry))}
+                  {group.entries.map(entry => <Row key={entry.entryId} entry={entry} onWatch={() => { if (gladiatorId) rememberHistoryRow(gladiatorId, kind, entry.entryId); onWatch(historyScene(entry)); }}
                     text={historyRow(entry, { nowMs, clock, timeZone, rewards: own ? rewards.get(entry.activityId) ?? null : null, runLast: last.has(entry.entryId) })} />)}
                 </ul>
               </section>
             ))}
           </div>
-          {/* aria-disabled while it reads, so a keyboard press keeps the focus on it (a disabled button would drop it). */}
-          {list.nextCursor ? <button type="button" className={styles.more} onClick={showMore} aria-disabled={list.loadingMore || undefined}>Show more</button>
-            : list.pages > 1 ? <p className={styles.everything}>{EVERYTHING}</p> : null}
-          {list.moreFailed && <p className={styles.moreFailed} role="alert">More could not be loaded. Please try again.</p>}
+          <PanelFooter><Pager list={paged} show={!compact} /></PanelFooter>
+          {landingFailed && list.moreFailed && <p className={styles.failed} role="alert" data-landing-failed="">Could not load more. Try Next again.</p>}
+          {/* The end of a list that paged is said on its last page. */}
+          {!list.nextCursor && list.pages > 1 && paged.page === paged.knownPages ? <p className={styles.everything}>{EVERYTHING}</p> : null}
         </>}
       <p className={styles.footer} data-history-footer="">{footerText(own)}</p>
     </section>

@@ -5,15 +5,19 @@
 // status (Sent, Read, Answered) and date, and two lines of its text. Opened, an answered item shows the team's answer (its team-reply
 // message, which opening it marks read), a read one says the team has read it, a sent one that the team has not opened it yet. The text is
 // data, shown as plain text.
-import { useId, useState } from 'react';
+import { useEffect, useId, useRef, useState, type RefObject } from 'react';
 import type { GameMessage, Inbox, OwnFeedback } from '@contracts/reads';
 import { useClockMode } from '../../lib/clock-setting';
 import { categoryLabel, feedbackDate, mineSummary, playerStatus, replyFor } from './feedback';
 import { isUnread } from './messages';
+import { Pager } from '../paging/Pager';
+import { PanelFooter } from '../paging/PanelFooter';
+import { usePagedList } from '../paging/usePagedList';
 import type { Loaded } from './useLoadedList';
 import messages from './messages.module.css';
 import styles from './feedback.module.css';
 
+const NO_FEEDBACK: readonly OwnFeedback[] = [];
 const STATUS_CLASS = { new: styles.statusSent, read: styles.statusRead, answered: styles.statusAnswered } as const;
 
 export function MyFeedback({ list, held, inbox, nowMs, onSeen }: {
@@ -31,6 +35,15 @@ export function MyFeedback({ list, held, inbox, nowMs, onSeen }: {
   const clock = useClockMode();
   const [open, setOpen] = useState<number | null>(null);
   const items = list.value;
+  // Patch 1.9 Task 31: 6 items a page. A feedback just sent is the newest: the list turns to page 1 to show it.
+  const paged = usePagedList(items ?? NO_FEEDBACK, { list: 'feedback' });
+  const newest = useRef<number | null | undefined>(undefined);
+  useEffect(() => {
+    const now = items ? items[0]?.id ?? null : undefined;
+    if (now === undefined) return;
+    if (newest.current !== undefined && newest.current !== now) paged.goToIndex(0);
+    newest.current = now;
+  });
   if (items === null) {
     return list.failed ? <div className={messages.state}>
       <p role="alert">Your feedback could not be loaded.</p>
@@ -48,10 +61,10 @@ export function MyFeedback({ list, held, inbox, nowMs, onSeen }: {
     {list.failed && <p className={`${messages.banner} ${messages.bannerErr}`}><span>Your feedback could not be loaded again.</span>
       <button type="button" className={messages.bannerRetry} onClick={list.reload}>Try again</button></p>}
     {items.length === 0 ? <p className={messages.state}>You have not sent any feedback yet.</p>
-      : <ul className={messages.list} aria-label="My feedback">
-        {items.map(item => {
+      : <ul className={messages.list} aria-label="My feedback" ref={paged.listRef as RefObject<HTMLUListElement | null>}>
+        {paged.rows.map(item => {
           const shown = open === item.id, reply = replyFor(item, held);
-          return <li key={item.id} className={styles.mine}>
+          return <li key={item.id} className={styles.mine} data-page-row="" tabIndex={-1}>
             <button type="button" className={styles.mineRow} data-feedback-row={item.id} aria-expanded={shown} aria-controls={shown ? `${ids}-${item.id}` : undefined}
               onClick={() => toggle(item)}>
               <span className={messages.rowTop}>
@@ -73,6 +86,7 @@ export function MyFeedback({ list, held, inbox, nowMs, onSeen }: {
           </li>;
         })}
       </ul>}
+    <PanelFooter><Pager list={paged} show /></PanelFooter>
     <p className={styles.mineFoot}>Statuses: Sent → Read → Answered. Answers also arrive as a message.</p>
   </>;
 }

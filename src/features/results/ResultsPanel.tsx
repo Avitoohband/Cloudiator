@@ -1,7 +1,8 @@
 'use client';
 
 // The "Results" menu's list of recent results (spec "Menus": recent results and replays, the same public list for a
-// player and a visitor). It reads `recent()` 50 rows at a time, with "More" for the next page, and marks the viewer's
+// player and a visitor). It reads `recent()` 50 rows at a time, shows them eight a page with Back and Next (Patch 1.9 Task 32: Next past the
+// loaded rows reads the next 50), and marks the viewer's
 // own rows "You". A row holds only public fields (who, what happened, how it ended, when, whether its replay is kept),
 // never a reward or receipt. A kept replay offers "Replay", which calls `onWatch` with the result's kind (the camp opens
 // it over itself as that kind's scene, Task 13.8). It reads once each time the menu opens and never sends a command.
@@ -15,7 +16,7 @@
 // where it opens) and "Everyone" (the list above, unchanged). The tab and the chip are the shell's, so Back from a bout and a reload
 // open them again. "My bouts" carries a red count of kept replays not watched on this device. A visitor, or a player without a
 // gladiator, sees Everyone alone, with no tabs.
-import { useCallback, useEffect, useId, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
+import { useCallback, useEffect, useId, useMemo, useRef, useState, type KeyboardEvent, type ReactNode, type RefObject } from 'react';
 import type { PublicActivitySummary } from '@contracts/events';
 import type { GameNotification, ResultRow } from '@contracts/reads';
 import type { GameGateway, RestedActivity } from '../../lib/api/gateway';
@@ -32,6 +33,9 @@ import { useBoutList, type BoutsStore } from '../bouts/bouts-store';
 import { MyBouts } from '../bouts/MyBouts';
 import { useWatched } from '../bouts/watched';
 import { useLoaded } from '../messages/useLoadedList';
+import { usePagedList } from '../paging/usePagedList';
+import { Pager } from '../paging/Pager';
+import { PanelFooter } from '../paging/PanelFooter';
 import { DungeonRewardsView } from './DungeonRewards';
 import { RETENTION_TEXT, resultKind, resultLine, resultTime } from './result-text';
 import type { ResultsTab } from './results-choice';
@@ -93,7 +97,7 @@ function useServerTime(clock: DisplayClock, expiries: readonly ReplayExpiry[]): 
 }
 
 /** Pure view of the loaded results. */
-export function ResultsView({ model, viewerId, serverNowMs, onMore, onRetry, onWatch, loadingMore = false, moreFailed = false, timeZone, rested, rules = RULES_V2 }: {
+export function ResultsView({ model, viewerId, serverNowMs, onMore, onRetry, onWatch, timeZone, rested, rules = RULES_V2 }: {
   model: ResultsModel;
   /**
    * Patch 1.9 Task 29: the viewer's own rests that replaced a planned activity, by activity id: its own row then says so ("Aster rested instead
@@ -106,17 +110,18 @@ export function ResultsView({ model, viewerId, serverNowMs, onMore, onRetry, onW
   viewerId: string | null;
   /** The server's time (the shared display clock), which decides whether each replay is kept; null until it is known (no replay offered). */
   serverNowMs: number | null;
-  onMore(): void;
+  /** Reads the next page of results: resolves once the rows have grown, rejects when the read fails (Next past the loaded rows). */
+  onMore(): Promise<unknown> | void;
   onRetry(): void;
   onWatch: WatchResult;
-  loadingMore?: boolean;
-  moreFailed?: boolean;
   /** Tests only: the time zone of the settlement times (the viewer's own otherwise). */
   timeZone?: string;
 }) {
   const titleId = useId();
   const clockMode = useClockMode();
   const { rows, status } = model;
+  // Eight a page (Patch 1.9 Task 32); Next past the loaded rows reads the next 50.
+  const paged = usePagedList(rows, { list: 'results', more: model.nextCursor ? { hasMore: true, load: async () => { await onMore(); } } : undefined });
   return (
     <section className={styles.results} aria-labelledby={titleId}>
       <p id={titleId} className="eyebrow">RECENT RESULTS</p>
@@ -125,12 +130,12 @@ export function ResultsView({ model, viewerId, serverNowMs, onMore, onRetry, onW
         ? <div className={styles.failed} role="alert"><p>Recent results could not be loaded right now.</p><button type="button" onClick={onRetry}>Try again</button></div>
         : status === 'loading' && rows.length === 0 ? <p className="muted" role="status">Loading recent results…</p>
           : rows.length === 0 ? <p className="muted" role="status">No results yet.</p>
-            : <ul className={styles.list} aria-label="Recent results">{rows.map(row => {
+            : <ul ref={paged.listRef as RefObject<HTMLUListElement | null>} className={styles.list} aria-label="Recent results">{paged.rows.map(row => {
               const own = row.gladiatorId === viewerId && viewerId !== null && row.summary.resolvedKind === 'rest'
                 ? rested?.get(row.summary.activityId.toLowerCase()) ?? null : null;
               const line = own ? { text: restedResultText(row.name, own, rules), replay: false } : resultLine(row, serverNowMs);
               return (
-                <li key={row.summary.activityId} className={styles.row} data-rested={own ? '' : undefined}>
+                <li key={row.summary.activityId} className={styles.row} data-page-row="" tabIndex={-1} data-rested={own ? '' : undefined}>
                   <div className={styles.what}>
                     <p className={styles.line}>{line.text}{row.gladiatorId === viewerId && <span className={styles.you}>You</span>}</p>
                     <p className={styles.when}>{[resultKind(row), resultTime(row.summary.settledAtMs, clockMode, timeZone)].filter(Boolean).join(' · ')}</p>
@@ -141,13 +146,12 @@ export function ResultsView({ model, viewerId, serverNowMs, onMore, onRetry, onW
                 </li>
               );
             })}</ul>}
-      {model.nextCursor && <button type="button" className={styles.more} onClick={onMore} disabled={loadingMore}>More</button>}
-      {moreFailed && <p className={styles.moreFailed} role="alert">More results could not be loaded. Please try again.</p>}
+      <PanelFooter><Pager list={paged} show /></PanelFooter>
     </section>
   );
 }
 
-/** Everyone's results (today's list): the first page when it mounts, then More. */
+/** Everyone's results (today's list): the first page when it mounts, then Next past the loaded rows. */
 function EveryoneResults({ reads, viewerId, clock, onWatch, loadRested, rules }: {
   reads: ResultsReader; viewerId: string | null; clock: DisplayClock; onWatch: WatchResult;
   /** Patch 1.9 Task 29: the owner's own rests that replaced a planned activity, by id (owner only; absent for a visitor). */
@@ -157,15 +161,15 @@ function EveryoneResults({ reads, viewerId, clock, onWatch, loadRested, rules }:
   const [list, setList] = useState<ResultsList | null>(null);
   const [status, setStatus] = useState<ResultsModel['status']>('loading');
   const [attempt, setAttempt] = useState(0);
-  const [loadingMore, setLoadingMore] = useState(false);
-  const [moreFailed, setMoreFailed] = useState(false);
+  /** The next page being read (a second Next while it reads does nothing); the controller also holds one read at a time. */
+  const loadingMore = useRef(false);
   /** The current read generation: a page that arrives for an older one (another reader, a retry) is dropped. */
   const generation = useRef(0);
 
   useEffect(() => {
     const mine = ++generation.current;
     setStatus('loading');
-    setLoadingMore(false);
+    loadingMore.current = false;
     readResults(reads, null).then(
       next => { if (mine === generation.current) { setList(next); setStatus('ready'); } },
       () => { if (mine === generation.current) setStatus('failed'); },
@@ -174,28 +178,27 @@ function EveryoneResults({ reads, viewerId, clock, onWatch, loadRested, rules }:
   }, [reads, attempt]);
 
   const more = useCallback(async () => {
-    if (!list?.nextCursor || loadingMore) return;
+    if (!list?.nextCursor || loadingMore.current) return;
     const mine = generation.current;
-    setLoadingMore(true);
-    setMoreFailed(false);
+    loadingMore.current = true;
     try {
       const next = await readResults(reads, list);
       if (mine === generation.current) setList(next);
-    } catch {
-      // The rows already shown stay, and More stays for another try.
-      if (mine === generation.current) setMoreFailed(true);
+    } catch (error) {
+      // The rows already shown stay, and Next tries again: the pager says so (its failure line is the one line).
+      throw error;
     } finally {
-      if (mine === generation.current) setLoadingMore(false);
+      if (mine === generation.current) loadingMore.current = false;
     }
-  }, [list, loadingMore, reads]);
+  }, [list, reads]);
 
   const rows = list?.rows ?? NO_ROWS;
   const expiries = useMemo(() => rows.map(row => row.summary.replayExpiry), [rows]);
   const serverNowMs = useServerTime(clock, expiries);
   const rested = useOwnRests(rows, viewerId, loadRested);
   const model: ResultsModel = { rows, nextCursor: list?.nextCursor ?? null, status };
-  return <ResultsView model={model} viewerId={viewerId} serverNowMs={serverNowMs} onMore={() => void more()} onRetry={() => setAttempt(n => n + 1)}
-    onWatch={onWatch} loadingMore={loadingMore} moreFailed={moreFailed} rested={rested} rules={rules} />;
+  return <ResultsView model={model} viewerId={viewerId} serverNowMs={serverNowMs} onMore={more} onRetry={() => setAttempt(n => n + 1)}
+    onWatch={onWatch} rested={rested} rules={rules} />;
 }
 
 const NO_RESTS: ReadonlyMap<string, RestedActivity> = new Map();

@@ -90,8 +90,11 @@ export const NPC_ROUTINES: NpcRoutine[] = [
   { npcId: 'patrol-south', look: 'guard', name: 'South Wall Patrol', evening: NIGHT_WATCH, keepClear: true, periodMs: 160_000, steps: [
     { x: 39, y: 27, at: 0, durationMs: 4_000, action: 'idle', facing: 'se' },
     { x: 40, y: 40, at: 26_000, durationMs: 6_000, action: 'idle', facing: 'se' },
-    { x: 6, y: 41, at: 76_000, durationMs: 6_000, action: 'idle', facing: 'sw' },
-    { x: 5, y: 27, at: 103_000, durationMs: 4_000, action: 'idle', facing: 'sw' },
+    // Task 34: the walk from the south-east post to the south-west one no longer runs through the sleeping area (the aisle between the beds);
+    // the only other way is round it to the north, several tiles further, so these two times (the arrival at the south-west post and the one after it)
+    // are 8 s later than before (76 s and 103 s). The posts, the period, the names and the other times are unchanged.
+    { x: 6, y: 41, at: 84_000, durationMs: 6_000, action: 'idle', facing: 'sw' },
+    { x: 5, y: 27, at: 111_000, durationMs: 4_000, action: 'idle', facing: 'sw' },
   ] },
   // Patch 1.5.1 camp NPCs: water from the well to the training yard and the gate; the herald at the Arena gate, the camp gate
   // and the plaza; crates from the gate to the stalls and the kitchen; the forester's four wooded corners (the future plots).
@@ -145,6 +148,8 @@ export function npcCarriesTorch(routine: NpcRoutine, nowMs: number): boolean {
 
 /** Beds and seats: where gladiators sleep, sit and eat (their props' footprints). */
 const BED_OR_SEAT = /^(bedroll|bench|log-seat)/;
+/** The beds alone (the sleeping area is drawn from them). */
+const BED = /^bedroll/;
 
 /**
  * The tiles a `keepClear` round never walks on: the gladiators' activity spots (every station that is not an NPC's, the
@@ -158,6 +163,14 @@ export function keepClearTiles(map: MapData, routine: NpcRoutine, routines: NpcR
   for (const p of map.props) {
     if (!BED_OR_SEAT.test(p.frame)) continue;
     for (let y = p.y; y < p.y + p.d; y += 1) for (let x = p.x; x < p.x + p.w; x += 1) tiles.add(`${x},${y}`);
+  }
+  // Task 34: the sleeping area. A sleeper lies along its bed onto the foot tile and is drawn tall, so a round in the aisle between the bed rows
+  // is drawn over the sleepers: the rectangle that holds every bedroll of the map, one tile wider on every side, is closed to the rounds.
+  const beds = map.props.filter(p => BED.test(p.frame));
+  if (beds.length > 0) {
+    const x0 = Math.min(...beds.map(p => p.x)) - 1, x1 = Math.max(...beds.map(p => p.x + p.w)) + 1;
+    const y0 = Math.min(...beds.map(p => p.y)) - 1, y1 = Math.max(...beds.map(p => p.y + p.d)) + 1;
+    for (let y = Math.max(0, y0); y < Math.min(map.height, y1); y += 1) for (let x = Math.max(0, x0); x < Math.min(map.width, x1); x += 1) tiles.add(`${x},${y}`);
   }
   if (map.arena) {
     const [cx, cy] = map.arena.centre;

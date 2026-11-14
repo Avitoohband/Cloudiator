@@ -1,5 +1,5 @@
 import { mkdirSync, readFileSync } from 'node:fs';
-import { expect, test, type Page } from './fixtures';
+import { expect, test, type Locator, type Page } from './fixtures';
 import type { BattleLog } from '../../supabase/functions/_shared/contracts/events';
 import type { PublicActor, TournamentView } from '../../supabase/functions/_shared/contracts/reads';
 import { ARENA_GLADIATORS } from '../fixtures/arena-ids';
@@ -102,6 +102,8 @@ test('final R6 bracket Up next names the next pair and round then disappears at 
 });
 
 const card = (page: Page) => page.locator('article[data-status]');
+/** Patch 1.9 Task 31: the entrants are paged (6 a page); a test that reads all 8 chooses Show 10 in that list's own bar. */
+const allEntrants = async (scope: Locator) => { await scope.getByRole('region', { name: 'Entrants' }).getByRole('combobox', { name: 'Rows per page' }).selectOption('10'); };
 const panelState = (page: Page) => page.evaluate(() => window.__cloudiatorTournaments!.state());
 
 async function openTournaments(page: Page) {
@@ -155,6 +157,16 @@ test.describe('tournament registration and brackets', () => {
   test.skip(production, 'The tournament samples need the fixture preview, which production exports never include.');
   test.use({ timezoneId: 'UTC' });
 
+  // Task 31 fix round 1 (M-C): the 8-placement settled bracket of the unit test: page 1 holds six, page 2 the two 5th places.
+  test('pages the settled bracket placements, page 2 holding the rest', async ({ page }) => {
+    await tournamentFlow.openAtMinute(page, 'completed', 85);
+    const table = card(page).getByRole('table', { name: 'Placements' });
+    const bar = table.locator('xpath=ancestor::*[@data-paging-scope][1]').getByRole('navigation', { name: 'Pages' });
+    await expect(table.locator('tbody tr')).toHaveText([/1\s*Varro/, /2\s*Severus/, /3\s*Cassia/, /3\s*Decimus/, /5\s*Aster/, /5\s*Aurelia/]);
+    await bar.getByRole('button', { name: 'Next page', exact: true }).click();
+    await expect(table.locator('tbody tr')).toHaveText([/5\s*Bellator/, /5\s*Corvina/]);
+  });
+
   test('keeps every future result hidden before round 1 (plan Step 1)', { tag: '@render' }, async ({ page, baseURL }, testInfo) => {
     const remote = forbidRemote(page, baseURL);
     await tournamentFlow.openBeforeRound(page, 1);
@@ -163,6 +175,7 @@ test.describe('tournament registration and brackets', () => {
     await expect(page.getByLabel('Automatically enter tournaments')).not.toBeChecked();
     // Entrants, the bracket shape and the seeded first round are public from the start; the results wait for the round.
     await expect(card(page)).toContainText('8-slot bracket · 3 rounds · 0 byes');
+    await allEntrants(card(page));
     await expect(card(page).getByRole('region', { name: 'Entrants' }).getByRole('listitem')).toHaveCount(8);
     const named = (id: string | null) => VIEWS.opening.entrants.find(e => e.gladiatorId === id)!.name;
     const slots = VIEWS.opening.bracket!.slots;
@@ -263,6 +276,7 @@ test.describe('tournament registration and brackets', () => {
     await tournamentFlow.openAtMinute(page, 'completed', 30);
     expect((await tournamentFlow.visibleWinnerIds(page)).sort()).toEqual(VIEWS.completed.bouts.filter(b => b.round === 1).map(b => b.revealedResult!.winnerId).sort());
     await expect(card(page)).toContainText('You were eliminated in the Quarterfinals. You stay in the tournament as a spectator until it ends at Sat 26 Sep, 20:00 UTC; this slot has no other activity for you.');
+    await allEntrants(card(page));
     const aster = card(page).getByRole('region', { name: 'Entrants' }).getByRole('listitem').filter({ hasText: 'Aster' });
     await expect(aster).toContainText('Eliminated in the Quarterfinals · spectating');
     // The semifinals are not revealed yet: their sides are the winners already shown, their results preparing.
@@ -386,13 +400,13 @@ test.describe('tournament registration and brackets', () => {
 
   test('explains the one-entrant fallback: regular Arena this slot', { tag: '@render' }, async ({ page }, testInfo) => {
     await tournamentFlow.openAtMinute(page, 'insufficient', 30);
-    await expect(card(page).getByRole('status')).toHaveText('Not held: too few entrants');
+    await expect(card(page).getByRole('status').filter({ hasText: /\S/ })).toHaveText('Not held: too few entrants');
     await expect(card(page)).toContainText('Only 1 gladiator qualified in the Gold league, so no bracket was held: that entrant fought regular Arena this slot (with an NPC opponent where needed).');
     await expect(card(page).getByRole('tablist')).toHaveCount(0);
     await card(page).screenshot({ path: testInfo.outputPath('tournament-one-entrant.png') });
     // A tournament that has not started shows neither entrants nor a bracket.
     await tournamentFlow.openAt(page, 'upcoming', startOf('upcoming') - 30 * MIN);
-    await expect(card(page).getByRole('status')).toHaveText('Scheduled');
+    await expect(card(page).getByRole('status').filter({ hasText: /\S/ })).toHaveText('Scheduled');
     await expect(card(page)).toContainText('Entrants and the bracket are published at the start, Sat 10 Oct, 18:40 UTC.');
     await expect(page.getByRole('region', { name: 'Tournament schedule' }).getByRole('definition')).toHaveText(['Sat 10 Oct, 18:40 UTC', '30 min 0 s']);
   });
@@ -400,7 +414,7 @@ test.describe('tournament registration and brackets', () => {
   test('marks a due round as preparing while its results are unpublished, and asks again', { tag: '@render' }, async ({ page }, testInfo) => {
     // The mid-way view was read at minute 45; by minute 65 its final is due but not published.
     await tournamentFlow.openAtMinute(page, 'midway', 65);
-    await expect(card(page).getByRole('status')).toHaveText('Processing results');
+    await expect(card(page).getByRole('status').filter({ hasText: /\S/ })).toHaveText('Processing results');
     await expect(card(page).getByRole('tab', { selected: true })).toHaveText('Final');
     await expect(page.getByText('Result preparing')).toBeVisible();
     await expect(card(page)).toContainText('These results were due at Sat 3 Oct, 19:40 UTC but are not published yet.');
@@ -416,7 +430,7 @@ test.describe('tournament registration and brackets', () => {
   test('says the owner’s due but unpublished result is not published yet, never that she advances', async ({ page }) => {
     // The opening view was read at minute 5; at minute 25 round 1 is due but unpublished.
     await tournamentFlow.openAtMinute(page, 'opening', 25);
-    await expect(card(page).getByRole('status')).toHaveText('Processing results');
+    await expect(card(page).getByRole('status').filter({ hasText: /\S/ })).toHaveText('Processing results');
     await expect(card(page)).toContainText('Your Quarterfinals result is not published yet. It appears here as soon as it is revealed.');
     await expect(card(page)).not.toContainText('You advance');
     expect(await tournamentFlow.visibleWinnerIds(page)).toEqual([]);
@@ -435,7 +449,7 @@ test.describe('tournament registration and brackets', () => {
     ];
     for (const [key, status, detail] of shows) {
       await page.getByRole('button', { name: TOURNAMENTS[key].label, exact: true }).click();
-      await expect(card(page).getByRole('status'), key).toHaveText(status);
+      await expect(card(page).getByRole('status').filter({ hasText: /\S/ }), key).toHaveText(status);
       await expect(card(page), key).toContainText(detail);
       expect((await panelState(page))?.now, key).toBe(tournamentAsOf(key));
     }
@@ -444,7 +458,7 @@ test.describe('tournament registration and brackets', () => {
     expect((await panelState(page))?.now).toBe(tournamentAsOf('upcoming'));
     await page.getByRole('button', { name: TOURNAMENTS.opening.label, exact: true }).click();
     await page.evaluate(t => window.__cloudiatorTournaments!.freeze(t), startOf('opening') + 25 * MIN);
-    await expect(card(page).getByRole('status')).toHaveText('Processing results');
+    await expect(card(page).getByRole('status').filter({ hasText: /\S/ })).toHaveText('Processing results');
   });
 
   test('retries a failed first read every 30 s while the tab is visible', async ({ page }) => {
@@ -478,7 +492,7 @@ test.describe('tournament registration and brackets', () => {
     const at = (seconds: number) => page.evaluate(t => window.__cloudiatorTournaments!.freeze(t), startOf('late') + 85 * MIN + seconds * 1000);
     const settled = async (expected: number) => { await page.waitForTimeout(1200); expect(await reads()).toBe(expected); };
     await tournamentFlow.openAtMinute(page, 'late', 85);
-    await expect(card(page).getByRole('status')).toHaveText('Processing results');
+    await expect(card(page).getByRole('status').filter({ hasText: /\S/ })).toHaveText('Processing results');
     // Crossing minute 80 read the view once; then only the processing back-off reads.
     await page.waitForTimeout(1200);
     let n = await reads();
@@ -505,7 +519,7 @@ test.describe('tournament registration and brackets', () => {
     n += 1;
     // Back before the end the view is not processing, which resets the back-off: the next stuck spell starts at 30 s.
     await page.evaluate(ts => window.__cloudiatorTournaments!.freeze(ts), startOf('late') + 78 * MIN);
-    await expect(card(page).getByRole('status')).toHaveText('In progress');
+    await expect(card(page).getByRole('status').filter({ hasText: /\S/ })).toHaveText('In progress');
     await settled(n);
     await at(0);
     await expect.poll(reads).toBe(n + 1);
@@ -947,11 +961,13 @@ test.describe('the live Tournaments panel', () => {
     await expect(leagues.getByRole('button', { name: 'Bronze' })).toHaveAttribute('aria-pressed', 'true');
     const bracket = panel.locator('article[data-status]');
     await expect(bracket.getByRole('heading', { name: 'Bronze tournament' })).toBeVisible();
+    await allEntrants(bracket);
     await expect(bracket.getByRole('region', { name: 'Entrants' }).getByRole('listitem')).toHaveCount(8);
     await expect(bracket).not.toContainText(/You are|Your /);
     await leagues.getByRole('button', { name: 'Silver' }).click();
     await expect(leagues.getByRole('button', { name: 'Silver' })).toHaveAttribute('aria-pressed', 'true');
     await expect(bracket.getByRole('heading', { name: 'Silver tournament' })).toBeVisible();
+    await allEntrants(bracket);
     await expect(bracket.getByRole('region', { name: 'Entrants' }).getByRole('listitem')).toHaveCount(8);
     // A league without a tournament in that slot.
     await leagues.getByRole('button', { name: 'Gold' }).click();
@@ -1052,6 +1068,75 @@ test.describe('the live Tournaments panel', () => {
     await page.clock.fastForward(30_000);
     await expect(bracket.getByRole('heading', { name: 'Silver tournament' })).toBeVisible();
     expect(live.requests.some(r => r.table === 'tournament_views' && r.query.get('id') === `eq.tournament:${OPENING_SLOT}:silver`)).toBe(true);
+  });
+
+  // Patch 1.9 Task 31 (menus with Back and Next): a 50-entrant bracket shows its entrants and a round's bouts 6 a page, each with its own bar.
+  test('shows entrants and bouts 6 a page, each list with its own bar; a round tab goes back to page 1 of its bouts', async ({ page, context }) => {
+    const templates = Object.values(VIEWS).flatMap(v => v.bouts.flatMap(b => (b.revealedResult?.battleLog ? [b.revealedResult.battleLog] : [])));
+    const start = startOf('opening');
+    const { view, actors } = largeTournament(50, { startsAtMs: start, league: 'bronze', templates });
+    const at = start + Math.ceil(80 * MIN * 2 / 7) + 10_000;
+    await routeLiveReads(context, { world: { ...emptyWorld(at), actors }, tournaments: [view], serverNowMs: () => at });
+    await page.goto('/game/');
+    const panel = await tournamentsPanel(page);
+    const entrants = panel.getByRole('region', { name: 'Entrants' });
+    const entrantBar = entrants.getByRole('navigation', { name: 'Pages' });
+    await expect(entrants.getByRole('listitem')).toHaveCount(6);
+    await expect(entrantBar.locator('b').first()).toHaveText('Page 1 of 9');
+    await entrantBar.getByRole('button', { name: 'Next page', exact: true }).click();
+    await expect(entrantBar.locator('b').first()).toHaveText('Page 2 of 9');
+    await expect(entrants.getByRole('listitem')).toHaveCount(6);
+    await entrantBar.getByRole('button', { name: 'Previous page', exact: true }).click();
+    await expect(entrantBar.locator('b').first()).toHaveText('Page 1 of 9');
+    await entrantBar.getByRole('button', { name: 'Go to page 5', exact: true }).click();
+    await expect(entrantBar.locator('b').first()).toHaveText('Page 5 of 9');
+    await entrantBar.getByRole('button', { name: 'Go to page 2', exact: true }).click();
+    const bracket = panel.getByRole('region', { name: 'Bracket', exact: true });
+    const boutBar = bracket.getByRole('navigation', { name: 'Pages' });
+    const bouts = bracket.getByRole('tabpanel').getByRole('listitem');
+    await expect(bouts).toHaveCount(6);
+    await boutBar.getByRole('button', { name: 'Next page', exact: true }).click();
+    await expect(boutBar.locator('b').first()).not.toHaveText(/Page 1 /);
+    // The latest round shows first (round 2 here); the first tab turns to round 1, whose bouts start on page 1.
+    await bracket.getByRole('tab').first().click();
+    await expect(boutBar.locator('b').first()).toHaveText(/^Page 1 of /);
+    // The entrants' own page is not touched by the round tab.
+    await expect(entrantBar.locator('b').first()).toHaveText('Page 2 of 9');
+  });
+
+  // Task 31 fix round 1 (I2, I3, minor 10): a settled 50-entrant bracket has 50 placements: 6 a page, with a bar of their own, and each list keeps its
+  // own Show choice.
+  test('a settled 50-entrant bracket pages its placements 6 a page, and each list keeps its own Show choice', async ({ page, context }) => {
+    const templates = Object.values(VIEWS).flatMap(v => v.bouts.flatMap(b => (b.revealedResult?.battleLog ? [b.revealedResult.battleLog] : [])));
+    const start = startOf('opening');
+    const { view: running, actors } = largeTournament(50, { startsAtMs: start, league: 'bronze', templates });
+    const view: TournamentView = { ...running, status: 'completed',
+      placements: running.entrants.map((e, i) => ({ gladiatorId: e.gladiatorId, place: i + 1, completion: { ...VIEWS.completed.placements[0].completion, activityId: crypto.randomUUID() } })) };
+    const at = view.endsAtMs + 5 * MIN;
+    await routeLiveReads(context, { world: { ...emptyWorld(at), actors }, tournaments: [view], serverNowMs: () => at });
+    await page.goto('/game/');
+    const panel = await tournamentsPanel(page);
+    const table = panel.getByRole('table', { name: 'Placements' });
+    const rows = table.locator('tbody tr');
+    const bar = table.locator('xpath=ancestor::*[@data-paging-scope][1]').getByRole('navigation', { name: 'Pages' });
+    const label = bar.locator('b').first();
+    await expect(rows).toHaveCount(6);
+    await expect(label).toHaveText('Page 1 of 9');
+    await bar.getByRole('button', { name: 'Next page', exact: true }).click();
+    await expect(label).toHaveText('Page 2 of 9');
+    await bar.getByRole('button', { name: 'Previous page', exact: true }).click();
+    await expect(label).toHaveText('Page 1 of 9');
+    await bar.getByRole('button', { name: 'Go to page 9', exact: true }).click();
+    await expect(rows).toHaveCount(2);
+    // A Show choice on the entrants' bar changes the entrants only.
+    const entrants = panel.getByRole('region', { name: 'Entrants' });
+    await entrants.getByRole('combobox', { name: 'Rows per page' }).selectOption('25');
+    await expect(entrants.getByRole('listitem')).toHaveCount(25);
+    await expect(label).toHaveText('Page 9 of 9');
+    const bouts = panel.getByRole('region', { name: 'Bracket', exact: true });
+    // (The settled bracket opens on its final, one bout: round 1 has the long list.)
+    await bouts.getByRole('tab').first().click();
+    await expect(bouts.getByRole('combobox', { name: 'Rows per page' })).toHaveValue('6');
   });
 
   test('a viewer joining late loads at most the logs of the current and next ring window', async ({ page, context }, testInfo) => {

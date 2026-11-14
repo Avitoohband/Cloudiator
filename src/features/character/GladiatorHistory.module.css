@@ -83,8 +83,6 @@
 }
 
 .list {
-  max-height: 380px;
-  overflow-y: auto;
   overscroll-behavior: contain;
   padding-right: 2px;
 }
@@ -94,7 +92,7 @@
 }
 
 .day {
-  margin: 10px 0 3px;
+  margin: 8px 0 2px;
   color: #a3adc1;
   font-size: 11px;
   font-weight: 700;
@@ -111,7 +109,7 @@
   display: flex;
   align-items: center;
   gap: 10px;
-  padding: 8px 0;
+  padding: 6px 0;
   border-bottom: 1px solid #2b2935;
 }
 
@@ -341,8 +339,7 @@
   text-align: center;
 }
 
-.failed,
-.moreFailed {
+.failed {
   margin: 10px 0;
   color: #f0b4b4;
   font-size: 12.5px;
@@ -407,6 +404,29 @@
     max-height: none;
     overflow: visible;
     padding-right: 0;
+  }
+
+  /* Task 32 fix round 1 (I3): the three chips share one row and the retention line is one line (its whole text is the line's title), so the
+     sheet holds the four rows of a page. */
+  .chips {
+    flex-wrap: nowrap;
+    gap: 4px;
+    margin: 8px 0 2px;
+  }
+
+  .chip {
+    flex: 0 1 auto;
+    min-width: 0;
+    padding: 4px 8px;
+    font-size: 12px;
+    white-space: nowrap;
+  }
+
+  .keep {
+    margin: 2px 0;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
   }
 
   .trow {

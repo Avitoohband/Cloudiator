@@ -100,7 +100,7 @@
   --topic-row: 38px;
   position: relative;
   /* Four rows, the 4 px padding above and below and the 1 px border (box-sizing is border-box), so the 4th row is never clipped. */
-  max-height: calc(var(--topic-row) * 4 + 8px + 2px);
+  /* Patch 1.9 Task 31: a page of the topics is the whole box (5 rows by default); a larger Show choice makes the panel scroll instead. */
   margin-bottom: 12px;
   padding: 4px;
   overflow-y: auto;
@@ -290,4 +290,27 @@
 @media (hover: none), (max-width: 480px) {
   .panel .gold, .panel .ghost, .panel .fseg button { min-height: 44px; }
   .feedbackWhen { margin-left: 0; flex-basis: 100%; text-align: right; }
+}
+
+/* Patch 1.9 Task 31: the paging surface around the three tabs' panels. It fills what the head, the tabs and the edit bar leave; each panel
+   keeps its own scroll (a Wiki article, a Future Updates entry), and the bar sits on the surface's bottom edge. */
+.paged {
+  flex: 1 1 auto;
+  /* A very short window (a phone with its keyboard up) keeps a reader this tall, and the panel itself scrolls under the controls. */
+  min-height: 11rem;
+}
+
+.pagedBody {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.pagedBody > .body {
+  flex: 1 1 auto;
+}
+
+.panel p.loading {
+  padding: 8px 0;
+  color: var(--ink-dim);
 }

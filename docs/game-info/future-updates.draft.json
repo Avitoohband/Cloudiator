@@ -85,6 +85,11 @@
       "body": "A big, showy card you can open from a gladiator's card to show off gear, titles and achievements, and later skins and dyes. It shows nothing private, such as gold or loot."
     },
     {
+      "id": "crossovers",
+      "title": "Crossover skins and titles",
+      "body": "Special events made together with other games, YouTube creators or brands: skins in their style and a title you can earn during the event. Skins change looks only, with no combat bonuses. This comes after 2.0, once skins are in the game."
+    },
+    {
       "id": "inventory-shops",
       "title": "Inventory, shops and gladiator help",
       "body": "Shops show goods as icons with the inventory card, and you can search and sort. Identical items stack and you choose how many to sell. Choose gear from your Worn equipment slots. Renown gets a gold laurel. Mark messages and notifications as read. See your XP bar and level-up hint, and hover or tap any stat or attribute for help.",
@@ -164,8 +169,8 @@
     },
     {
       "id": "harder-bosses",
-      "title": "Much harder dungeon bosses",
-      "body": "Dungeon bosses become a real challenge: a full party at the dungeon level should win only about one time in four.",
+      "title": "Harder bosses and gear you cannot buy",
+      "body": "Dungeon bosses become a real challenge: a full party at the dungeon level should win only about one time in four. Gear above level 10 is never sold in shops: level 12 weapons and armor, including new kinds with their own looks, drop only from dungeon bosses. Higher levels follow with 2.1.",
       "patch": "2.0"
     },
     {
@@ -187,12 +192,6 @@
       "patch": "2.0"
     },
     {
-      "id": "dungeon-gear",
-      "title": "Gear you cannot buy",
-      "body": "Gear above level 10 is never sold in shops. Level 12 weapons and armor, including new kinds with their own looks, drop only from dungeon bosses. Higher levels follow with 2.1.",
-      "patch": "2.0"
-    },
-    {
       "id": "feedback",
       "title": "Send feedback",
       "body": "Send bug reports and ideas from inside the game. The team reads and answers them.",
@@ -202,6 +201,12 @@
       "id": "stamina-notices",
       "title": "Stamina warnings",
       "body": "The Schedule will warn when your gladiator will not have the stamina for a planned activity, or when a third Training in a game day becomes a Rest, and show the stamina left after each part. A notice in camp warns before the next part. If your gladiator rests instead of its plan, the Schedule, your notifications and your own results will say so and why.",
+      "patch": "1.9"
+    },
+    {
+      "id": "away-summary",
+      "title": "While you were away",
+      "body": "When you come back to the game, a summary pops up with everything your gladiators gained since your last visit: XP and levels, gold and renown, new items, and their fight, tournament and expedition results.",
       "patch": "1.9"
     },
     {

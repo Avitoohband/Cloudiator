@@ -13,13 +13,15 @@ import { MessagesPanel } from './MessagesPanel';
 import type { NoticeTitles } from './TitleNotices';
 import styles from './messages.module.css';
 
-export function MessagesButton({ inbox, load, loadNotifications, loadPatches, read, seeNotifications, changeLook, open, panelId, onToggle, onClose, buttonRef, history, initialTab, watch,
+export function MessagesButton({ inbox, load, loadNotifications, loadPatches, read, seeNotifications, changeLook, open, panelId, onToggle, onClose, buttonRef, history, initialTab, initialRow, watch,
   latestPatch = null, titles, feedback, rules }: MessagingActions & {
   inbox: Inbox;
   /** The owner's titles and the Wear and "Choose a title" actions for the Notifications tab (patch 1.7). */
   titles?: NoticeTitles;
   /** `feedback` opens on My feedback (patch 1.9). */
   initialTab?: 'messages' | 'notifications' | 'feedback';
+  /** The result a Watch left from (Task 31): Notifications opens on the page that holds it. */
+  initialRow?: string;
   /** Opens the panel on Patch history, at that patch (the account menu's "Patch history ›"); absent opens the lists. */
   history?: { patch: string | null };
   /** The server's newest patch, for Patch history. */
@@ -53,7 +55,7 @@ export function MessagesButton({ inbox, load, loadNotifications, loadPatches, re
     </button>
     <span role="status" className={styles.sr} data-testid="messages-live">{announcement}</span>
     {open && <MessagesPanel id={panelId} inbox={inbox} load={load} loadNotifications={loadNotifications} loadPatches={loadPatches} read={read}
-      seeNotifications={seeNotifications} initialTab={initialTab} watch={watch} changeLook={changeLook} onClose={onClose} history={history} latestPatch={latestPatch}
+      seeNotifications={seeNotifications} initialTab={initialTab} initialRow={initialRow} watch={watch} changeLook={changeLook} onClose={onClose} history={history} latestPatch={latestPatch}
       titles={titles} feedback={feedback} rules={rules} />}
   </>;
 }

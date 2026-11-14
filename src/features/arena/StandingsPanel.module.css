@@ -344,8 +344,7 @@
   margin: 0;
 }
 
-.failed button,
-.more {
+.failed button {
   justify-self: start;
   min-height: 44px;
   padding: 0 1.2rem;

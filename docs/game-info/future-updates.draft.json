@@ -162,6 +162,11 @@
       "patch": "2.0"
     },
     {
+      "id": "away-summary",
+      "title": "While you were away",
+      "body": "When you come back to the game, a summary pops up with everything your gladiators gained since your last visit: XP and levels, gold and renown, new items, and their fight, tournament and expedition results."
+    },
+    {
       "id": "potions",
       "title": "Stamina and health potions",
       "body": "Stamina potions restore 30 stamina, at most 2 per game day. A health potion is drunk automatically in a fight when health falls below a level you set, and you can drink one yourself between fights.",
@@ -169,8 +174,8 @@
     },
     {
       "id": "harder-bosses",
-      "title": "Much harder dungeon bosses",
-      "body": "Dungeon bosses become a real challenge: a full party at the dungeon level should win only about one time in four.",
+      "title": "Harder bosses and gear you cannot buy",
+      "body": "Dungeon bosses become a real challenge: a full party at the dungeon level should win only about one time in four. Gear above level 10 is never sold in shops: level 12 weapons and armor, including new kinds with their own looks, drop only from dungeon bosses. Higher levels follow with 2.1.",
       "patch": "2.0"
     },
     {
@@ -189,12 +194,6 @@
       "id": "payments",
       "title": "Bag slots and real-money shop",
       "body": "Buy extra bag slots with real money, coupons, or renown. Bag slots add space only, never combat power. Optional ads are being looked at too, such as watching a short ad for a small stamina refill; nothing is decided yet.",
-      "patch": "2.0"
-    },
-    {
-      "id": "dungeon-gear",
-      "title": "Gear you cannot buy",
-      "body": "Gear above level 10 is never sold in shops. Level 12 weapons and armor, including new kinds with their own looks, drop only from dungeon bosses. Higher levels follow with 2.1.",
       "patch": "2.0"
     },
     {

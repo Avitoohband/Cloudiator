@@ -316,3 +316,33 @@ describe('patch 1.5.1 night watch', () => {
     }
   });
 });
+
+// Task 34 (film note 2026-11-14): two rounds walked the aisle between the bed rows, drawn over the sleepers. No `keepClear` round enters the sleeping
+// area now: the rectangle that holds every bedroll of the map (read from its props), one tile wider on every side, the aisle between the rows inside it.
+describe('the sleeping area', () => {
+  const beds = camp.props.filter(p => /^bedroll/.test(p.frame));
+  const area = {
+    x0: Math.min(...beds.map(p => p.x)) - 1, x1: Math.max(...beds.map(p => p.x + p.w)) + 1,
+    y0: Math.min(...beds.map(p => p.y)) - 1, y1: Math.max(...beds.map(p => p.y + p.d)) + 1,
+  };
+  const inside = (x: number, y: number) => x >= area.x0 && x < area.x1 && y >= area.y0 && y < area.y1;
+
+  it('is the beds of the map, the aisle between the rows included', () => {
+    expect(beds.length).toBeGreaterThan(4);
+    expect(inside(16.5, 37.5), 'the aisle').toBe(true);
+    expect(inside(14.5, 35.5), 'a bed').toBe(true);
+  });
+
+  it('is never entered by a keepClear round, sampled every 250 ms over a period', () => {
+    for (const r of NPC_ROUTINES.filter(round => round.keepClear)) {
+      for (let t = 0; t < r.periodMs; t += 250) {
+        const p = planNpcPosition(r, camp, t);
+        expect(inside(p.x, p.y), `${r.npcId} at ${t} ms: ${p.x.toFixed(2)}, ${p.y.toFixed(2)}`).toBe(false);
+      }
+    }
+  });
+
+  it('leaves every leg arriving before its next step, with a second to spare', () => {
+    for (const r of NPC_ROUTINES) for (const slack of routineSlack(r, camp)) expect(slack, r.npcId).toBeGreaterThanOrEqual(1_000);
+  });
+});

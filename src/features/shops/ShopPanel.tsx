@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useId, useLayoutEffect, useRef, useState, type KeyboardEvent, type ReactNode, type RefObject } from 'react';
+import { useEffect, useId, useRef, useState, type KeyboardEvent, type ReactNode, type RefObject } from 'react';
 import type { BuyBackEntry, OwnerState } from '@contracts/reads';
 import { CATALOG_V1 } from '@domain/catalog-v1';
 import type { Merchant } from '@domain/inventory';
@@ -8,7 +8,8 @@ import type { DisplayClock } from '../../game/display-clock';
 import { ItemIcon } from '../inventory/ItemPresentation';
 import { MatchCount, ItemSearch, NoMatch } from '../inventory/ItemSearch';
 import { SHOP_SORTS, queryItems, type SortKey } from '../inventory/item-query';
-import { revealCard } from '../inventory/reveal-card';
+import { gridColumns, rowFill } from '../inventory/grid-page';
+import { usePhoneCard } from '../inventory/phone-card';
 import inventory from '../inventory/InventoryPanel.module.css';
 import { Pager } from '../paging/Pager';
 import { PanelFooter } from '../paging/PanelFooter';
@@ -45,9 +46,11 @@ type ShopView = ShopFilter | 'Buy back';
  * read without the list (an older server, before M34) shows no Buy back chip at all (final fix wave).
  *
  * Patch 1.9 Task 33 (menus with Back and Next): the Shops are the menu's second section. The grid shows one page of whole rows (`gridPage`:
- * 24 tiles, or 15 where it has five columns), Buy back 5 sales a page (a list, with the Show choice); a filter, the currency, a search or a
- * sort goes back to page 1, and when the chosen cell is kept on another page, that page shows. The chosen cell stays chosen across pages,
- * and the grid's one Tab stop is always on the page shown. The bar is the section's bottom bar while the section shows (`active`).
+ * 24 tiles, or 15 where it has five columns), and Buy back too (fix round 1, the coordinator's ruling: it is the shop's grid, so no Show
+ * choice); the last page is padded with empty cells to whole rows. A filter, the currency, a search or a sort goes back to page 1, and when
+ * the chosen cell is kept on another page, that page shows. The chosen cell stays chosen across pages, and the grid's one Tab stop is always
+ * on the page shown. The bar is the section's bottom bar while the section shows (`active`). On a phone the chosen cell's card opens over
+ * the grid (fix round 1, `usePhoneCard`).
  */
 export function ShopPanel({ owner, busy, preview, buy, initialMerchant, clock, buyBack, buyBackOutcome, buyBackRequest = 0, gridPage = GRID_PAGE.desktop, active = true }: {
   owner: OwnerState; busy: boolean; preview: boolean; buy(catalogId: string, quantity: number): void; initialMerchant?: Merchant;
@@ -57,16 +60,13 @@ export function ShopPanel({ owner, busy, preview, buy, initialMerchant, clock, b
   /** The Shops section shows: its bar is the menu's bottom bar. */
   active?: boolean;
 }) {
-  const section = useRef<HTMLElement>(null), grid = useRef<HTMLDivElement>(null), detailsBox = useRef<HTMLElement>(null);
+  const section = useRef<HTMLElement>(null), grid = useRef<HTMLDivElement>(null);
   const backChip = useRef<HTMLButtonElement>(null);
   const [filter, setFilter] = useState<ShopView>(merchantFilter(initialMerchant));
   const [currency, setCurrency] = useState<ShopCurrency>('money');
   const [chosenId, setChosenId] = useState<string | null>(null);
   /** The chosen sale in the Buy back view (its own choice, so the shop's is kept while Buy back is shown). */
   const [saleId, setSaleId] = useState<string | null>(null);
-  /** Counts cell taps: each one brings the chosen offer's card into view on a phone (`revealCard`, Task 21). */
-  const [reveal, setReveal] = useState(0);
-  useLayoutEffect(() => { if (reveal) revealCard(detailsBox.current); }, [reveal]);
   /** The cell the arrow keys last reached: the grid's one Tab stop while it is shown, else the chosen cell. */
   const [stopId, setStopId] = useState<string | null>(null);
   const [quantity, setQuantity] = useState(1);
@@ -92,6 +92,10 @@ export function ShopPanel({ owner, busy, preview, buy, initialMerchant, clock, b
   const backCells = back ? queryItems(sales, buyBackView, query, backSort) : [];
   const cellId = (entry: BuyBackEntry) => `sale-${entry.saleId}`;
   const ids = back ? backCells.map(cellId) : choices.map(choice => choice.id);
+  const count = ids.length;
+  const phoneCard = usePhoneCard(count > 0);
+  // The card closes with the section (it opens again from a cell).
+  useEffect(() => { if (!active) phoneCard.close(false); }, [active, phoneCard.close]);
   // A search with no match under a chip that hides matches All would show says so ("No match for “sword” in Armor").
   const hiddenBy = !back && !choices.length && query.trim() && view !== 'All' && queryItems(shopChoices('All', currency), choiceView, query, sort).length ? view : undefined;
   // The first visible cell when nothing visible is chosen; remembered, so Buy never sends an offer the grid hides.
@@ -100,19 +104,17 @@ export function ShopPanel({ owner, busy, preview, buy, initialMerchant, clock, b
   if (chosenKey && picked !== chosenKey) (back ? setSaleId : setChosenId)(chosenKey);
   const chosen: ShopChoice | undefined = back ? undefined : choices.find(choice => choice.id === chosenKey);
   const chosenSale = back ? backCells.find(entry => cellId(entry) === chosenKey) : undefined;
-  // The pages: the shop's cells (then the empty cells that keep its shape, as before) in whole rows, and Buy back's sales 5 a page.
-  const fill = Math.max(0, (view === 'All' && !query.trim() ? 30 : 6) - choices.length);
-  const shopCells: (ShopChoice | number)[] = [...choices, ...Array.from({ length: fill }, (_, n) => n)];
-  // `list` names a Show choice, which a grid (a fixed page of whole rows) has none of.
-  const shopPaged = usePagedList(shopCells, { list: 'market', size: gridPage, resetKey: `${view}|${currency}|${query}|${sort}` });
-  const backPaged = usePagedList(backCells, { list: 'buyBack', resetKey: `${query}|${backSort}` });
-  const paged: { listRef: RefObject<HTMLElement | null>; goToIndex(index: number): void } = back ? backPaged : shopPaged;
-  const pageIds = back ? backPaged.rows.map(cellId) : shopPaged.rows.flatMap(entry => (typeof entry === 'number' ? [] : [entry.id]));
+  // The pages: the shop's cells and Buy back's sales, each in whole rows of the grid; the last page is padded with empty cells to whole rows.
+  const shopPaged = usePagedList(choices, { size: gridPage, resetKey: `${view}|${currency}|${query}|${sort}` });
+  const backPaged = usePagedList(backCells, { size: gridPage, resetKey: `${query}|${backSort}` });
+  const paged: { listRef: RefObject<HTMLElement | null>; goToIndex(index: number): void; rows: readonly unknown[] } = back ? backPaged : shopPaged;
+  const fill = rowFill(paged.rows.length, gridColumns(gridPage));
+  const pageIds = back ? backPaged.rows.map(cellId) : shopPaged.rows.map(choice => choice.id);
   // The grid's one Tab stop is on the page shown: the cell the arrow keys last reached, else the chosen one, else the first.
   const tabStop = pageIds.includes(stopId ?? '') ? stopId : pageIds.includes(chosenKey ?? '') ? chosenKey : pageIds[0];
   // After a filter, currency, search or sort change the chosen cell's page shows (page 1 unless it is kept further on); nothing else moves.
-  const latest = useRef({ chosenKey, ids, size: back ? backPaged.size : gridPage });
-  latest.current = { chosenKey, ids, size: back ? backPaged.size : gridPage };
+  const latest = useRef({ chosenKey, ids, size: gridPage });
+  latest.current = { chosenKey, ids, size: gridPage };
   const pagedRef = useRef(paged);
   pagedRef.current = paged;
   const changedView = useRef(false);
@@ -143,7 +145,7 @@ export function ShopPanel({ owner, busy, preview, buy, initialMerchant, clock, b
     event.preventDefault();
     cells[next]?.focus();
   }
-  const choose = (id: string) => { (back ? setSaleId : setChosenId)(id); setReveal(n => n + 1); };
+  const choose = (id: string) => { (back ? setSaleId : setChosenId)(id); phoneCard.show(); };
   function cell(choice: ShopChoice) {
     const offer = choice.kind === 'offer' ? choice.offer : null, entry = offer ? CATALOG_V1.items[offer.catalogId] : null;
     const price = offer ? offer.unitPrice : BANNER.renownPrice;
@@ -178,7 +180,6 @@ export function ShopPanel({ owner, busy, preview, buy, initialMerchant, clock, b
     </button>;
   }
   const purchase = { owner, busy, preview, buy };
-  const count = back ? backCells.length : choices.length;
   return <section ref={section} aria-labelledby="shops-heading" className={`shops-panel ${styles.panel}`}>
     <div className={styles.top}>
       {/* The section strip names the Shops (Task 33); the heading stays for the outline and screen readers. */}
@@ -188,7 +189,8 @@ export function ShopPanel({ owner, busy, preview, buy, initialMerchant, clock, b
         <span><CurrencyIcon currency="renown" size={14} /> Available renown <b>{spendable(owner, 'renown')}</b></span>
       </p>
     </div>
-    <div className={inventory.columns}>
+    {/* On a phone the chosen cell's card lies over the grid once a cell is chosen; with no cell to choose, the card (empty or no match) shows below. */}
+    <div ref={phoneCard.hostRef} className={inventory.columns} data-card={phoneCard.phone && count > 0 ? (phoneCard.open ? 'open' : 'closed') : undefined}>
       <div>
         <ItemSearch query={query} setQuery={setQuery} sorts={back ? BUY_BACK_SORTS : SHOP_SORTS} sort={back ? backSort : sort}
           setSort={back ? setBackSort : setSort} label="Search the shops" sortLabel="Sort the shops" />
@@ -203,20 +205,25 @@ export function ShopPanel({ owner, busy, preview, buy, initialMerchant, clock, b
             {CURRENCIES.map(([value, label]) => <button key={value} type="button" aria-pressed={value === currency} onClick={() => switchCurrency(value)}>{label}</button>)}
           </div>}
         </div>
+        <div inert={phoneCard.open}>
         {/* The arrow keys move between the cells and never move the section (`data-arrow-keys`). */}
-        <div className={`${inventory.gridScroll} ${styles.scroll}${back ? ` ${styles.backScroll}` : ''}`} role="group" aria-label={back ? 'Items to buy back' : 'Shop items'} data-arrow-keys="" onKeyDown={move}>
+        <div ref={phoneCard.anchorRef} className={`${inventory.gridScroll} ${inventory.paged} ${styles.scroll}${back ? ` ${styles.backScroll}` : ''}`} role="group"
+          aria-label={back ? 'Items to buy back' : 'Shop items'} data-arrow-keys="" onKeyDown={move}>
           {back && sales.length === 0 ? <div className={styles.empty}><span><AtlasIcon frame="inventory" size={40} /></span><p>{BUY_BACK_EMPTY}</p></div>
             : count === 0 ? <NoMatch query={query} clear={() => setQuery('')} filter={hiddenBy} />
-              : <div ref={paged.listRef as RefObject<HTMLDivElement | null>} data-page-list=""><div ref={grid} className={inventory.grid}>
-                {back ? backPaged.rows.map(saleCell)
-                  : shopPaged.rows.map(entry => (typeof entry === 'number' ? <span key={`empty-${entry}`} className={inventory.emptyCell} aria-hidden="true" /> : cell(entry)))}
+              : <div ref={paged.listRef as RefObject<HTMLDivElement | null>} data-page-list=""><div ref={grid} className={`${inventory.grid} ${inventory.paged}`}>
+                {back ? backPaged.rows.map(saleCell) : shopPaged.rows.map(cell)}
+                {Array.from({ length: fill }, (_, n) => <span key={`empty-${n}`} className={inventory.emptyCell} aria-hidden="true" />)}
               </div></div>}
         </div>
         <MatchCount count={count} query={query} filter={hiddenBy} />
         <p className={`muted ${styles.foot}`}>{back ? buyBackCount(sales.length, owner.inventory.length, owner.inventoryCapacity)
           : `${EXPLAINERS[currency]} L = level needed; pieces with a lock are above your level. ${choices.length} items.`}</p>
+        </div>
       </div>
-      <section ref={detailsBox} id={detailsId} aria-label="Offer details" className={inventory.details}>
+      <section ref={phoneCard.sheetRef} id={detailsId} aria-label="Offer details" className={inventory.details}
+        onKeyDown={phoneCard.onKeyDown}>
+        {phoneCard.phone && count > 0 && <button type="button" className={inventory.closeCard} aria-label="Close item card" onClick={() => phoneCard.close()}>×</button>}
         {back ? <>
           {buyBackOutcome && <div className={styles.outcome}>{buyBackOutcome}</div>}
           {sales.length === 0 ? <div className={styles.emptyCard}><p>{BUY_BACK_EMPTY_CARD}</p></div>
@@ -226,6 +233,6 @@ export function ShopPanel({ owner, busy, preview, buy, initialMerchant, clock, b
           : chosen.kind === 'offer' ? <OfferCard offer={chosen.offer} quantity={quantity} setQuantity={setQuantity} {...purchase} /> : <BannerCard {...purchase} />}
       </section>
     </div>
-    {active && count > 0 && <PanelFooter>{back ? <Pager list={backPaged} show /> : <Pager list={shopPaged} />}</PanelFooter>}
+    {active && count > 0 && <PanelFooter>{back ? <Pager list={backPaged} /> : <Pager list={shopPaged} />}</PanelFooter>}
   </section>;
 }

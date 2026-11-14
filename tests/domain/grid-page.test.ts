@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { GRID_PAGE } from '../../src/features/paging/paging';
-import { NARROW_GRID_PX, gridLayout } from '../../src/features/inventory/grid-page';
+import { NARROW_GRID_PX, gridColumns, gridLayout, rowFill } from '../../src/features/inventory/grid-page';
 import { GLADIATOR_SECTIONS } from '../../src/features/character/CharacterPanel';
 import { INVENTORY_SECTIONS } from '../../src/features/inventory/InventoryPanel';
 
@@ -20,10 +20,24 @@ describe('the grid page', () => {
     expect(gridLayout(true, 740)).toBe('phone');
   });
 
-  it('matches the stylesheet: five columns in a panel up to NARROW_GRID_PX wide and in the touch layout', () => {
+  it('matches the stylesheet: five columns in a panel up to NARROW_GRID_PX wide and, for the paged grids only, in the touch layout', () => {
     const css = readFileSync('src/features/inventory/InventoryPanel.module.css', 'utf8');
     expect(css).toContain(`@container (max-width: ${NARROW_GRID_PX}px) {\n  .grid { grid-template-columns: repeat(5, minmax(0, 1fr)); }`);
-    expect(css).toMatch(/@media \(hover: none\), \(max-width: 480px\) \{\n {2}\.gridScroll \{ min-height: 194px; \}\n(?: {2}\/\*[^\n]*\*\/\n)? {2}\.grid \{ grid-template-columns: repeat\(5, minmax\(0, 1fr\)\);/);
+    // Fix round 1 (review Important 2): the touch layout's five columns and the growing box are the paged grids' (`paged`), never the
+    // Marketplace's "Item to list" box, which keeps its fixed 254 / 194 px.
+    expect(css).toContain('.grid.paged { grid-template-columns: repeat(5, minmax(0, 1fr)); }');
+    expect(css).toContain('.gridScroll.paged { min-height: 194px; }');
+    expect(css).toMatch(/\.gridScroll \{\n {2}height: 254px;/);
+    expect(css).toContain('.gridScroll { height: 194px; }');
+  });
+
+  it('finishes a page\'s last row with empty cells, a whole row when the page has no tile (fix round 1)', () => {
+    expect([gridColumns(GRID_PAGE.desktop), gridColumns(GRID_PAGE.phone)]).toEqual([6, 5]);
+    expect(rowFill(24, 6)).toBe(0);
+    expect(rowFill(3, 6)).toBe(3);
+    expect(rowFill(12, 5)).toBe(3);
+    expect(rowFill(15, 5)).toBe(0);
+    expect(rowFill(0, 6)).toBe(6);
   });
 });
 

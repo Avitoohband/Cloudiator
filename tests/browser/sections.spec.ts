@@ -124,49 +124,25 @@ test.describe('named sections and paged grids (fixture preview)', () => {
     await expect(shownSection(menu)).toHaveText('Worn equipment');
   });
 
-  test('Inventory and shops opens on Inventory; the grid pages whole rows, keeps the chosen piece and goes back to page 1 on a sort', async ({ page }, info) => {
+  test('Inventory and shops opens on Inventory; one page of tiles pads its last row with free slots and has no bar; the arrow keys stay in the grid', async ({ page }, info) => {
     if (info.project.name === 'mobile') await page.setViewportSize({ width: 360, height: 780 });
     await openCamp(page);
     const menu = await openMenu(page, 'Inventory and shops');
     await expect(shownSection(menu)).toHaveText('Inventory');
     await expect(circles(menu)).toHaveCount(2);
-    await expect(sectionStrip(menu).getByRole('button', { name: 'Next section: Shops', exact: true })).toBeVisible();
+    await expect(sectionStrip(menu).getByRole('button', { name: 'Next section: Shops', exact: true })).toBeAttached();
     // A section with a paged grid: its bottom bar is the grid's, never the section bar.
     await expect(sectionBar(menu)).toHaveCount(0);
     const size = await pageSize(page);
     const grid = menu.getByTestId('inventory-grid');
-    // 14 tiles and 41 free slots of the 60: 24 a page in six columns (3 pages), 15 in five (4 pages).
-    await expect(gridCells(grid)).toHaveCount(size);
+    // Fix round 1: the tiles page, and only the last page is padded with free slots to whole rows. 14 tiles fit one page (24 in six columns,
+    // 15 in five): no bar, and the row is filled: 14 + 4 = 18 cells in six columns, 14 + 1 = 15 in five. The slot count still says the bag.
     await expect(grid.getByRole('button')).toHaveCount(14);
-    const total = size === 24 ? 3 : 4;
-    await expect(pageLabel(menu)).toHaveText(`Page 1 of ${total}`);
+    await expect(gridCells(grid)).toHaveCount(size === 24 ? 18 : 15);
+    await expect(pages(menu)).toHaveCount(0);
+    await expect(menu.getByText('19 / 60 slots', { exact: true })).toBeVisible();
     const columns = await grid.evaluate(element => getComputedStyle(element).gridTemplateColumns.split(' ').length);
     expect(columns).toBe(size === 24 ? 6 : 5);
-    // The chosen piece stays chosen while the pages turn; its card stays.
-    const second = grid.getByRole('button').nth(1);
-    const name = await second.getAttribute('aria-label');
-    await second.click();
-    await expect(second).toHaveAttribute('aria-pressed', 'true');
-    const heading = await menu.getByRole('region', { name: 'Item details' }).getByRole('heading').first().textContent();
-    await pages(menu).getByRole('button', { name: 'Next page', exact: true }).click();
-    await expect(pageLabel(menu)).toHaveText(`Page 2 of ${total}`);
-    await expect(grid.getByRole('button')).toHaveCount(0);
-    // A page of free slots only: the turn gives the focus to the grid itself.
-    await expect(menu.getByRole('group', { name: 'Your items', exact: true })).toBeFocused();
-    await expect(menu.getByRole('region', { name: 'Item details' }).getByRole('heading').first()).toHaveText(heading!);
-    await pages(menu).getByRole('button', { name: `Go to page ${total}`, exact: true }).click();
-    await expect(pageLabel(menu)).toHaveText(`Page ${total} of ${total}`);
-    await pages(menu).getByRole('button', { name: 'Previous page', exact: true }).click();
-    await expect(pageLabel(menu)).toHaveText(`Page ${total - 1} of ${total}`);
-    // A sort goes back to page 1, where the chosen piece is.
-    await menu.getByRole('combobox', { name: 'Sort your items' }).selectOption('level');
-    await expect(pageLabel(menu)).toHaveText(`Page 1 of ${total}`);
-    await expect(grid.getByRole('button', { name: name!, exact: true })).toHaveAttribute('aria-pressed', 'true');
-    // A search that leaves one page has no bar; clearing it shows page 1.
-    await menu.getByRole('searchbox', { name: 'Search your items' }).fill('sword');
-    await expect(pages(menu)).toHaveCount(0);
-    await menu.getByRole('searchbox', { name: 'Search your items' }).fill('');
-    await expect(pageLabel(menu)).toHaveText(`Page 1 of ${total}`);
     // ← and → on a tile stay with the grid; on a filter chip they move the section.
     await grid.getByRole('button').first().focus();
     await page.keyboard.press('ArrowRight');
@@ -176,6 +152,48 @@ test.describe('named sections and paged grids (fixture preview)', () => {
     await page.keyboard.press('ArrowRight');
     await expect(shownSection(menu)).toHaveText('Shops');
     expect(await noHorizontalScroll(page)).toBe(true);
+  });
+
+  test('a phone’s section strip is one line, and Attributes and stats fits above the bar on the 360 × 780 sheet', async ({ page }) => {
+    await page.setViewportSize({ width: 360, height: 780 });
+    await openCamp(page);
+    const menu = await openSection(await openMenu(page, 'My gladiator'), 'Attributes and stats');
+    const strip = sectionStrip(menu);
+    const [previous, next] = [strip.getByRole('button', { name: 'Previous section: Level and stamina', exact: true }), strip.getByRole('button', { name: 'Next section: Worn equipment', exact: true })];
+    await expect(previous).toBeVisible();
+    await expect(next).toBeVisible();
+    // One row: ‹, the name, the circles and › share a line; the neighbours' names are read (the buttons' names) but not shown.
+    const middle = async (locator: Locator) => { const box = (await locator.boundingBox())!; return box.y + box.height / 2; };
+    const line = await middle(shownSection(menu));
+    for (const part of [previous, next, circles(menu).nth(2)]) expect(Math.abs((await middle(part)) - line)).toBeLessThan(6);
+    expect((await strip.boundingBox())!.height).toBeLessThanOrEqual(52);
+    expect(await previous.evaluate(element => (element as HTMLElement).innerText.trim())).toBe('‹');
+    expect(await next.evaluate(element => (element as HTMLElement).innerText.trim())).toBe('›');
+    // The whole section (Attributes, Stats and Practice fight) above the bottom bar, with no scroll.
+    const practice = menu.getByRole('button', { name: /Practice fight/ });
+    expect((await practice.boundingBox())!.y + (await practice.boundingBox())!.height).toBeLessThanOrEqual((await sectionBar(menu).boundingBox())!.y);
+    expect(await menu.getByTestId('menu-body').evaluate(body => body.scrollHeight <= body.clientHeight + 1)).toBe(true);
+    expect(await noHorizontalScroll(page)).toBe(true);
+  });
+
+  test('while a Worn equipment picker is open, ← and → leave the section alone (desktop)', async ({ page }, info) => {
+    test.skip(info.project.name === 'mobile', 'A phone’s picker sheet hides the slots, so nothing outside the picker takes the focus.');
+    await openCamp(page);
+    const menu = await openSection(await openMenu(page, 'My gladiator'), 'Worn equipment');
+    const feet = menu.getByRole('button', { name: /^Feet:/ });
+    await feet.focus();
+    await page.keyboard.press('Enter');
+    const dialog = menu.getByRole('dialog', { name: 'Change Feet', exact: true });
+    await expect(dialog.locator('[data-tile]').first()).toBeFocused();
+    // Back to the slot behind the picker (the picker's ✕ comes first, then the slot), then the arrows: the section stays, the picker stays open.
+    await page.keyboard.press('Shift+Tab');
+    await page.keyboard.press('Shift+Tab');
+    await expect(feet).toBeFocused();
+    await page.keyboard.press('ArrowRight');
+    await page.keyboard.press('ArrowLeft');
+    await page.keyboard.press('ArrowRight');
+    await expect(shownSection(menu)).toHaveText('Worn equipment');
+    await expect(dialog).toBeVisible();
   });
 
   test('the Shops section: the shop grid pages whole rows, a currency goes back to page 1, and the arrow keys stay in the grid', async ({ page }, info) => {
@@ -193,8 +211,10 @@ test.describe('named sections and paged grids (fixture preview)', () => {
     const chosenId = await chosen.getAttribute('data-cell-id');
     await pages(menu).getByRole('button', { name: 'Next page', exact: true }).click();
     await expect(pageLabel(menu)).toHaveText(/^Page 2 of \d+$/);
-    // The chosen offer stays chosen (its card stays) on another page; the grid's one Tab stop is on the page shown.
-    await expect(shops.getByRole('region', { name: 'Offer details' })).toBeVisible();
+    // The chosen offer stays chosen (its card stays) on another page; the grid's one Tab stop is on the page shown. (On a phone the card
+    // shows only once a cell is tapped, over the grid: Task 33 fix round 1.)
+    if (info.project.name === 'mobile') await expect(shops.locator('[data-card="closed"]')).toHaveCount(1);
+    else await expect(shops.getByRole('region', { name: 'Offer details' })).toBeVisible();
     await expect(grid.locator(`[data-cell-id="${chosenId}"]`)).toHaveCount(0);
     const stops = grid.locator('[data-shop-cell][tabindex="0"]');
     if (await grid.locator('[data-shop-cell]').count()) {

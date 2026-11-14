@@ -200,6 +200,17 @@ test.describe('help on stats and attributes (live)', () => {
       await expect(tip).toHaveCount(1);
       await expect(tip).toContainText('How much more a critical hit deals than a normal hit.');
       await expect(tip).toContainText('A critical hit deals 1.5 times the damage of a normal hit.');
+      // The pointer from one stat label to the next, moving off between them (review Minor 5): each shows its own tooltip, one at a time.
+      await page.keyboard.press('Escape');
+      await menu.focus();
+      await attributes.getByRole('heading').hover();
+      await stats.getByRole('button', { name: 'Critical', exact: true }).hover();
+      await expect(tip).toContainText('Chance for a landed hit to be a critical hit');
+      await attributes.getByRole('heading').hover();
+      await expect(tip).toHaveCount(0);
+      await stats.getByRole('button', { name: 'Critical damage', exact: true }).hover();
+      await expect(tip).toHaveCount(1);
+      await expect(tip).toContainText('How much more a critical hit deals than a normal hit.');
       await shot(page, info, 'xp-help-desktop');
     }
   });
@@ -264,12 +275,25 @@ test.describe('help on stats and attributes (live)', () => {
     await staminaButton.click();
     await expect(tip).toContainText('What your activities spend; resting gives it back. Endurance raises it.');
     await expect(tip).toContainText('Base 90, plus 2 for each Endurance.');
-    // Task 33: Stamina is in Level and stamina, Load in Worn equipment; still one tooltip in the whole panel, hidden sections too.
-    await openSection(menu, 'Worn equipment');
+    // Task 33: Stamina is in Level and stamina, Load in Worn equipment. Fix round 1 (review Minor 4): Stamina's tooltip stays open across the
+    // move (a press that leaves the focus on the panel, then → twice from the panel), so opening Load really closes another tooltip.
+    await page.keyboard.press('Escape');
+    await expect(tip).toHaveCount(0);
+    await menu.focus();
+    await staminaButton.dispatchEvent('click');
+    await expect(tip).toContainText('Base 90, plus 2 for each Endurance.');
+    await expect(menu).toBeFocused();
+    await page.keyboard.press('ArrowRight');
+    await page.keyboard.press('ArrowRight');
+    await expect(menu.getByRole('navigation', { name: 'Sections', exact: true }).locator('b').first()).toHaveText('Worn equipment');
+    const tooltips = menu.locator('[role="tooltip"]');
+    await expect(tooltips).toHaveCount(1);
+    await expect(tooltips).toContainText('Base 90, plus 2 for each Endurance.');
     await loadButton.scrollIntoViewIfNeeded();
     await loadButton.click();
     await expect(tip).toHaveCount(1);
-    await expect(menu.locator('[role="tooltip"]')).toHaveCount(1);
+    await expect(tooltips).toHaveCount(1);
+    await expect(tooltips).not.toContainText('Base 90');
     await expect(tip).toContainText('How much your worn gear weighs against what you can carry.');
     await expect(tip).toContainText('Capacity is 10, plus 2 for each Endurance.');
     await expect(tip).toContainText('down to 50%');

@@ -32,6 +32,17 @@ export async function openMenuSection(page: Page, label: string, name: string): 
   return openSection(await openMenu(page, label), name);
 }
 
+/**
+ * Task 33 fix round 1: on a phone the Inventory's and the Shops' card shows only once a tile is chosen, over the grid. Opens the chosen
+ * tile's card (a tap on it) in the section shown when it is closed; nothing on a pointer layout, where the card is always beside the grid.
+ */
+export async function openItemCard(scope: Locator): Promise<void> {
+  const closed = scope.locator('[data-card="closed"]:visible');
+  if (!(await closed.count())) return;
+  await closed.first().locator('[data-page-row][aria-pressed="true"]').first().click();
+  await expect(scope.locator('[data-card="open"]:visible')).toHaveCount(1);
+}
+
 /** Opens Inventory and shops on its Shops section and returns the Shops region. */
 export async function openShops(page: Page): Promise<Locator> {
   const menu = await openMenuSection(page, 'Inventory and shops', 'Shops');

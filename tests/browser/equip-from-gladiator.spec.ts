@@ -80,6 +80,17 @@ async function expectRow(scope: Locator, name: string, cells: [string, string, s
   await expect(row(scope, name).locator('th, td')).toHaveText([name, ...cells]);
 }
 const wearButton = (scope: Locator) => scope.getByRole('button', { name: /^Wear / });
+/**
+ * Task 33 fix round 1 (review Minor 2): while another tile's card shows, the chosen piece's Wear waits beside it, unseen (opacity 0) but still
+ * the chosen piece's and still reachable by Tab, which ends the preview and shows its own card again.
+ */
+async function expectWearWaiting(scope: Locator, name: string) {
+  await expect(scope.locator('[data-waiting]')).toHaveCount(1);
+  await expect(wearButton(scope)).toHaveAccessibleName(name);
+  await expect(wearButton(scope)).toHaveCSS('opacity', '0');
+}
+/** Only a change of the chosen piece is announced (review Minor 2): the picker's status line, never the previewed card. */
+const chosenStatus = (scope: Locator) => scope.locator('[data-chosen-status]');
 const clockNow = (page: Page) => page.evaluate(() => window.__cloudiatorShell!.clock.now());
 const effectiveTime = async (page: Page, processedSlotIndex: number) => slotTime(page, (processedSlotIndex + 1) * SLOT_MS, await clockNow(page));
 /** Waits for the phone sheet's rise (0.2 s) so boxes and screenshots read the settled layout. */
@@ -106,6 +117,9 @@ test.describe('equip from My gladiator (live)', () => {
     await expect(weapon.locator('[data-chevron]')).toHaveText('▾');
     await expect(worn).toContainText('Load 12 / 24.7');
     await weapon.click();
+    // A click in the phone emulation is a mouse's, and the mouse left where the slot was is over the sheet that rose under it, where it would
+    // preview the tile under it, which a finger never does (Task 33 fix round 1: the one-line strip moved the slot over the Remove tile).
+    if (hasTouch) await page.mouse.move(0, 0);
     const dialog = picker(menu, 'Weapon');
     await expect(dialog).toBeVisible();
     // (A CSS locator: on a phone the sheet hides the slot row under it, so the slot is out of the accessibility tree meanwhile.)
@@ -556,7 +570,7 @@ test.describe('equip from My gladiator (live)', () => {
     await expect(pick(dialog, low1)).toBeFocused();
     await expect(pick(dialog, high)).toHaveAttribute('aria-pressed', 'true');
     await expectRow(dialog, 'Damage', ['–', '6', '+6']);
-    await expect(wearButton(dialog)).toHaveCount(0);
+    await expectWearWaiting(dialog, 'Wear Sword, level 5 common');
     await page.keyboard.press('ArrowRight');
     await expectRow(dialog, 'Damage', ['–', '9', '+9']);
     await expect(wearButton(dialog)).toHaveAccessibleName('Wear Sword, level 5 common');
@@ -573,8 +587,9 @@ test.describe('equip from My gladiator (live)', () => {
     await expect(weapon).toBeFocused();
     await expect(wornRegion(menu).getByRole('status')).toHaveText('Sword will be worn from the next slot.');
     expect(flow.commands[0]).toMatchObject({ kind: 'queue-build', equipment: { weapon: high.id } });
-    // By pointer: the stack chosen, then the other piece hovered: its card, and the stack's Wear out of reach; the pointer leaving it brings
-    // back the stack's card and Wear. The focus on the other piece shows its card too, never with the stack's Wear beside it.
+    // By pointer: the stack chosen, then the other piece hovered: its card, and the stack's Wear waiting unseen; the pointer leaving it brings
+    // back the stack's card and Wear. A focus a script gives the other piece after a click may or may not show its card (it is not the
+    // keyboard's); the arrow that follows is the keyboard's, and back on the chosen stack its card and Wear show.
     await weapon.click();
     await pick(dialog, low1).click();
     await expectRow(dialog, 'Damage', ['9', '6', '−3']);
@@ -582,7 +597,7 @@ test.describe('equip from My gladiator (live)', () => {
     if (!hasTouch) {
       await pick(dialog, high).hover();
       await expectRow(dialog, 'Damage', ['9', '9', '=']);
-      await expect(wearButton(dialog)).toHaveCount(0);
+      await expectWearWaiting(dialog, 'Wear Sword, level 1 common (one of 2)');
       await dialog.getByRole('heading', { name: 'Weapon', exact: true }).hover();
     }
     await expectRow(dialog, 'Damage', ['9', '6', '−3']);
@@ -620,13 +635,26 @@ test.describe('equip from My gladiator (live)', () => {
     await expect(pick(dialog, high)).toBeFocused();
     await expectRow(dialog, 'Damage', ['–', '9', '+9']);
     await expect(pick(dialog, high)).toHaveAttribute('aria-pressed', 'false');
+    await expect(chosenStatus(dialog)).toHaveText('');
     await page.keyboard.press('Enter');
     await expect(pick(dialog, high)).toHaveAttribute('aria-pressed', 'true');
     await expect(wearButton(dialog)).toHaveAccessibleName('Wear Sword, level 5 common');
-    // The focus on the stack shows its card; Wear (the level 5 sword's) waits for its own card.
+    // The choice is announced (a polite status), the previews are not: the card itself is no live region.
+    await expect(chosenStatus(dialog)).toHaveText(/^Sword, Level 5 · common/);
+    await expect(chosenStatus(dialog)).toHaveAttribute('aria-live', 'polite');
+    await expect(dialog.locator('[aria-live]:not([data-chosen-status])')).toHaveCount(0);
+    // The focus on the stack shows its card; Wear (the level 5 sword's) waits unseen for its own card, and nothing new is announced.
     await page.keyboard.press('ArrowLeft');
     await expectRow(dialog, 'Damage', ['–', '6', '+6']);
-    await expect(wearButton(dialog)).toHaveCount(0);
+    await expectWearWaiting(dialog, 'Wear Sword, level 5 common');
+    await expect(chosenStatus(dialog)).toHaveText(/^Sword, Level 5 · common/);
+    // Tab from the previewed stack reaches the waiting Wear: the preview ends, and the level 5 sword's card shows beside it (review Minor 2).
+    await page.keyboard.press('Tab');
+    await expect(wearButton(dialog)).toBeFocused();
+    await expectRow(dialog, 'Damage', ['–', '9', '+9']);
+    await expect(wearButton(dialog)).toHaveCSS('opacity', '1');
+    await page.keyboard.press('Shift+Tab');
+    await expect(pick(dialog, low1)).toBeFocused();
     await page.keyboard.press('ArrowRight');
     await expectRow(dialog, 'Damage', ['–', '9', '+9']);
     await page.keyboard.press('Tab');
@@ -642,7 +670,7 @@ test.describe('equip from My gladiator (live)', () => {
       await pick(dialog, low1).hover();
       await expectRow(dialog, 'Damage', ['–', '6', '+6']);
       await expect(dialog).toContainText('Level 1 · common · Tradable · 2 owned');
-      await expect(wearButton(dialog)).toHaveCount(0);
+      await expectWearWaiting(dialog, 'Wear Sword, level 5 common');
       await dialog.getByRole('heading', { name: 'Weapon', exact: true }).hover();
       await expectRow(dialog, 'Damage', ['–', '9', '+9']);
       await expect(wearButton(dialog)).toHaveAccessibleName('Wear Sword, level 5 common');

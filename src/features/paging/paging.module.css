@@ -313,10 +313,6 @@
     margin: 0 0 4px;
   }
 
-  .strip {
-    grid-template-areas: 'name name name' 'dots dots dots' 'prev . next';
-  }
-
   .dot {
     width: 32px;
     height: 44px;
@@ -325,6 +321,46 @@
   .dot i {
     width: 12px;
     height: 12px;
+  }
+
+  /* Task 33 fix round 1: the section strip is one line on a phone, as the approved mockup draws it: ‹, the section's name, quiet circles,
+     ›. The neighbours' names are read (each button keeps its accessible name) but not shown; the bottom bar shows them. */
+  .strip {
+    grid-template-columns: auto minmax(0, 1fr) auto auto;
+    grid-template-areas: 'prev name dots next';
+    column-gap: 4px;
+    margin-bottom: 6px;
+    padding-bottom: 2px;
+  }
+
+  .stripName {
+    min-width: 0;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+  }
+
+  .stripMoveName {
+    display: none;
+  }
+
+  .stripMove {
+    min-width: 40px;
+    padding: 0 8px;
+  }
+
+  .strip .dots {
+    height: 44px;
+    margin: 0;
+  }
+
+  .strip .dot {
+    width: 16px;
+  }
+
+  .strip .dot i {
+    width: 7px;
+    height: 7px;
   }
 
   .back,

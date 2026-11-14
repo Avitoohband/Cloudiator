@@ -15,7 +15,7 @@ import { a11yShot, contrastIssues, expectNamedControls, focusDrops, focusedEleme
 import { SUPABASE_URL, emptyWorld, isPresence, routeLiveReads, seedSession, testUser } from './live-routes';
 import { reviewShot, reviewShot360 } from './review-shots';
 import { chipToggle, cornerChip, creationDialog, everyoneResults, expectOwnerShown, joinButton, menuDialog, openMenu, quietArrivals, railMenus, revealRail, touchLayout, pageTo } from './shell-helpers';
-import { openSection } from './section-helpers';
+import { openItemCard, openSection } from './section-helpers';
 
 // Task 23.5: the release browser spec. The game is usable by keyboard and screen reader (every control named, the focus
 // never left on <body>, validation messages linked to their fields), readable (WCAG contrast), calm with reduced motion,
@@ -369,6 +369,9 @@ test.describe('release accessibility in the fixture preview', () => {
     // Task 33: the shops are the menu's second section.
     await openSection(shops, 'Shops');
     await expectNamedControls(shops, 'Inventory and shops (player), Shops');
+    // (On a phone the chosen offer's card opens over the grid with a tap: Task 33 fix round 1.)
+    await openItemCard(shops);
+    await expectNamedControls(shops, 'Inventory and shops (player), Shops, the card');
     const quantity = shops.getByRole('spinbutton', { name: 'Purchase quantity' });
     await quantity.fill('0');
     await expect(quantity).toHaveAttribute('aria-invalid', 'true');
@@ -1073,6 +1076,7 @@ test.describe('release accessibility in live mode', () => {
     await page.goto('/game/');
     await expectOwnerShown(page, 'Aster');
     const inventory = await openSection(await openMenu(page, 'Inventory and shops'), 'Shops');
+    await openItemCard(inventory);
     await inventory.getByRole('spinbutton', { name: 'Purchase quantity' }).focus();
     const other = testUser('brutus@example.invalid');
     await seedSession(context, other);

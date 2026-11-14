@@ -35,3 +35,9 @@ export function useGridPage(panel: RefObject<HTMLElement | null>): number {
   }, [panel]);
   return GRID_PAGE[layout];
 }
+
+/** A grid page's columns: six for a page of 24, five for 15 (Task 33 fix round 1). */
+export const gridColumns = (size: number): number => (size === GRID_PAGE.desktop ? 6 : 5);
+
+/** The empty cells that finish a page's last row of `count` tiles: a whole row when there is no tile (Task 33 fix round 1). */
+export const rowFill = (count: number, columns: number): number => (count === 0 ? columns : (columns - (count % columns)) % columns);

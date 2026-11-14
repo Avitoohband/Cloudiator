@@ -668,5 +668,8 @@
 /* Patch 1.9 Task 33 (fix 1): while another tile's card shows (hover or the keyboard's focus), the chosen tile's action keeps its place, out of
    sight and out of reach, so nothing moves and the card shown is always the piece the action sends. */
 .act[data-waiting] > * {
-  visibility: hidden;
+  /* Fix round 1 (review Minor 2): unseen and out of the pointer's reach, but still the chosen piece's and reachable by Tab, which ends the
+     preview (the tile's blur) and shows its own card again. */
+  opacity: 0;
+  pointer-events: none;
 }

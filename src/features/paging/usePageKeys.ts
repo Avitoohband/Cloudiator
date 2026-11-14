@@ -30,6 +30,16 @@ export const keyInPanel = (target: Element, panel: Element): boolean => {
   return owner === null || owner === panel;
 };
 
+/**
+ * Whether a key on `target` is inside an open `<dialog>` that sits in `panel` (a modal confirmation in the menu, such as the discard one):
+ * the dialog's own keys, never the panel's pages or sections. A dialog that holds the panel (a `PagingScope` in a dialog) is the panel's
+ * (Task 33 fix round 1, review Minor 8; add-only).
+ */
+export const inOtherModal = (target: Element, panel: Element): boolean => {
+  const dialog = target.closest('dialog[open]');
+  return dialog !== null && dialog !== panel && !dialog.contains(panel);
+};
+
 export function usePageKeys(anchor: RefObject<HTMLElement | null>, keys: Record<string, () => void>, enabled = true) {
   const scope = usePanelScope();
   const latest = useRef(keys);
@@ -41,7 +51,8 @@ export function usePageKeys(anchor: RefObject<HTMLElement | null>, keys: Record<
       if (!action || event.defaultPrevented || event.altKey || event.ctrlKey || event.metaKey || ownsKeys(event.target, event.key)) return;
       // The panel: the open menu or the PagingScope, else the dialog or section the bar sits in.
       const panel = scope?.panel ?? anchor.current?.closest('[data-paging-scope], [role="dialog"], section') ?? null;
-      if (!panel || !(event.target instanceof Element) || !panel.contains(event.target) || !keyInPanel(event.target, panel)) return;
+      if (!panel || !(event.target instanceof Element) || !panel.contains(event.target) || !keyInPanel(event.target, panel)
+        || inOtherModal(event.target, panel)) return;
       event.preventDefault();
       action();
     };

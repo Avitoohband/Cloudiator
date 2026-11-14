@@ -272,6 +272,8 @@ export function WornEquipment({ owner, gateway, refresh, clock, preview = false,
     const comparison = item || showingRemove ? compareChoice(owner, slot, item ?? null) : null;
     const blocked = item ? lockText(owner, item) : null;
     const chosenBlocked = chosenItem ? lockText(owner, chosenItem) : null;
+    const chosenSummary = chosenItem ? `${itemName(chosenItem)}, Level ${chosenItem.tier} · ${chosenItem.rarity} · ${binding(chosenItem)}${chosenCount > 1 ? ` · ${chosenCount} owned` : ''}`
+      : removing ? `Remove ${now ? itemName(now) : 'the piece'}: ${name} left empty` : '';
     const describedBy = [chosenBlocked ? blockedId : '', preview ? previewId : ''].filter(Boolean).join(' ') || undefined;
     const nowName = now ? itemName(now) : next[slot] ? 'Unavailable' : 'empty';
     const queuedHere = changed.includes(slot);
@@ -323,7 +325,9 @@ export function WornEquipment({ owner, gateway, refresh, clock, preview = false,
             </div>}
             {tiles.length > 0 && <p className={styles.legend}>{LEGEND}</p>}
           </div>
-          <div className={styles.card} aria-live="polite">
+          {/* Only a change of the chosen piece is announced (fix round 1, review Minor 2): the previewed card is no live region. */}
+          <p className={styles.hidden} data-chosen-status="" aria-live="polite">{chosenSummary}</p>
+          <div className={styles.card}>
             {comparison ? <>
               <div className={styles.cardHead}>
                 {item ? <ItemIcon catalogId={item.catalogId} size={40} /> : <span className={styles.removeIcon} aria-hidden="true">✕</span>}

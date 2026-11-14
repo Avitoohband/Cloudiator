@@ -178,6 +178,8 @@ function OwnerSections({ owner, slotIndex, clock, fixture, stale, resting, onRet
   const index = GLADIATOR_SECTIONS.findIndex(entry => entry.id === at);
   const holder = useRef<HTMLDivElement>(null);
   useSectionChange(index, holder);
+  /** The section navigation's move: nothing while a Worn equipment picker is open. */
+  const go = (next: number) => { if (!picking) onSection(next); };
   // The History section: the owner's own history (its chip kept while the menu is open), read only once it is first shown.
   const [kind, setKind] = useState<HistoryKind>('arena');
   const [seenHistory, setSeenHistory] = useState(index === HISTORY);
@@ -192,10 +194,12 @@ function OwnerSections({ owner, slotIndex, clock, fixture, stale, resting, onRet
   // its slot ends (Patch A item 6). A Rest that has not started, or is over, shows none; nor does resting at home, which has no activity.
   const gain = activity?.kind === 'rest' && status.status === 'in-progress' ? restingGainText(restingGain(owner)) : null;
   return <>
-    {/* While a Worn equipment picker is open (a phone's sheet covers the strip and the bar), the section navigation waits. */}
-    <div inert={picking}><SectionStrip sections={GLADIATOR_SECTIONS} index={index} onGo={onSection} /></div>
+    {/* While a Worn equipment picker is open (a phone's sheet covers the strip and the bar), the section navigation waits: inert, and its
+        keys (← →, the shell's listener) do nothing (fix round 1, review Important 3). */}
+    <div inert={picking}><SectionStrip sections={GLADIATOR_SECTIONS} index={index} onGo={go} /></div>
+    {/* The stale notice sits over every section; a phone's picker sheet covers it too (fix round 1, review Minor 1). */}
     {stale && (
-      <div className={styles.stale} role="status">
+      <div className={styles.stale} role="status" data-covered={picking || undefined} inert={picking}>
         <p>Your gladiator could not be refreshed. Showing the last loaded details.</p>
         <button type="button" onClick={onRetry}>Retry</button>
       </div>
@@ -251,7 +255,7 @@ function OwnerSections({ owner, slotIndex, clock, fixture, stale, resting, onRet
       </SectionBox>
     </div>
     {/* The bottom bar of a section with no paged list of its own; History's list pages with its own bar (the list rule). */}
-    {index !== HISTORY && <PanelFooter><div inert={picking}><SectionPager sections={GLADIATOR_SECTIONS} index={index} onGo={onSection} /></div></PanelFooter>}
+    {index !== HISTORY && <PanelFooter><div inert={picking}><SectionPager sections={GLADIATOR_SECTIONS} index={index} onGo={go} /></div></PanelFooter>}
   </>;
 }
 

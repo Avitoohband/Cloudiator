@@ -91,7 +91,7 @@ export const NPC_ROUTINES: NpcRoutine[] = [
     { x: 39, y: 27, at: 0, durationMs: 4_000, action: 'idle', facing: 'se' },
     { x: 40, y: 40, at: 26_000, durationMs: 6_000, action: 'idle', facing: 'se' },
     // Task 34: the walk from the south-east post to the south-west one no longer runs through the sleeping area (the aisle between the beds);
-    // the only other way is round it to the north, 8 tiles further, so these two times (the arrival at the south-west post and the one after it)
+    // the only other way is round it to the north, several tiles further, so these two times (the arrival at the south-west post and the one after it)
     // are 8 s later than before (76 s and 103 s). The posts, the period, the names and the other times are unchanged.
     { x: 6, y: 41, at: 84_000, durationMs: 6_000, action: 'idle', facing: 'sw' },
     { x: 5, y: 27, at: 111_000, durationMs: 4_000, action: 'idle', facing: 'sw' },

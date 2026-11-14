@@ -538,6 +538,42 @@ test('on a phone the page and section keys pressed in an open card never turn th
   await expect(label).toHaveText('Page 1 of 2');
 });
 
+// Fix wave re-review M4: a page the grid turns under an open phone card (the bar's Next by keyboard) closes the card, and the new page's first
+// tile takes the focus, as any other turn gives it. The same in the Shops.
+test('on a phone the bar’s Next pressed by keyboard with a card open closes the card and gives the focus to the new page’s first tile', async ({ page, context }, info) => {
+  const flow = await inventoryFlow(context);
+  flow.state.inventory = Object.keys(CATALOG_V1.items).slice(0, 27).map(id => ({ ...itemFixture(CATALOG_V1.items[id]), id: randomUUID() }));
+  await page.setViewportSize({ width: 360, height: 740 });
+  await page.goto('/game/');
+  const menu = await openMenu(page, 'Inventory and shops');
+  const tap = (locator: Locator) => (info.project.name === 'mobile' ? locator.tap() : locator.click());
+  const grid = menu.getByTestId('inventory-grid'), details = menu.getByRole('region', { name: 'Item details' });
+  const bar = menu.getByRole('navigation', { name: 'Pages', exact: true }), label = bar.locator('b').first();
+  const size = await page.evaluate(() => (matchMedia('(hover: none), (max-width: 480px)').matches ? 15 : 24));
+  await expect(label).toHaveText('Page 1 of 2');
+  await tap(tile(grid, flow.state.inventory[0]));
+  await expect(details).toBeVisible();
+  await bar.getByRole('button', { name: 'Next page', exact: true }).focus();
+  await expect(details).toBeVisible();
+  await page.keyboard.press('Enter');
+  await expect(label).toHaveText('Page 2 of 2');
+  await expect(details).toBeHidden();
+  await expect(tile(grid, flow.state.inventory[size])).toBeFocused();
+  // The Shops: the same.
+  await openSection(menu, 'Shops');
+  const shops = shopsRegion(menu), offers = offerDetails(shops), cells = shops.getByRole('group', { name: 'Shop items', exact: true }).locator('[data-page-row]');
+  await expect(label).toHaveText(/^Page 1 of \d+$/);
+  await tap(cells.first());
+  await expect(offers).toBeVisible();
+  const firstOfPage1 = await cells.first().getAttribute('data-cell-id');
+  await bar.getByRole('button', { name: 'Next page', exact: true }).focus();
+  await page.keyboard.press('Enter');
+  await expect(label).toHaveText(/^Page 2 of \d+$/);
+  await expect(offers).toBeHidden();
+  await expect(cells.first()).toBeFocused();
+  expect(await cells.first().getAttribute('data-cell-id')).not.toBe(firstOfPage1);
+});
+
 // Codex review Minor 4: a sale's line never stays in a closed phone card; closed while the sale is on its way, the line shows at the section's end.
 test('on a phone a sale’s line shows outside the card when the card is closed while the sale is on its way', async ({ page, context }, info) => {
   const flow = await inventoryFlow(context);

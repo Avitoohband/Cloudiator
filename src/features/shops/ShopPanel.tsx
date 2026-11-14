@@ -9,7 +9,7 @@ import { ItemIcon } from '../inventory/ItemPresentation';
 import { MatchCount, ItemSearch, NoMatch } from '../inventory/ItemSearch';
 import { SHOP_SORTS, queryItems, type SortKey } from '../inventory/item-query';
 import { gridColumns, rowFill } from '../inventory/grid-page';
-import { usePhoneCard } from '../inventory/phone-card';
+import { useCloseOnTurn, usePhoneCard } from '../inventory/phone-card';
 import inventory from '../inventory/InventoryPanel.module.css';
 import { Pager } from '../paging/Pager';
 import { PanelFooter } from '../paging/PanelFooter';
@@ -110,10 +110,8 @@ export function ShopPanel({ owner, busy, preview, buy, initialMerchant, clock, b
   const shopPaged = usePagedList(choices, { size: gridPage, resetKey: `${view}|${currency}|${query}|${sort}` });
   const backPaged = usePagedList(backCells, { size: gridPage, resetKey: `${query}|${backSort}` });
   const paged: { listRef: RefObject<HTMLElement | null>; goToIndex(index: number): void; rows: readonly unknown[] } = back ? backPaged : shopPaged;
-  // A page the grid turns under an open phone card (the bar's Next by keyboard, a page key pressed outside the card) closes the card, so it
-  // never lies over another page than its cell's (Codex review 6).
-  const shownPage = back ? backPaged.page : shopPaged.page;
-  useEffect(() => { phoneCard.close(false); }, [shownPage, back, phoneCard.close]);
+  // A page the grid turns under an open phone card closes the card, and the new page's first cell takes the focus (`useCloseOnTurn`).
+  useCloseOnTurn(phoneCard, `${back ? 'back' : 'shop'}|${back ? backPaged.page : shopPaged.page}`, paged.listRef);
   const fill = rowFill(paged.rows.length, gridColumns(gridPage));
   const pageIds = back ? backPaged.rows.map(cellId) : shopPaged.rows.map(choice => choice.id);
   // The grid's one Tab stop is on the page shown: the cell the arrow keys last reached, else the chosen one, else the first.

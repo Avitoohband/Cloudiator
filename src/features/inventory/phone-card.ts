@@ -6,7 +6,7 @@
 // menu does not scroll. The focus goes into the card and back to the tile when it closes (×, Escape); a press outside closes it too and
 // leaves the focus where that press puts it. What lies under it is inert meanwhile (the panel's `covered`). A pointer window keeps the card
 // beside the grid, always shown.
-import { useCallback, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type KeyboardEvent } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type KeyboardEvent, type RefObject } from 'react';
 import { COMPACT_QUERY } from '../shell/rail-reveal';
 
 const subscribe = (change: () => void) => {
@@ -127,4 +127,27 @@ export function usePhoneCard(available = true) {
     close();
   };
   return { phone, open, show, close, hostRef, anchorRef, sheetRef, onKeyDown };
+}
+
+/**
+ * A page the grid turns under the open card (the bar's Next by keyboard, a page key pressed outside the card) closes the card, so it never
+ * lies over another page than its tile's (Codex review 6). The turn's own focus move ran while the grid was still inert under the card, so
+ * once the card has closed the new page's first tile takes the focus, as every other turn gives it (fix wave re-review M4). `turn` changes
+ * with the page shown; `list` is the page's container (`usePagedList`'s `listRef`).
+ */
+export function useCloseOnTurn(card: { open: boolean; close(giveBack?: boolean): void }, turn: unknown, list: RefObject<HTMLElement | null>) {
+  const open = useRef(card.open);
+  open.current = card.open;
+  const focusFirst = useRef(false);
+  const { close } = card;
+  useEffect(() => {
+    if (!open.current) return;
+    focusFirst.current = true;
+    close(false);
+  }, [turn, close]);
+  useEffect(() => {
+    if (card.open || !focusFirst.current) return;
+    focusFirst.current = false;
+    list.current?.querySelector<HTMLElement>('[data-page-row]')?.focus({ preventScroll: true });
+  });
 }

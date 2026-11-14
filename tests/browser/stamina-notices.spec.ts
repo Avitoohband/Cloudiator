@@ -91,6 +91,22 @@ async function shot(page: Page, testInfo: TestInfo, name: string) {
 const fitsWidth = (locator: Locator) => locator.evaluate(el => { const r = el.getBoundingClientRect(); return r.left >= 0 && r.right <= window.innerWidth + 0.5; });
 
 test.describe('stamina notices', () => {
+  test('dismissing a next-slot warning in one tab hides it in the other', async ({ page, context }) => {
+    await live(context, { owner: aster(12), serverNowMs: () => MORNING });
+    const other = await context.newPage();
+    try {
+      await openCamp(page, MORNING);
+      await openCamp(other, MORNING);
+      const warning = 'Not enough stamina for your next Expedition';
+      await expect(notice(page)).toContainText(warning);
+      await expect(notice(other)).toContainText(warning);
+      await notice(page).getByRole('button', { name: 'Dismiss', exact: true }).click();
+      await expect(notice(page)).toHaveText('');
+      await expect(notice(other)).toHaveText('');
+    } finally {
+      await other.close();
+    }
+  });
   test.skip(production, 'Live mode uses the development-only intercepted Supabase transport.');
 
   test('marks the part that will rest instead, and the stamina after the parts that run', async ({ page, context }, testInfo) => {

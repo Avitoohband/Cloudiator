@@ -101,7 +101,7 @@ import { DEFAULT_MENU_PREFS, useLabelPrefs, useMenuPrefs } from './menu-prefs';
 import { MenuSurface } from './MenuSurface';
 import { PatchNotice, reloadPage } from './PatchNotice';
 import { StaminaNotice } from './StaminaNotice';
-import { dismissSlot, readDismissedSlots, type NoticeKind } from './stamina-dismissals';
+import { STAMINA_DISMISSED_KEY, dismissSlot, pruneDismissedSlots, readDismissedSlots, type NoticeKind } from './stamina-dismissals';
 import { modalOpen, useModalOpen } from './modal';
 import { PerfOverlay, perfPhaseOf } from './PerfOverlay';
 import { PAGED_MENUS, menusFor, originMenu, type MenuId } from './menus';
@@ -633,6 +633,18 @@ export function CampShell({ fixture, previewAs, previewResting = false, previewB
   // (`stamina-dismissals.ts`), so a reload in the same slot does not bring a dismissed one back; `dismissals` re-reads them after each dismissal.
   const [dismissals, setDismissals] = useState(0);
   const staminaOwner = viewer === 'player' ? owner?.gladiatorId ?? null : null;
+  const confirmedStaminaSlot = fixture ? null : game.slotIndex;
+  useEffect(() => {
+    if (staminaOwner === null) return;
+    const changed = (event: StorageEvent) => {
+      if (event.key === STAMINA_DISMISSED_KEY || event.key === null) setDismissals(n => n + 1);
+    };
+    window.addEventListener('storage', changed);
+    return () => window.removeEventListener('storage', changed);
+  }, [staminaOwner]);
+  useEffect(() => {
+    if (staminaOwner !== null && confirmedStaminaSlot !== null) pruneDismissedSlots(confirmedStaminaSlot);
+  }, [confirmedStaminaSlot, staminaOwner]);
   const dismissedNext = useMemo(() => (staminaOwner ? readDismissedSlots(staminaOwner, 'next') : new Set<number>()),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [staminaOwner, dismissals]);

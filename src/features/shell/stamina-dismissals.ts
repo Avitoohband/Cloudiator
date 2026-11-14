@@ -1,7 +1,7 @@
 // Patch 1.9 Task 29 addition: which stamina notices the player dismissed, by gladiator and slot index, kept across a reload on this device.
 // `next` is the notice before the next slot (it will not run), `now` the pop-up while the running slot rests instead. A dismissal lasts for
 // its slot only. The device's storage may be missing, blocked or hold garbage: every read and write is guarded, and the page's own memory
-// answers then (for the page's life). Only the newest 20 slots of each list are kept.
+// answers then (for the page's life). Only the newest 20 slots of each list are kept and old slots are pruned against server time.
 export const STAMINA_DISMISSED_KEY = 'cloudiator.stamina-dismissed.v1';
 const KEEP = 20;
 export type NoticeKind = 'next' | 'now';
@@ -38,6 +38,27 @@ export function dismissSlot(gladiatorId: string, kind: NoticeKind, slot: number)
   const slots = [...new Set([...readDismissedSlots(gladiatorId, kind), slot])].sort((a, b) => a - b).slice(-KEEP);
   memory = { ...memory, [gladiatorId]: { ...memory[gladiatorId], [kind]: slots } };
   try { localStorage.setItem(STAMINA_DISMISSED_KEY, JSON.stringify({ ...stored, [gladiatorId]: { ...stored[gladiatorId], [kind]: slots } })); } catch { /* No storage: the page's memory answers. */ }
+}
+
+function withoutExpiredSlots(stored: Stored, oldest: number): Stored {
+  const kept: Stored = {};
+  for (const [gladiatorId, lists] of Object.entries(stored)) {
+    const next = lists.next?.filter(slot => slot >= oldest);
+    const now = lists.now?.filter(slot => slot >= oldest);
+    if (next?.length || now?.length) kept[gladiatorId] = { ...(next?.length ? { next } : {}), ...(now?.length ? { now } : {}) };
+  }
+  return kept;
+}
+
+/** Keep the preceding slot for another tab that is still crossing the boundary. */
+export function pruneDismissedSlots(confirmedSlot: number): void {
+  if (!Number.isSafeInteger(confirmedSlot) || confirmedSlot < 0) return;
+  const oldest = Math.max(0, confirmedSlot - 1);
+  memory = withoutExpiredSlots(memory, oldest);
+  const stored = readStored();
+  const next = JSON.stringify(withoutExpiredSlots(stored, oldest));
+  if (next === JSON.stringify(stored)) return;
+  try { localStorage.setItem(STAMINA_DISMISSED_KEY, next); } catch { /* The page's memory still answers. */ }
 }
 
 /** Tests only: forget this page's memory (a reload). */

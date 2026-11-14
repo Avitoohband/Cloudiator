@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { RULES_V2 } from '@domain/rules-v2';
 import { restingNowPopup, restingNowText } from '../../src/features/schedule/stamina-text';
-import { STAMINA_DISMISSED_KEY, dismissSlot, readDismissedSlots, resetDismissalMemory } from '../../src/features/shell/stamina-dismissals';
+import { STAMINA_DISMISSED_KEY, dismissSlot, pruneDismissedSlots, readDismissedSlots, resetDismissalMemory } from '../../src/features/shell/stamina-dismissals';
 
 // Patch 1.9 Task 29 addition (Avi, 2026-11-13: "it should also appear as the expedition pop up appear, and the user can dismiss it"): a
 // pop-up while the RUNNING slot rests instead of its plan, once per slot, its dismissal (and the pre-slot notice's) kept across a reload.
@@ -66,6 +66,22 @@ describe('dismissals kept across a reload', () => {
     expect(kept.size).toBe(20);
     expect(kept.has(SLOT + 29)).toBe(true);
     expect(kept.has(SLOT)).toBe(false);
+  });
+
+  it('prunes expired slots for every gladiator and preserves current and upcoming dismissals', () => {
+    const store = memoryStorage();
+    dismissSlot('g1', 'now', SLOT - 10);
+    dismissSlot('g1', 'now', SLOT - 1);
+    dismissSlot('g1', 'now', SLOT);
+    dismissSlot('g1', 'next', SLOT + 1);
+    dismissSlot('g2', 'now', SLOT - 20);
+    dismissSlot('g3', 'next', SLOT + 1);
+    pruneDismissedSlots(SLOT);
+    expect(readDismissedSlots('g1', 'now')).toEqual(new Set([SLOT - 1, SLOT]));
+    expect(readDismissedSlots('g2', 'now')).toEqual(new Set());
+    expect(JSON.parse(store.get(STAMINA_DISMISSED_KEY)!)).toEqual({
+      g1: { now: [SLOT - 1, SLOT], next: [SLOT + 1] }, g3: { next: [SLOT + 1] },
+    });
   });
 
   it('works without storage: the page remembers for its own life', () => {

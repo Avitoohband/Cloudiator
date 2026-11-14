@@ -26,10 +26,27 @@ function result(kind: LiveNotification['summary']['resolvedKind'], settledAtMs: 
   } };
 }
 
-async function expectFits(page: Page) {
+async function expectFits(page: Page, bodyMayScroll = false) {
   const dialog = away(page);
   await expect(dialog).toBeVisible();
-  await expect.poll(() => dialog.getByTestId('away-summary-body').evaluate(body => body.scrollHeight - body.clientHeight)).toBeLessThanOrEqual(1);
+  if (!bodyMayScroll) {
+    await expect.poll(() => dialog.getByTestId('away-summary-body').evaluate(body => body.scrollHeight - body.clientHeight)).toBeLessThanOrEqual(1);
+  }
+  const lines = dialog.getByRole('listitem');
+  expect(await lines.count()).toBeGreaterThan(0);
+  expect(await lines.evaluateAll(rows => rows.flatMap(row => {
+    const text = row.lastElementChild as HTMLElement;
+    const style = getComputedStyle(text);
+    return text.scrollWidth > text.clientWidth || style.textOverflow === 'ellipsis' || style.whiteSpace === 'nowrap'
+      ? [{ text: text.textContent, width: text.clientWidth, content: text.scrollWidth, overflow: style.textOverflow, whitespace: style.whiteSpace }] : [];
+  })), 'each result wraps without truncation').toEqual([]);
+  if (page.viewportSize()!.width === 360) {
+    const lefts = await lines.evaluateAll(rows => rows.map(row => row.getBoundingClientRect().left));
+    expect(new Set(lefts).size, 'phone result lines stay in one column').toBe(1);
+  }
+  for (const name of [/^(Open )?My gladiator$/, /^(See )?[Aa]ll results$/, /^Got it$/]) {
+    await expect(dialog.getByRole('button', { name })).toBeInViewport({ ratio: 1 });
+  }
   await expectNamedControls(dialog, 'away summary');
   expect(await contrastIssues(dialog)).toEqual([]);
 }
@@ -102,6 +119,110 @@ test('a background owner read failure leaves the summary open and Got it still m
   await expect.poll(() => seen(page)).toBeGreaterThanOrEqual(now);
 });
 
+test('Got it records dismissal time while results settled with the summary open stay in Notifications', async ({ page, context }) => {
+  await page.clock.install();
+  const user = await seedSession(context);
+  const since = now - 120 * minute;
+  let serverNow = now;
+  const owner = structuredClone(ownerFixture);
+  owner.inbox = { ...owner.inbox, notificationsSeenMs: since, unread: 0, newNotifications: 1 };
+  const first = result('expedition', now - 15 * minute);
+  const later = result('training', now + 30 * minute);
+  const live = await routeLiveReads(context, { world: emptyWorld(now), owner, notifications: [first], ownerAccountId: user.id, serverNowMs: () => serverNow });
+  const marks: number[] = [];
+  await context.route(`${SUPABASE_URL}/functions/v1/game-command`, async route => {
+    if (route.request().method() !== 'POST') return route.fallback();
+    const command = route.request().postDataJSON();
+    if (command.kind !== 'see-notifications') return route.fallback();
+    marks.push(command.upToMs);
+    owner.inbox.notificationsSeenMs = command.upToMs;
+    owner.inbox.newNotifications = 1;
+    live.setOwner(owner);
+    await route.fulfill({ status: 200, headers: { 'access-control-allow-origin': '*' }, json: { ok: true, value: { seenMs: command.upToMs } } });
+  });
+  await seedVisit(page, since);
+  await visit(page, '/game/');
+  const dialog = away(page);
+  await expect(dialog).toContainText('1 result');
+  serverNow += 45 * minute;
+  live.setNotifications([later, first]);
+  await page.evaluate(time => window.__cloudiatorShell!.clock.freeze(time), serverNow);
+  await expect(dialog).toBeVisible();
+  expect(await seen(page)).toBe(since);
+  await dialog.getByRole('button', { name: 'Got it' }).click();
+  await expect.poll(() => marks).toEqual([first.summary.settledAtMs]);
+  await expect.poll(() => seen(page)).toBe(serverNow);
+  await page.clock.fastForward(60_000);
+  await expect(dialog).toBeHidden();
+  await page.getByTestId('corner-chip').locator('[data-messages-button]').click();
+  const panel = page.getByRole('region', { name: 'Messages', exact: true });
+  await expect(panel.getByRole('tab', { name: /^Notifications/ })).toHaveAttribute('aria-selected', 'true');
+  await expect(panel.getByText('Training finished')).toBeVisible();
+});
+
+test('another tab dismisses an open copy at its cutoff without any storage write back', async ({ page }) => {
+  await seedVisit(page);
+  await visit(page);
+  const dialog = away(page);
+  await expect(dialog).toBeVisible();
+  const dispatch = (time: number) => page.evaluate(async ({ key, id, time }) => {
+    localStorage.setItem(key, JSON.stringify({ [id]: time }));
+    const original = Storage.prototype.setItem;
+    let writes = 0;
+    Storage.prototype.setItem = function (name, value) { if (name === key) writes++; original.call(this, name, value); };
+    try {
+      window.dispatchEvent(new StorageEvent('storage', { key, newValue: JSON.stringify({ [id]: time }), storageArea: localStorage }));
+      await new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
+      return writes;
+    } finally { Storage.prototype.setItem = original; }
+  }, { key, id, time });
+  expect(await dispatch(now - 1)).toBe(0);
+  await expect(dialog).toBeVisible();
+  expect(await dispatch(now)).toBe(0);
+  await expect(dialog).toBeHidden();
+  expect(await seen(page)).toBe(now);
+  await expect(page.locator('[data-camp-view] [role="application"]')).toBeFocused();
+});
+
+test('reload while the summary is open shows it again without saving the visit', async ({ page }) => {
+  const since = now - 1_180 * minute;
+  await seedVisit(page, since);
+  await visit(page);
+  await expect(away(page)).toContainText('12 results');
+  expect(await seen(page)).toBe(since);
+  await page.reload();
+  await campReady(page);
+  await expect(away(page)).toContainText('12 results');
+  expect(await seen(page)).toBe(since);
+});
+
+test('a six-item day with two dungeons and Arena uses wrapped single-column results without dense mode', async ({ page, context, hasTouch }) => {
+  await page.setViewportSize(hasTouch ? { width: 360, height: 780 } : { width: 1280, height: 720 });
+  const user = await seedSession(context);
+  const since = now - 120 * minute;
+  const owner = structuredClone(ownerFixture);
+  owner.inbox.notificationsSeenMs = since;
+  const items = Array.from({ length: 6 }, () => ({ catalogId: 'spear:5:common', catalogVersion: 'v1' as const, tier: 5 as const, rarity: 'common' as const, quantity: 1 }));
+  const arena = [12, -10, 12].map((ratingDelta, index) => {
+    const note = result('arena', now - (index + 5) * minute);
+    note.summary.result = ratingDelta > 0 ? 'victory' : 'defeat';
+    note.summary.ratingDelta = ratingDelta;
+    return note;
+  });
+  await routeLiveReads(context, { world: emptyWorld(now), owner, notifications: [
+    result('expedition', now - minute, items), result('dungeon', now - 2 * minute), result('dungeon', now - 3 * minute), ...arena,
+  ], ownerAccountId: user.id, serverNowMs: () => now });
+  await seedVisit(page, since);
+  await visit(page, '/game/');
+  const dialog = away(page);
+  await expect(dialog).not.toHaveAttribute('data-dense');
+  await expect(dialog).toContainText('Arena: 2 won · 1 lost · rating +14');
+  await expect(dialog.getByRole('listitem').filter({ hasText: /^Arena:/ })).toHaveCount(1);
+  await expect(dialog.getByRole('listitem').filter({ hasText: /^Wolf Den:/ })).toHaveCount(2);
+  await expect(dialog.getByTestId('away-summary-item')).toHaveCount(6);
+  await expectFits(page);
+});
+
 test('fits a week of tournament and dungeon results with the footer in view', async ({ page, context, hasTouch }) => {
   await page.setViewportSize(hasTouch ? { width: 360, height: 780 } : { width: 1280, height: 720 });
   const user = await seedSession(context);
@@ -130,15 +251,24 @@ test('fits a week of tournament and dungeon results with the footer in view', as
   await visit(page, '/game/');
   const dialog = away(page);
   await expect(dialog).toContainText('19 results');
-  await expect(dialog).toContainText(/4 more dungeon runs.*7 items/);
-  await expect(dialog).toContainText('4 more tournaments');
-  await expect(dialog).toContainText('1 more title');
+  await expect(dialog).toContainText(/5 more dungeon runs.*9 items/);
+  await expect(dialog).toContainText('5 more tournaments');
+  for (const name of ['Rare Find', 'Victor', 'Tiro']) await expect(dialog.getByText(name, { exact: true })).toBeVisible();
   await expect(dialog).toContainText('Bag full');
-  await expect(dialog.getByRole('button', { name: 'Open schedule' })).toBeInViewport({ ratio: 1 });
-  await expect(dialog.getByRole('button', { name: 'Read' })).toBeInViewport({ ratio: 1 });
   await expect(dialog.getByTestId('away-summary-item').first()).toHaveAccessibleName('Rare Spear (tier 5)');
-  await expectFits(page);
-  await expect(dialog.getByRole('button', { name: /All results/i })).toBeInViewport({ ratio: 1 });
+  const copy = await dialog.getByRole('listitem').allTextContents();
+  const tournamentMore = copy.findIndex(line => line.includes('5 more tournaments'));
+  const dungeonMore = copy.findIndex(line => line.includes('5 more dungeon runs'));
+  expect(copy[tournamentMore - 1]).toContain('Silver Tournament: 1st place');
+  expect(copy[dungeonMore - 1]).toContain('Wolf Den: your party won');
+  await expectFits(page, hasTouch);
+  await capture(page, hasTouch, 'week');
+  for (const name of ['Open schedule', 'Read']) {
+    const action = dialog.getByRole('button', { name, exact: true });
+    await action.scrollIntoViewIfNeeded();
+    await expect(action).toBeInViewport({ ratio: 1 });
+    await expect(dialog.getByRole('button', { name: 'Got it' })).toBeInViewport({ ratio: 1 });
+  }
 });
 
 test('opens on a new device from the notification mark and ignores an ordinary fixture visit', async ({ page }) => {
@@ -488,7 +618,7 @@ test('shows only small-day gains and fits the approved phone sheet', async ({ pa
   await capture(page, hasTouch, 'small');
 });
 
-async function capture(page: Page, phone: boolean, day: 'big' | 'small') {
+async function capture(page: Page, phone: boolean, day: 'big' | 'small' | 'week') {
   const shots = process.env.TASK35_SHOTS;
   if (!shots) return;
   await expect(away(page).getByTestId('profile-look').locator('[data-layer]').first()).toBeVisible();

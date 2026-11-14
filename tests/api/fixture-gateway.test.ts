@@ -51,18 +51,6 @@ test('away variants supply a stable bounded owner read and mark only their own s
   expect(await empty.rested!()).toEqual([]);
 });
 
-test('the away fixture answers whether a bounded interval has an older owner result', async () => {
-  const gateway = createFixtureGateway({ away: 'big' });
-  const { gladiatorId, inbox } = await gateway.owner();
-  const { serverNowMs } = await gateway.revision();
-  const visit = serverNowMs - 1_180 * 60_000;
-  expect(await gateway.hasResultsBetween!(gladiatorId, inbox.notificationsSeenMs, visit)).toBe(false);
-  const firstResultTime = serverNowMs - 1_045 * 60_000;
-  expect(await gateway.hasResultsBetween!(gladiatorId, visit, firstResultTime)).toBe(true);
-  expect(await gateway.hasResultsBetween!(gladiatorId, firstResultTime, firstResultTime + 1)).toBe(false);
-  expect(await gateway.hasResultsBetween!('9fce3cd5-e831-4a66-8ca1-16b4576b1499', visit, serverNowMs)).toBe(false);
-});
-
 test('fixture preview: a gladiator resting at home, and with ?as=resting the owner resting until its presence', async () => {
   const { RESTING_ACTOR, RESTING_PROFILE } = await import('../fixtures/resting');
   // Otho rests at home in the default preview's world: public, with no activity (Task 23.8's PublicActor.resting).

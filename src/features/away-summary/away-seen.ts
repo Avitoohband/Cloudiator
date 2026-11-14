@@ -26,9 +26,9 @@ export function readAwaySeen(gladiatorId: string): number | null {
   return memory.get(gladiatorId) ?? null;
 }
 
-/** Record another tab's visit without writing back to it. */
-export function onAwaySeenStorage(gladiatorId: string, event: Pick<StorageEvent, 'key'>): void {
-  if (event.key === AWAY_SEEN_KEY) readAwaySeen(gladiatorId);
+/** Record another tab's visit without writing back to it. Returns that visit, or null for another key. */
+export function onAwaySeenStorage(gladiatorId: string, event: Pick<StorageEvent, 'key'>): number | null {
+  return event.key === AWAY_SEEN_KEY ? readAwaySeen(gladiatorId) : null;
 }
 
 export function heartbeatAwaySeen(gladiatorId: string, now: number): void {

@@ -104,18 +104,12 @@ export function useAwaySummary({ owner, reads, clock, clockReady, ownerForSummar
           writeAwaySeen(id, through);
           return;
         }
+        // Got it marks through the newest result in the window, readable or not (M7). Results older than the device's last visit settled
+        // while the player was in the game, so the account mark passes them too and the Messages badge drops (Avi's Q1; N4).
         const newest = result.newestSettledMs;
         const mark = Math.max(summary.seenUpToMs ?? 0, newest !== null && newest > floor && newest <= through ? newest : 0);
-        // The account mark is one timestamp. Leave it alone if advancing would include older unseen records outside this summary.
-        let canMark = mark > floor;
-        if (canMark && serverMark < floor) {
-          const olderTitle = [...latest.titles, ...current.owner.titles].some(title => title.activityId === null && title.source !== 'joined'
-            && title.earnedAtMs > serverMark && title.earnedAtMs <= floor);
-          canMark = !olderTitle && gateway.hasResultsBetween !== undefined
-            && !await gateway.hasResultsBetween(id, serverMark, floor).catch(() => true);
-        }
-        if (!active || isBlocked() || (readAwaySeen(id) ?? 0) > floor) return;
-        const visit = { gladiatorId: id, through, summary: { ...summary, seenUpToMs: canMark ? mark : null } };
+        if ((readAwaySeen(id) ?? 0) > floor) return;
+        const visit = { gladiatorId: id, through, summary: { ...summary, seenUpToMs: mark > floor ? mark : null } };
         openVisit.current = visit;
         setOpened(visit);
       } catch {
@@ -134,7 +128,14 @@ export function useAwaySummary({ owner, reads, clock, clockReady, ownerForSummar
       else saveRecentVisit();
     };
     const onFocus = () => { void check(true); };
-    const onStorage = (event: StorageEvent) => onAwaySeenStorage(id, event);
+    const onStorage = (event: StorageEvent) => {
+      const seen = onAwaySeenStorage(id, event);
+      // Another tab dismissed this summary (its visit reaches this copy's cutoff): close this copy without writing anything back.
+      if (seen !== null && openVisit.current?.gladiatorId === id && seen >= openVisit.current.through) {
+        openVisit.current = null;
+        setOpened(null);
+      }
+    };
     const scheduled = () => {
       if (!clock.synced()) return;
       const now = clock.now();
@@ -162,7 +163,8 @@ export function useAwaySummary({ owner, reads, clock, clockReady, ownerForSummar
 
   return { summary, dismiss() {
     const visit = openVisit.current;
-    if (visit && visit.gladiatorId === gladiatorId) writeAwaySeen(visit.gladiatorId, visit.through);
+    // The visit ends when the player closes the summary (N2): results that settled while it was open stay in Notifications.
+    if (visit && visit.gladiatorId === gladiatorId) writeAwaySeen(visit.gladiatorId, Math.max(visit.through, clock.synced() ? clock.now() : 0));
     openVisit.current = null;
     setOpened(null);
   } };

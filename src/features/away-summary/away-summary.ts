@@ -19,7 +19,8 @@ const MINUTE_MS = 60_000;
 const DAY_MS = 24 * 60 * MINUTE_MS;
 export const MIN_AWAY_MS = 30 * MINUTE_MS;
 export const MAX_AWAY_RESULTS = 150;
-export const MAX_DETAILED_RUNS = 3;
+/** Tournaments and dungeons list their newest runs, then one line for the rest, so a long return fits without cutting a line. */
+export const MAX_DETAILED_RUNS = 2;
 
 export function awaySince(nowMs: number, deviceSeenMs: number | null, notificationsSeenMs: number): number {
   return Math.floor(Math.max(0, nowMs - 7 * DAY_MS, deviceSeenMs ?? 0, notificationsSeenMs));

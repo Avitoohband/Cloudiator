@@ -5,7 +5,7 @@ import type { HistoryCounts, HistoryKind, HistoryPage, MarketPage, OwnFeedback, 
 import type { PatchEntry } from '../patch';
 import { getBrowserClient } from './client';
 import {
-  GatewayReadError, hasResultsBetween, parseDungeonFightRef, readBouts, readDungeonFight, readHistory, readHistoryCounts, readOwnRewards, readLooks, readMarket, readMessages, readNotifications, readOwnFeedback, readOwner, readPatchNumbers, readPatches, readWorld, readRevision, readTimeline, readProfile,
+  GatewayReadError, parseDungeonFightRef, readBouts, readDungeonFight, readHistory, readHistoryCounts, readOwnRewards, readLooks, readMarket, readMessages, readNotifications, readOwnFeedback, readOwner, readPatchNumbers, readPatches, readWorld, readRevision, readTimeline, readProfile,
   readRecent, readRestAfter, readRested, readResultsSince, readSeasons, readStandingOf, readStandings, readTournament, readTournamentLog, type BoutFilter, type BoutsPage, type NotificationsRead, type OwnRewards,
   type ResultsSinceRead,
   type ProfileRead, type RestedActivity, type RevisionRead, type ShownMessage,
@@ -105,8 +105,6 @@ export interface GameGateway {
   notifications(): Promise<NotificationsRead>;
   /** The owner's completed results since a visit, up to 150, with the server's cutoff and verified progression for the away summary. */
   resultsSince?(gladiatorId: GladiatorId, sinceMs: number): Promise<ResultsSinceRead>;
-  /** Owner-only check for completed results after `afterMs` and through `throughMs`, including unreadable rows. */
-  hasResultsBetween?(gladiatorId: GladiatorId, afterMs: number, throughMs: number): Promise<boolean>;
   /**
    * One page (20) of the owner's own settled Arena and tournament bouts, newest first, for My bouts: each with its opponent (read only while
    * its replay is kept), result, renown and rating change. `filter` asks the server for All, Won or Lost; `cursor` is a page's `nextCursor`
@@ -304,7 +302,6 @@ export function createLiveGateway(): GameGateway {
     owner: () => read(readOwner),
     notifications: () => read(readNotifications),
     resultsSince: (gladiatorId, sinceMs) => read(client => readResultsSince(client, gladiatorId, sinceMs)),
-    hasResultsBetween: (gladiatorId, afterMs, throughMs) => read(client => hasResultsBetween(client, gladiatorId, afterMs, throughMs)),
     feedback: () => read(readOwnFeedback),
     bouts: (filter, cursor) => read(client => readBouts(client, filter, cursor)),
     world: () => publicRead(readWorld), revision: () => publicRead(readRevision),

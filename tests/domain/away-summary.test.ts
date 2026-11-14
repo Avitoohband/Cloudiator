@@ -1,8 +1,11 @@
 import { describe, expect, it } from 'vitest';
+import { createElement } from 'react';
+import { renderToStaticMarkup } from 'react-dom/server';
 import type { CreditedRewards, ItemReward } from '@contracts/events';
 import type { EarnedTitle, GameMessage, GameNotification, HistoryEntry } from '@contracts/reads';
 import { RULES_V2 } from '@domain/rules-v2';
 import { awaySince, awayTimeText, buildAwaySummary, type AwaySummaryInput } from '../../src/features/away-summary/away-summary';
+import { AwaySummaryDialog } from '../../src/features/away-summary/AwaySummaryDialog';
 import { notificationLines } from '../../src/features/messages/notifications';
 import { restedActivityName, restedNoteLines } from '../../src/features/schedule/stamina-text';
 import { ownerFixture } from '../fixtures/domain';
@@ -95,7 +98,7 @@ describe('While you were away model', () => {
       .toEqual([{ kind: 'tournament', label: 'Bronze Tournament', main: 'finished' }]);
   });
 
-  it('lists the three newest runs of each kind, summarizing older runs and their loot', () => {
+  it('lists the two newest runs of each kind, keeping older runs and their loot beside their kind', () => {
     const runs = Array.from({ length: 7 }, (_, i) => [
       result(`dungeon-${i}`, 'dungeon', { at: nowMs - i * MINUTE, destination: `Dungeon ${i}`, rewards: { items: [salvage] } }),
       result(`tournament-${i}`, 'tournament', { at: nowMs - i * MINUTE }),
@@ -104,10 +107,10 @@ describe('While you were away model', () => {
     const summary = buildAwaySummary(input({ results: runs, history: placements }));
     expect(summary?.resultCount).toBe(14);
     expect(summary?.lines.filter(line => line.kind === 'tournament').map(line => line.main))
-      .toEqual(['1st place', '2nd place', '3rd place', '4 more tournaments']);
+      .toEqual(['1st place', '2nd place', '5 more tournaments']);
     expect(summary?.lines.filter(line => line.kind === 'dungeon')).toMatchObject([
-      { label: 'Dungeon 0' }, { label: 'Dungeon 1' }, { label: 'Dungeon 2' },
-      { main: '4 more dungeon runs', detail: ' · 8 items' },
+      { label: 'Dungeon 0' }, { label: 'Dungeon 1' },
+      { main: '5 more dungeon runs', detail: ' · 10 items' },
     ]);
     expect(summary?.items).toMatchObject([{ catalogId: 'salvage', quantity: 14 }]);
   });
@@ -237,5 +240,42 @@ describe('While you were away model', () => {
     expect(phrase).toBe('a dungeon');
     expect(restedNoteLines(rest, rest.name, RULES_V2).title).toBe(`Aster rested instead of ${phrase}`);
     expect(buildAwaySummary(input({ rests: [rest] }))?.rested).toBe(`Rested once instead of ${phrase}: not enough stamina.`);
+  });
+});
+
+describe('away summary presentation', () => {
+  const render = (summary: NonNullable<ReturnType<typeof buildAwaySummary>>, compact = false) => renderToStaticMarkup(createElement(AwaySummaryDialog, {
+    summary, owner: ownerFixture, compact, onClose: () => {},
+  }));
+  const text = (html: string) => html.replace(/<[^>]*>/g, '');
+
+  it('keeps a six-item day with two dungeons and Arena in the regular layout', () => {
+    const summary = buildAwaySummary(input({ results: [
+      result('trip', 'expedition', { rewards: { items: Array.from({ length: 6 }, () => spear) } }),
+      result('d1', 'dungeon'), result('d2', 'dungeon'), result('arena', 'arena'),
+    ] }))!;
+    expect(summary.items).toHaveLength(6);
+    expect(render(summary, true)).not.toContain('data-dense');
+  });
+
+  it('keeps every title name in dense mode and groups the remaining runs beside their own kind', () => {
+    const data = input({ results: Array.from({ length: 7 }, (_, index) => [
+      result(`t${index}`, 'tournament'), result(`d${index}`, 'dungeon', { rewards: { overflowMoney: 4 } }),
+    ]).flat() });
+    data.owner.titles = [title('rare-find'), title('victor'), title('tiro')];
+    const html = render(buildAwaySummary(data)!);
+    expect(html).toContain('data-dense');
+    expect(html.match(/<em>/g)).toHaveLength(3);
+    const copy = text(html);
+    expect(copy.indexOf('5 more tournaments')).toBeLessThan(copy.indexOf('Dungeon:'));
+    expect(copy.indexOf('5 more dungeon runs')).toBeLessThan(copy.indexOf('Bag full:'));
+  });
+
+  it('provides hidden Rare item names as screen-reader text when Rares exceed the tile cap', () => {
+    const items = [...Array.from({ length: 8 }, () => spear), { ...spear, catalogId: 'dagger:5:rare' }];
+    const html = render(buildAwaySummary(input({ results: [result('loot', 'expedition', { rewards: { items } })] }))!);
+    expect(html).not.toMatch(/<strong[^>]*aria-label=/);
+    expect(text(html)).toContain('Additional Rare items: Rare Dagger (tier 5)');
+    expect(text(html)).toContain('+1 more, 1 Rare');
   });
 });

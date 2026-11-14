@@ -1017,8 +1017,9 @@ test.describe('Watch from Notifications', () => {
     await expect(panel.getByText('Arena victory')).toBeVisible();
   });
 
-  test('Got it in the away summary leaves unseen results from before this device visit', async ({ page }) => {
-    const { commands } = await player(page, { notifications: RESULTS, seenMs: NOW - 3 * 60 * MIN });
+  test('Got it in the away summary marks through its newest result including older in-game results and titles', async ({ page }) => {
+    const { commands, live } = await player(page, { notifications: RESULTS, seenMs: NOW - 3 * 60 * MIN,
+      titles: [earned('rare-find', NOW - 160 * MIN, 'result')] });
     await page.addInitScript(({ id, time }) => {
       localStorage.setItem('cloudiator.away-seen.v1', JSON.stringify({ [id]: time }));
     }, { id: ownerFixture.gladiatorId, time: NOW - 2 * 60 * MIN });
@@ -1027,11 +1028,14 @@ test.describe('Watch from Notifications', () => {
     await expect(summary).toContainText('2 results');
     await summary.getByRole('button', { name: 'Got it', exact: true }).click();
     await expect(summary).toBeHidden();
-    await expect(badge(page)).toHaveText('5');
-    expect(sent(commands, 'see-notifications')).toEqual([]);
+    await expect.poll(() => sent(commands, 'see-notifications')).toEqual([
+      { kind: 'see-notifications', operationId: expect.any(String), upToMs: newest(RESULTS) },
+    ]);
+    await expect(badge(page)).toHaveText('2');
+    expect(live.requests.filter(request => request.table === 'activities' && request.query.get('limit') === '1')).toEqual([]);
   });
 
-  test('Got it in the away summary includes the latest unreadable result when there is no older gap', async ({ page }) => {
+  test('Got it in the away summary includes the latest unreadable result', async ({ page }) => {
     const notifications = [...RESULTS.slice(0, 2), settled(4, 'training', 'completed', 5, { money: -1 })];
     const { commands } = await player(page, { notifications, seenMs: NOW - 3 * 60 * MIN });
     await page.addInitScript(({ id, time }) => {

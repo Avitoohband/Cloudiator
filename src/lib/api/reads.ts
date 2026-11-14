@@ -613,22 +613,6 @@ export function parseResultsSince(gladiatorId: string, sinceMs: number): string 
   return gladiatorId.toLowerCase();
 }
 
-export function parseResultsInterval(gladiatorId: string, afterMs: number, throughMs: number): string {
-  if (!whole(throughMs)) throw new GatewayReadError('unavailable');
-  return parseResultsSince(gladiatorId, afterMs);
-}
-
-/** Whether the owner's badge includes a result the away summary excluded. A row counts even if its summary cannot be decoded. */
-export async function hasResultsBetween(client: SupabaseClient, gladiatorId: GladiatorId, afterMs: number, throughMs: number): Promise<boolean> {
-  const id = parseResultsInterval(gladiatorId, afterMs, throughMs);
-  if (afterMs >= throughMs) return false;
-  const rows = checked(await client.from('activities').select('settled_at_ms')
-    .eq('gladiator_id', id).eq('status', 'completed').in('resolved_kind', NOTIFICATION_KINDS).not('summary', 'is', null)
-    .gt('settled_at_ms', afterMs).lte('settled_at_ms', throughMs).limit(1));
-  if (!Array.isArray(rows)) throw new GatewayReadError('unavailable');
-  return rows.length > 0;
-}
-
 /**
  * Three pages of the reader's own completed activities at most. A single server-time cutoff applies to every page. The owner's
  * unique slot index separates rows settled at the same time, including rows this client cannot present. Like Notifications, an

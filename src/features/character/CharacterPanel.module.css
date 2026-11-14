@@ -789,3 +789,8 @@ p.partTitle {
 .roster [data-page-list] > p.partTitle:first-child {
   margin-top: 0;
 }
+
+/* Patch 1.9 Task 33: My gladiator's sections, one shown at a time; the others stay mounted (a draft build or an open picker is kept). */
+.section[hidden] {
+  display: none;
+}

@@ -187,6 +187,15 @@
   display: none;
 }
 
+/* Patch 1.9 Task 33: a menu of named sections (a player's My gladiator, Inventory and shops) keeps one height as its sections change, so
+   its bottom bar stays in place, as the approved mockup draws it: as tall as the panel may be where it is pinned (its max-height). The
+   touch layout's sheet is tall already. */
+@media (hover: hover) and (min-width: 481px) {
+  .shell[data-owner-menu] .surface:is([data-menu-surface='inventory'], [data-menu-surface='gladiator'])[data-paged] {
+    height: 100%;
+  }
+}
+
 /* A profile card that replaces the panel (no room beside it, Task 21): the panel keeps its box under the card, unseen and inert. */
 .surface[data-covered] {
   visibility: hidden;

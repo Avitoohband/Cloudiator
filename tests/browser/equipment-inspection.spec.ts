@@ -3,6 +3,8 @@ import { CATALOG_V1 } from '../../supabase/functions/_shared/domain/catalog-v1';
 import { itemFixture, ownerFixture } from '../fixtures/domain';
 import { SUPABASE_URL, emptyWorld, isPresence, routeLiveReads, seedSession } from './live-routes';
 import { openMenu } from './shell-helpers';
+// Patch 1.9 Task 33: Worn equipment and the build planner are My gladiator's Worn equipment section.
+import { openSection } from './section-helpers';
 
 test.beforeEach(() => {
   test.skip(process.env.PLAYWRIGHT_STATIC === 'true', 'Live UI uses development-only intercepted identity transport.');
@@ -44,7 +46,7 @@ test('inspects worn and replacement equipment stats and weight', async ({ page, 
   });
   if (hasTouch) await page.setViewportSize({ width: 360, height: 740 });
   await page.goto('/game/');
-  const mine = await openMenu(page, 'My gladiator');
+  const mine = await openSection(await openMenu(page, 'My gladiator'), 'Worn equipment');
 
   const worn = mine.getByRole('region', { name: 'Worn equipment' });
   const wornSword = worn.getByRole('button', { name: 'Weapon: Sword' });

@@ -32,7 +32,11 @@
 .columns .filters button[aria-pressed="true"] { border-color: #ae864a; background: #4b3726; color: var(--gold); }
 
 .gridScroll {
-  height: 254px;
+  /* Patch 1.9 Task 33: the grid shows one page of whole rows (24 tiles in six columns, 15 in five), so the box fits its page and no longer
+     scrolls; the floor keeps its shape on a short page, and a page taller than it (big tiles) grows it, never clipped. */
+  min-height: 254px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
   overflow-y: auto;
   overscroll-behavior: contain;
   scrollbar-width: thin;
@@ -153,9 +157,15 @@
 }
 
 @media (hover: none), (max-width: 480px) {
-  .gridScroll { height: 194px; }
-  .grid { gap: 4px; }
+  .gridScroll { min-height: 194px; }
+  /* Five columns in the touch layout at any width, so a page of 15 is three whole rows (`grid-page.ts`). */
+  .grid { grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 4px; }
 }
+
+/* Patch 1.9 Task 33: one section at a time; the others stay mounted (a draft or a shop's filter is kept) and hidden. */
+.section[hidden] { display: none; }
+/* The Shops are a section of their own now: no rule and gap above them, as there was under the inventory. */
+.section > :global(.shops-panel) { margin-top: 0; padding-top: 0; border-top: 0; }
 
 /* Search and sort above the grid (Patch 1.9, the approved search mockup): the field on its own row above the chips, Sort beside it. */
 .searchRow { display: flex; gap: 6px; align-items: stretch; margin-bottom: 8px; }

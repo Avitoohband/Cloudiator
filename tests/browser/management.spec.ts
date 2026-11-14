@@ -8,6 +8,7 @@ import { ARENA_GLADIATORS } from '../fixtures/arena-ids';
 import { ownerFixture } from '../fixtures/domain';
 import { SLOT_MS, SUPABASE_URL, emptyWorld, isPresence, routeLiveReads, seedSession } from './live-routes';
 import { closeMenu, cornerChip, everyoneResults, expectOwnerShown, menuDialog, openMenu, quietArrivals, railMenus, touchLayout, pageTo } from './shell-helpers';
+import { openSection } from './section-helpers';
 
 // Task 13.7: the Results list, the profile card a click on a gladiator opens (and its keyboard paths: the Gladiators
 // list and the standings), the merchants' stalls as shortcuts into Inventory and shops, and the owner's pending build through a
@@ -197,9 +198,13 @@ test.describe('profile cards and merchants in the fixture preview', () => {
     await expect(inventory).toBeVisible();
     // Patch 1.9: the merchant chooses the shop's filter (Weapons or Armor) and its first piece.
     const shopFilters = inventory.getByRole('group', { name: 'Shop filters', exact: true });
+    // Task 33: a stall opens the menu on its Shops section.
+    await expect(inventory.getByRole('navigation', { name: 'Sections', exact: true }).locator('b').first()).toHaveText('Shops');
     await expect(shopFilters.getByRole('button', { pressed: true })).toHaveText(['Weapons']);
     await expect(inventory.getByTestId('offer-sword:1:common')).toHaveAttribute('aria-pressed', 'true');
-    await expect(inventory.getByRole('heading', { name: 'Shops', exact: true })).toBeInViewport();
+    // Task 33: the Shops section starts at the menu's top; its heading is read, not shown (the strip names the section), so its chips are what is in view.
+    await expect(inventory.getByRole('heading', { name: 'Shops', exact: true })).toBeAttached();
+    await expect(shopFilters).toBeInViewport();
     // On desktop pan the stall into the camp beside the open panel. Close the phone sheet before tapping camp.
     const touch = await touchLayout(page);
     if (touch) await closeMenu(page);
@@ -207,7 +212,8 @@ test.describe('profile cards and merchants in the fixture preview', () => {
     await expect(inventory).toBeVisible();
     await expect(shopFilters.getByRole('button', { pressed: true })).toHaveText(['Armor']);
     await expect(inventory.getByTestId('offer-round-shield:1:common')).toHaveAttribute('aria-pressed', 'true');
-    await expect(inventory.getByRole('heading', { name: 'Shops', exact: true })).toBeInViewport();
+    await expect(inventory.getByRole('navigation', { name: 'Sections', exact: true }).locator('b').first()).toHaveText('Shops');
+    await expect(shopFilters).toBeInViewport();
   });
 
   test('opens My gladiator’s sign-in prompt when a visitor clicks a merchant’s stall', async ({ page }) => {
@@ -355,7 +361,9 @@ test.describe('live results and a signed-in player through a slot end', () => {
     const mine = await openMenu(page, 'My gladiator');
     const status = mine.locator('p[role="status"]').filter({ hasText: /^(Scheduled|In progress|Processing results|Preparing|Completed)/ });
     await expect(status).toHaveText(/^In progress/);
-    // The class is fixed (Avi, 2026-10-28) and every build change is free: a stance change reserves nothing.
+    // The class is fixed (Avi, 2026-10-28) and every build change is free: a stance change reserves nothing. (Task 33: the planner is in
+    // the Worn equipment section; the activity line and the gold stay on the Overview, read there while it is hidden.)
+    await openSection(mine, 'Worn equipment');
     await mine.getByLabel('Stance', { exact: true }).selectOption('offensive');
     await mine.getByRole('button', { name: 'Queue build' }).click();
     await expect(mine.getByRole('heading', { name: 'Pending build', exact: true })).toBeVisible();

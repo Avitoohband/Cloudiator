@@ -49,7 +49,11 @@ test.describe('the richer profile card', () => {
       expect(Math.round(box.width)).toBe(520);
       expect(Math.abs(box.x + box.width / 2 - 720)).toBeLessThanOrEqual(1);
     }
-    expect(await lucilla.getByTestId('profile-look').locator('[data-layer]').count()).toBeGreaterThanOrEqual(3);
+    // The look's layers are drawn once the atlas's frame table has loaded (a chunk of its own): wait for the third, then count (Task 33 fix 5:
+    // a count read at once saw none under load).
+    const layers = lucilla.getByTestId('profile-look').locator('[data-layer]');
+    await expect(layers.nth(2)).toBeAttached();
+    expect(await layers.count()).toBeGreaterThanOrEqual(3);
     await expect(lucilla.getByTestId('profile-look')).toHaveAttribute('aria-hidden', 'true');
     for (const label of ['Attributes', 'Stats', 'Gear', 'Record']) await expect(section(page, 'Lucilla', label)).toBeVisible();
     await expect(section(page, 'Lucilla', 'Stats').getByRole('term')).toHaveText(['Health', 'Damage', 'Attack speed', 'Armor', 'Critical', 'Critical damage']);

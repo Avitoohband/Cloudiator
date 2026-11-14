@@ -6,7 +6,8 @@ import { CATALOG_V1 } from '../../supabase/functions/_shared/domain/catalog-v1';
 import { shopOffers } from '../../supabase/functions/_shared/domain/inventory';
 import type { GameCommand } from '../../supabase/functions/_shared/contracts/commands';
 import { SLOT_MS, emptyWorld, isPresence, routeLiveReads } from './live-routes';
-import { openMenu } from './shell-helpers';
+import { menuDialog, openMenu, pageTo } from './shell-helpers';
+import { openSection } from './section-helpers';
 import { slotTime } from './slot-time';
 import { contrastIssues, focusDrops, focusedElement, watchFocus } from './a11y-helpers';
 
@@ -122,6 +123,35 @@ async function chooseOffer(shops: Locator, catalogId: string, mobile: boolean) {
   await expect(cell).toHaveAttribute('aria-pressed', 'true');
 }
 
+/**
+ * Patch 1.9 Task 33: the grids show one page of whole rows. Reads `read` on every page of the open menu's grid, from page 1 in turn, and
+ * comes back to page 1 (the bar is the menu's bottom bar; a grid of one page has none).
+ */
+async function acrossPages<T>(menu: Locator, read: () => Promise<T[]>): Promise<T[]> {
+  const bar = menu.getByRole('navigation', { name: 'Pages', exact: true });
+  if (!(await bar.count())) return read();
+  const label = bar.locator('b').first();
+  const total = Number(/of (\d+)$/.exec((await label.textContent()) ?? '')![1]);
+  const first = bar.getByRole('button', { name: 'Go to page 1', exact: true });
+  if ((await first.getAttribute('aria-current')) !== 'page') { await first.click(); await expect(label).toHaveText(`Page 1 of ${total}`); }
+  const all: T[] = [];
+  for (let at = 1; at <= total; at++) {
+    if (at > 1) { await bar.getByRole('button', { name: 'Next page', exact: true }).click(); await expect(label).toHaveText(`Page ${at} of ${total}`); }
+    all.push(...await read());
+  }
+  if (total > 1) { await first.click(); await expect(label).toHaveText(`Page 1 of ${total}`); }
+  return all;
+}
+/** The tiles a grid page holds: four rows of six (24) where the grid has six columns, three of five (15) where it has five. */
+const gridPage = (grid: Locator) => grid.evaluate(element => (getComputedStyle(element).gridTemplateColumns.split(' ').length === 6 ? 24 : 15));
+/** Waits for `total` shop offers over the grid's pages (each page full but the last), from page 1, and comes back to page 1. */
+async function expectOffers(menu: Locator, shops: Locator, total: number) {
+  const cells = shops.locator('[data-testid^="offer-"]');
+  const size = await gridPage(shops.getByRole('group', { name: 'Shop items', exact: true }).locator('[data-page-list] > div'));
+  await expect(cells).toHaveCount(Math.min(size, total));
+  expect((await acrossPages(menu, async () => [await cells.count()])).reduce((sum, n) => sum + n, 0)).toBe(total);
+}
+
 /** The camp reads the owner again when its next sync sees a new world revision. */
 async function publishInventoryRefresh(page: Page, flow: Awaited<ReturnType<typeof inventoryFlow>>) {
   await page.waitForFunction(() => window.__cloudiatorShell!.syncs() > 0);
@@ -183,6 +213,58 @@ test('shows a square pixel-art inventory and selected item details', async ({ pa
   await expect(detail).toContainText('NPC sell value: 10 gold each');
   await filter('All').click();
   await expect(tiles).toHaveCount(4);
+});
+
+// Patch 1.9 Task 33 (menus with Back and Next): the grid shows one page of whole rows, 24 tiles in six columns on a desktop panel and 15 in
+// five on a phone; the tiles and then the free slots page together. A turn gives the focus to the page's first tile, paging changes no
+// choice, and a sort that keeps the chosen piece on another page shows that page.
+test('the inventory grid pages whole rows; the chosen piece stays chosen, and a sort shows its page', async ({ page, context }, info) => {
+  const flow = await inventoryFlow(context);
+  // Thirty different pieces (no two share a tile); the bag's last one has the name that sorts last.
+  const kinds = Object.keys(CATALOG_V1.items).slice(0, 30);
+  flow.state.inventory = kinds.map(id => ({ ...itemFixture(CATALOG_V1.items[id]), id: randomUUID() }));
+  const nameOf = (piece: ItemInstance) => CATALOG_V1.items[piece.catalogId].name;
+  const last = [...flow.state.inventory].sort((p, q) => nameOf(p).localeCompare(nameOf(q))).at(-1)!;
+  flow.state.inventory = [...flow.state.inventory.filter(piece => piece !== last), last];
+  const mobile = info.project.name === 'mobile';
+  if (mobile) await page.setViewportSize({ width: 360, height: 740 });
+  await page.goto('/game/');
+  const menu = await openMenu(page, 'Inventory and shops');
+  const grid = menu.getByTestId('inventory-grid');
+  const bar = menu.getByRole('navigation', { name: 'Pages', exact: true });
+  const label = bar.locator('b').first();
+  const size = mobile ? 15 : 24, pages = mobile ? 4 : 3;
+  // 30 tiles and 30 free slots of the 60.
+  await expect(grid.getByRole('button')).toHaveCount(size);
+  await expect(grid.locator(':scope > *')).toHaveCount(size);
+  await expect(label).toHaveText(`Page 1 of ${pages}`);
+  await expect(bar.getByRole('combobox')).toHaveCount(0);
+  const [first] = flow.state.inventory;
+  await expect(tile(grid, first)).toHaveAttribute('aria-pressed', 'true');
+  await bar.getByRole('button', { name: 'Next page', exact: true }).click();
+  await expect(label).toHaveText(`Page 2 of ${pages}`);
+  await expect(tile(grid, flow.state.inventory[size])).toBeFocused();
+  await expect(bar.getByRole('status')).toHaveText(`Page 2 of ${pages}`);
+  // The chosen piece is on page 1: page 2 changes no choice, and its card stays.
+  await expect(card(menu, first)).toBeVisible();
+  await expect(grid.locator('[aria-pressed="true"]')).toHaveCount(0);
+  // Choose the bag's last piece (page 2), go back to page 1: its card stays.
+  await tile(grid, last).click();
+  await expect(tile(grid, last)).toHaveAttribute('aria-pressed', 'true');
+  await bar.getByRole('button', { name: 'Go to page 1', exact: true }).click();
+  await expect(tile(grid, last)).toHaveCount(0);
+  await expect(card(menu, last)).toBeVisible();
+  // Sort by name: back to page 1, but the chosen piece is last by name, so its page shows (and the focus stays on Sort).
+  const sort = menu.getByRole('combobox', { name: 'Sort your items' });
+  await sort.focus();
+  await sort.selectOption('name');
+  await expect(label).toHaveText(`Page 2 of ${pages}`);
+  await expect(tile(grid, last)).toHaveAttribute('aria-pressed', 'true');
+  await expect(sort).toBeFocused();
+  // A search for it: one page, no bar, the piece still chosen.
+  await menu.getByRole('searchbox', { name: 'Search your items' }).fill(nameOf(last));
+  await expect(tile(grid, last)).toHaveAttribute('aria-pressed', 'true');
+  await expect(bar).toHaveCount(0);
 });
 
 test('explains a stale discard after an inventory refresh and recovers keyboard focus', async ({ page, context }) => {
@@ -274,7 +356,11 @@ test('buys through the live gateway, refreshes inventory, and confirms bound dis
   await page.goto('/game/');
   const menu = await openMenu(page, 'Inventory and shops');
   await expect(page.getByText('3 / 60 slots')).toBeVisible();
+  // Task 33: the shops are the menu's second section, the bag its first.
+  await openSection(menu, 'Shops');
   await page.getByRole('button', { name: 'Buy Sword', exact: true }).click();
+  await expect(menu.getByRole('status').filter({ hasText: 'Purchase confirmed.' })).toBeVisible();
+  await openSection(menu, 'Inventory');
   await expect(page.getByText('4 / 60 slots')).toBeVisible();
   const boundItem = flow.state.inventory[1];
   const bound = await selectItem(page, boundItem);
@@ -290,8 +376,11 @@ test('buys through the live gateway, refreshes inventory, and confirms bound dis
   await expect(page.getByText('Available gold: 260')).toBeVisible();
   // Patch 1.9: the banner is a Renown cell, sold by the Armorer. Patch 1.6 (spec "The Arena banner"): its card says where the
   // banner shows, before and after it is bought.
+  await openSection(menu, 'Shops');
   const shops = shopsRegion(menu);
   await shopButton(shops, 'Shop currency', 'Renown').click();
+  // Task 33: the banner is on the grid's last page.
+  await pageTo(menu, offerCell(shops, 'banner'));
   await chooseOffer(shops, 'banner', info.project.name === 'mobile');
   const offer = offerDetails(shops);
   const DESCRIPTION = 'Cosmetic · Account-bound · Shown on your profile card · No inventory slot or combat bonus';
@@ -315,27 +404,33 @@ test('buys through the live gateway, refreshes inventory, and confirms bound dis
 
 test('retries the same operation after a lost response and explains processing without optimistic changes', async ({ page, context }, info) => {
   const flow = await inventoryFlow(context);
-  await page.goto('/game/'); await openMenu(page, 'Inventory and shops');
+  await page.goto('/game/');
+  // Task 33: the purchase in the Shops section, its count of bag slots in the Inventory section.
+  const menu = await openSection(await openMenu(page, 'Inventory and shops'), 'Shops');
+  const slots = async (text: string) => { await openSection(menu, 'Inventory'); await expect(page.getByText(text)).toBeVisible(); await openSection(menu, 'Shops'); };
   flow.loseNext();
   await page.getByRole('button', { name: 'Buy Sword', exact: true }).click();
   await expect(page.locator('.inventory-panel').getByRole('alert')).toContainText('could not be confirmed');
-  await expect(page.getByText('3 / 60 slots')).toBeVisible();
+  await slots('3 / 60 slots');
   await page.getByRole('button', { name: 'Retry request' }).click();
-  await expect(page.getByText('4 / 60 slots')).toBeVisible();
+  await expect(menu.getByRole('status').filter({ hasText: 'Purchase confirmed.' })).toBeVisible();
+  await slots('4 / 60 slots');
   expect(flow.commands[1]).toEqual(flow.commands[0]);
   flow.reject('processing');
   await chooseOffer(shopsRegion(page), 'axe:1:common', info.project.name === 'mobile');
   await page.getByRole('button', { name: 'Buy Axe', exact: true }).click();
   await expect(page.locator('.inventory-panel').getByRole('alert')).toContainText('processing');
-  await expect(page.getByText('4 / 60 slots')).toBeVisible();
+  await slots('4 / 60 slots');
 });
 
 test('shows level locks and reservation restrictions with both currencies', async ({ page, context }, info) => {
   const flow = await inventoryFlow(context);
-  await page.goto('/game/'); await openMenu(page, 'Inventory and shops');
+  await page.goto('/game/');
+  const menu = await openMenu(page, 'Inventory and shops');
   const equipped = await selectItem(page, flow.state.inventory[2]);
   await expect(equipped.getByRole('button', { name: 'Sell' })).toBeDisabled();
   await expect(equipped.getByRole('button', { name: 'Discard' })).toBeDisabled();
+  await openSection(menu, 'Shops');
   // A level 1 player: the level 5 Sword is locked in both currencies, its card says why, and Buy stays disabled.
   const shops = shopsRegion(page), details = offerDetails(shops);
   await chooseOffer(shops, 'sword:5:common', info.project.name === 'mobile');
@@ -392,10 +487,11 @@ for (const [rulesVersion, unit] of [['v1', 10], ['v2', 4]] as const) {
 
 test('fixture inventory and shops remain read-only alongside the camp', async ({ page }) => {
   await page.goto('/game/?mode=fixture');
-  await openMenu(page, 'Inventory and shops');
+  const menu = await openSection(await openMenu(page, 'Inventory and shops'), 'Shops');
   await expect(page.getByRole('heading', { name: 'Shops', exact: true })).toBeVisible();
   await page.getByRole('button', { name: 'Buy Sword', exact: true }).click();
   await expect(page.getByRole('status').filter({ hasText: 'unavailable in this preview' })).toBeVisible();
+  await openSection(menu, 'Inventory');
   // The fixture owner's Iron helmet is listed in the fixture market (Task 18.3): reserved, so it cannot be sold or discarded.
   await expect(page.getByText('1 / 60 slots')).toBeVisible();
   await page.getByTestId('inventory-grid').getByRole('button', { name: /^Iron helmet/ }).click();
@@ -413,7 +509,7 @@ test('shows the shop offers as an icon grid by level, locks pieces above the lev
   flow.state.wallets = { money: 100, renown: 100 };
   if (info.project.name === 'mobile') await page.setViewportSize({ width: 360, height: 740 });
   await page.goto('/game/');
-  const menu = await openMenu(page, 'Inventory and shops');
+  const menu = await openSection(await openMenu(page, 'Inventory and shops'), 'Shops');
   const shops = shopsRegion(menu);
   const filters = shops.getByRole('group', { name: 'Shop filters', exact: true });
   const currencies = shops.getByRole('group', { name: 'Shop currency', exact: true });
@@ -428,8 +524,9 @@ test('shows the shop offers as an icon grid by level, locks pieces above the lev
   const gold = shopOffers(CATALOG_V1).filter(offer => offer.currency === 'money');
   expect(gold).toHaveLength(33);
   const cells = shops.locator('[data-testid^="offer-"]');
-  await expect(cells).toHaveCount(33);
-  const shown = await cells.evaluateAll(nodes => nodes.map(node => {
+  // Task 33: the grid shows one page of whole rows; every page is read, from page 1.
+  await expectOffers(menu, shops, 33);
+  const shown = await acrossPages(menu, () => cells.evaluateAll(nodes => nodes.map(node => {
     const { width, height } = node.getBoundingClientRect();
     const art = Array.from(node.querySelectorAll('[data-item-icon]')).find(element => {
       const style = getComputedStyle(element);
@@ -439,7 +536,7 @@ test('shows the shop offers as an icon grid by level, locks pieces above the lev
       icon: art?.getAttribute('data-item-icon') ?? null, iconOpacity: art ? Number(getComputedStyle(art).opacity) : null,
       lock: node.querySelector('[data-shop-lock]') !== null, locked: node.hasAttribute('data-locked'), poor: node.hasAttribute('data-poor'),
       priceColor: getComputedStyle(node.querySelector('[data-shop-price]')!).color, tag: node.querySelector('[data-shop-level]')?.textContent ?? '' };
-  }));
+  })));
   expect(shown.map(cell => cell.id).sort()).toEqual(gold.map(offer => offer.catalogId).sort());
   const levels = shown.map(cell => gold.find(offer => offer.catalogId === cell.id)!.requiredLevel);
   expect(levels).toEqual([...levels].sort((a, b) => a - b));
@@ -455,8 +552,12 @@ test('shows the shop offers as an icon grid by level, locks pieces above the lev
   }
   const color = (id: string) => shown.find(cell => cell.id === id)!.priceColor;
   expect(color('sword:5:common')).not.toBe(color('sword:1:common'));
+  // Each cell on its own page (`pageTo` turns from page 1).
+  await pageTo(menu, offerCell(shops, 'sword:10:common'));
   await expect(offerCell(shops, 'sword:10:common')).toHaveAccessibleDescription('Requires level 10');
+  await pageTo(menu, offerCell(shops, 'sword:5:common'));
   await expect(offerCell(shops, 'sword:5:common')).toHaveAccessibleDescription('Not enough available gold');
+  await pageTo(menu, offerCell(shops, 'sword:1:common'));
   await expect(offerCell(shops, 'sword:1:common')).toHaveAccessibleDescription('');
   await expect(offerCell(shops, 'sword:1:common')).toHaveAccessibleName(/^Sword, level 1, 40 gold/);
 
@@ -478,19 +579,22 @@ test('after a filter or currency change the chosen shop cell is inside the grid,
   await inventoryFlow(context);
   if (info.project.name === 'mobile') await page.setViewportSize({ width: 360, height: 740 });
   await page.goto('/game/');
-  const menu = await openMenu(page, 'Inventory and shops');
+  const menu = await openSection(await openMenu(page, 'Inventory and shops'), 'Shops');
   const shops = shopsRegion(menu);
   const scroll = shops.getByRole('group', { name: 'Shop items', exact: true });
   const inside = async (testId: string) => {
     const box = (await scroll.boundingBox())!, cell = (await shops.getByTestId(testId).boundingBox())!;
     return cell.y >= box.y - 1 && cell.y + cell.height <= box.y + box.height + 1;
   };
-  await scroll.evaluate(node => { node.scrollTop = node.scrollHeight; });
+  // Task 33: the grid no longer scrolls inside its box; a later page stands for a scrolled grid.
+  await menu.getByRole('navigation', { name: 'Pages', exact: true }).getByRole('button', { name: 'Next page', exact: true }).click();
   await shopButton(shops, 'Shop filters', 'Weapons').click();
   await expect.poll(() => inside('offer-sword:1:common')).toBe(true);
-  // A short list adds no empty rows below its last cell: the grid is no taller than its cells plus one row.
+  // A short list adds no empty rows below its last cell: the grid is no taller than its cells plus one row. (Task 33: the cells sit in
+  // the page's container, one level deeper.)
   const cells = await shops.locator('[data-testid^="offer-"]').count();
-  const slots = await scroll.locator(':scope > div > *').count();
+  const slots = await scroll.locator(':scope > [data-page-list] > div > *').count();
+  expect(slots).toBeGreaterThan(0);
   expect(slots).toBeLessThanOrEqual(Math.max(cells, 6));
   await shopButton(shops, 'Shop currency', 'Renown').click();
   await expect.poll(() => inside('offer-sword:1:renown')).toBe(true);
@@ -501,7 +605,7 @@ test('keeps the shop card, the keyboard choice and Buy on the same one of two sa
   const flow = await inventoryFlow(context);
   flow.state.progression.level = 5;
   await page.goto('/game/');
-  const menu = await openMenu(page, 'Inventory and shops');
+  const menu = await openSection(await openMenu(page, 'Inventory and shops'), 'Shops');
   const shops = shopsRegion(menu), details = offerDetails(shops);
   const first = offerCell(shops, 'sword:1:common'), fifth = offerCell(shops, 'sword:5:common');
   const [low, high] = [CATALOG_V1.items['sword:1:common'], CATALOG_V1.items['sword:5:common']];
@@ -562,22 +666,24 @@ test('chooses the first visible offer when a filter hides the choice, and sells 
   const mobile = info.project.name === 'mobile';
   const flow = await inventoryFlow(context);
   await page.goto('/game/');
-  const menu = await openMenu(page, 'Inventory and shops');
+  const menu = await openSection(await openMenu(page, 'Inventory and shops'), 'Shops');
   const shops = shopsRegion(menu), details = offerDetails(shops);
-  const cells = shops.locator('[data-testid^="offer-"]');
   await chooseOffer(shops, 'axe:1:common', mobile);
   await shopButton(shops, 'Shop filters', 'Weapons').click();
-  await expect(cells).toHaveCount(12);
+  // Task 33: the offers over the grid's pages.
+  await expectOffers(menu, shops, 12);
   await expect(offerCell(shops, 'axe:1:common')).toHaveAttribute('aria-pressed', 'true');
   await shopButton(shops, 'Shop filters', 'Armor').click();
-  await expect(cells).toHaveCount(21);
+  await expectOffers(menu, shops, 21);
   await expect(offerCell(shops, 'round-shield:1:common')).toHaveAttribute('aria-pressed', 'true');
   await expect(details.getByRole('button', { name: 'Buy Round shield', exact: true })).toBeVisible();
   await expect(details).toContainText('Off-hand · sold by the Armorer');
 
   await shopButton(shops, 'Shop currency', 'Renown').click();
-  await expect(cells).toHaveCount(22);
+  await expectOffers(menu, shops, 22);
   const banner = offerCell(shops, 'banner');
+  // Task 33: the banner comes after the gear, on the grid's last page.
+  await pageTo(menu, banner);
   await expect(banner).toBeVisible();
   await expect(banner).toContainText(String(CATALOG_V1.cosmetics.banner.renownPrice));
   await chooseOffer(shops, 'banner', mobile);
@@ -588,9 +694,9 @@ test('chooses the first visible offer when a filter hides the choice, and sells 
   await expect(banner).toHaveCount(0);
   await expect(offerCell(shops, 'sword:1:renown')).toHaveAttribute('aria-pressed', 'true');
   await shopButton(shops, 'Shop filters', 'All').click();
-  await expect(cells).toHaveCount(34);
+  await expectOffers(menu, shops, 34);
   await shopButton(shops, 'Shop currency', 'Gold').click();
-  await expect(cells).toHaveCount(33);
+  await expectOffers(menu, shops, 33);
   await expect(offerCell(shops, 'sword:1:common')).toHaveAttribute('aria-pressed', 'true');
   expect(flow.commands).toEqual([]);
 });
@@ -875,8 +981,10 @@ for (const action of ['sell-item', 'discard-item', 'buy-shop', 'buy-banner'] as 
     if (action === 'sell-item') button = (await selectItem(panel, flow.state.inventory[0])).getByRole('button', { name: /^Sell / });
     else if (action === 'discard-item') button = (await selectItem(panel, flow.state.inventory[1])).getByRole('button', { name: 'Discard', exact: true });
     else {
+      await openSection(panel, 'Shops');
       if (action === 'buy-banner') {
         await shopButton(shopsRegion(panel), 'Shop currency', 'Renown').click();
+        await pageTo(panel, offerCell(shopsRegion(panel), 'banner'));
         await chooseOffer(shopsRegion(panel), 'banner', info.project.name === 'mobile');
       }
       button = panel.getByRole('button', { name: action === 'buy-banner' ? 'Buy Arena banner' : 'Buy Sword', exact: true });
@@ -953,7 +1061,8 @@ for (const kind of ['queue-build', 'cancel-build'] as const) {
       return route.fallback();
     });
     await page.goto('/game/');
-    const panel = await openMenu(page, 'My gladiator');
+    // Task 33: the build planner is in My gladiator's Worn equipment section, under the slots.
+    const panel = await openSection(await openMenu(page, 'My gladiator'), 'Worn equipment');
     const button = panel.getByRole('button', { name: kind === 'queue-build' ? 'Queue build' : 'Cancel pending build', exact: true });
     await button.focus();
     const sent = page.waitForRequest(request => request.method() === 'POST' && request.url().endsWith('/game-command') && request.postDataJSON().kind === kind);
@@ -1011,7 +1120,7 @@ test('keeps the focus in the panel when Enter in an attribute field sends the bu
     return route.fallback();
   });
   await page.goto('/game/');
-  const panel = await openMenu(page, 'My gladiator');
+  const panel = await openSection(await openMenu(page, 'My gladiator'), 'Worn equipment');
   const field = panel.getByRole('spinbutton', { name: 'strength', exact: true });
   const button = panel.getByRole('button', { name: 'Queue build', exact: true });
   await field.focus();
@@ -1040,7 +1149,7 @@ test('explains an invalid build change in words and reloads the latest inventory
   const flow = await inventoryFlow(context, { gear: true });
   const { sword2 } = flow.pieces;
   await page.goto('/game/');
-  await openMenu(page, 'My gladiator');
+  await openSection(await openMenu(page, 'My gladiator'), 'Worn equipment');
   const weapon = page.locator('[data-equipment-slot="weapon"]');
   const option = page.locator(`[data-equipment-option="${sword2.id}"]`);
   await weapon.click();
@@ -1150,7 +1259,9 @@ const sortSelect = (scope: Locator, name = 'Sort the shops') => scope.getByRole(
 /** The live lines that speak of matches: the count under the grid only (the no-match box in the grid is not announced again). */
 const matchStatus = (scope: Locator) => scope.getByRole('status').filter({ hasText: /match/ });
 const matchLine = (scope: Locator, text: RegExp | string) => scope.getByText(text);
-const shopIds = (shops: Locator) => shops.locator('[data-testid^="offer-"]').evaluateAll(nodes => nodes.map(node => node.getAttribute('data-testid')!.slice('offer-'.length)));
+/** The shop's offers in order, over every page of the grid (Task 33). */
+const shopIds = (shops: Locator) => acrossPages(menuDialog(shops.page(), 'Inventory and shops'),
+  () => shops.locator('[data-testid^="offer-"]').evaluateAll(nodes => nodes.map(node => node.getAttribute('data-testid')!.slice('offer-'.length))));
 const tileIds = (inv: Locator) => inv.getByTestId('inventory-grid').locator('[data-testid^="tile-"]').evaluateAll(nodes => nodes.map(node => node.getAttribute('data-testid')!.slice('tile-'.length)));
 const entryName = (catalogId: string) => CATALOG_V1.items[catalogId].name;
 const BANNER_ID = CATALOG_V1.cosmetics.banner.id;
@@ -1164,9 +1275,11 @@ test('searches the shop by part of a name, with the filters and the currency, an
   await page.goto('/game/');
   const menu = await openMenu(page, 'Inventory and shops');
   const shops = shopsRegion(menu), details = offerDetails(shops), field = searchField(shops);
-  await expect(menu.getByRole('search', { name: 'Search the shops', exact: true })).toHaveCount(1);
+  // Each section's search has its own names (Task 33: one section shows at a time).
   await expect(menu.getByRole('search', { name: ITEM_SEARCH, exact: true })).toHaveCount(1);
   await expect(menu.getByRole('combobox', { name: ITEM_SORT, exact: true })).toHaveCount(1);
+  await openSection(menu, 'Shops');
+  await expect(menu.getByRole('search', { name: 'Search the shops', exact: true })).toHaveCount(1);
   await expect(field).toBeVisible();
   await expect(field).toHaveValue('');
   await expect(shops.getByRole('button', { name: 'Clear search', exact: true })).toHaveCount(0);
@@ -1200,7 +1313,7 @@ test('clears the shop search with the x button, Escape or Clear search, and a se
   await inventoryFlow(context);
   if (info.project.name === 'mobile') await page.setViewportSize({ width: 360, height: 740 });
   await page.goto('/game/');
-  const menu = await openMenu(page, 'Inventory and shops');
+  const menu = await openSection(await openMenu(page, 'Inventory and shops'), 'Shops');
   const shops = shopsRegion(menu), field = searchField(shops);
   await field.fill('dagger');
   await expect(shops.getByText('No items match “dagger”')).toBeVisible();
@@ -1209,16 +1322,17 @@ test('clears the shop search with the x button, Escape or Clear search, and a se
   await expect(offerDetails(shops)).toContainText('Clear the search');
   await shops.getByRole('button', { name: 'Clear search', exact: true }).last().click();
   await expect(field).toHaveValue('');
-  await expect(shops.locator('[data-testid^="offer-"]')).toHaveCount(33);
+  await expectOffers(menu, shops, 33);
   await field.fill('axe');
   await shops.getByRole('button', { name: 'Clear search', exact: true }).click();
   await expect(field).toHaveValue('');
   await expect(field).toBeFocused();
-  await expect(shops.locator('[data-testid^="offer-"]')).toHaveCount(33);
+  await expectOffers(menu, shops, 33);
   await field.fill('bow');
   await field.press('Escape');
   await expect(field).toHaveValue('');
-  await expect(shops.locator('[data-testid^="offer-"]')).toHaveCount(33);
+  await expectOffers(menu, shops, 33);
+  await field.focus();
   // Escape in an empty field leaves the menu to close as it always did.
   await expect(menu).toBeVisible();
   await field.press('Escape');
@@ -1229,7 +1343,7 @@ test('sorts the shop: Level, Price and Name ascend, Damage, Armor and Weight des
   await inventoryFlow(context);
   if (info.project.name === 'mobile') await page.setViewportSize({ width: 360, height: 740 });
   await page.goto('/game/');
-  const menu = await openMenu(page, 'Inventory and shops');
+  const menu = await openSection(await openMenu(page, 'Inventory and shops'), 'Shops');
   const shops = shopsRegion(menu), sort = sortSelect(shops);
   await expect(sort.locator('option')).toHaveText(['Level', 'Price', 'Name', 'Damage', 'Armor', 'Weight']);
   await expect(sort).toHaveValue('level');
@@ -1267,7 +1381,7 @@ test('sorts the shop: Level, Price and Name ascend, Damage, Armor and Weight des
   expect(ids.at(-1)).toBe(BANNER_ID);
   await sort.selectOption('price');
   ids = await shopIds(shops);
-  const prices = (await shops.locator('[data-shop-price]').allTextContents()).map(Number);
+  const prices = (await acrossPages(menu, () => shops.locator('[data-shop-price]').allTextContents())).map(Number);
   const banner = ids.indexOf(BANNER_ID);
   expect(banner).toBeGreaterThan(0);
   expect(prices[banner]).toBe(CATALOG_V1.cosmetics.banner.renownPrice);
@@ -1282,7 +1396,7 @@ test('keeps the shop card, the chosen cell and Buy on the same offer as search a
   flow.state.wallets = { money: 1000, renown: 100 };
   if (mobile) await page.setViewportSize({ width: 360, height: 740 });
   await page.goto('/game/');
-  const menu = await openMenu(page, 'Inventory and shops');
+  const menu = await openSection(await openMenu(page, 'Inventory and shops'), 'Shops');
   const shops = shopsRegion(menu), details = offerDetails(shops);
   await searchField(shops).fill('sword');
   await sortSelect(shops).selectOption('damage');
@@ -1307,14 +1421,15 @@ test('the chosen shop cell stays inside the grid after a search or a sort change
   await inventoryFlow(context);
   if (info.project.name === 'mobile') await page.setViewportSize({ width: 360, height: 740 });
   await page.goto('/game/');
-  const menu = await openMenu(page, 'Inventory and shops');
+  const menu = await openSection(await openMenu(page, 'Inventory and shops'), 'Shops');
   const shops = shopsRegion(menu), scroll = shops.getByRole('group', { name: 'Shop items', exact: true });
   const inside = async (testId: string) => {
     const box = (await scroll.boundingBox())!, cell = (await shops.getByTestId(testId).boundingBox())!;
     return cell.y >= box.y - 1 && cell.y + cell.height <= box.y + box.height + 1;
   };
   await sortSelect(shops).selectOption('price');
-  await scroll.evaluate(node => { node.scrollTop = node.scrollHeight; });
+  // Task 33: a later page stands for the scrolled grid.
+  await menu.getByRole('navigation', { name: 'Pages', exact: true }).getByRole('button', { name: 'Next page', exact: true }).click();
   await searchField(shops).fill('shield');
   const first = (await shopIds(shops))[0];
   await expect.poll(() => inside(`offer-${first}`)).toBe(true);
@@ -1331,6 +1446,7 @@ test('lays the search field above the chips with Sort beside it, on one row at 3
   const menu = await openMenu(page, 'Inventory and shops');
   // The phone sheet rises for 0.2 s: read the boxes once it has settled.
   await menu.evaluate(el => Promise.all(el.getAnimations().map(a => a.finished)));
+  await openSection(menu, 'Shops');
   const shops = shopsRegion(menu), field = searchField(shops), sort = sortSelect(shops);
   const chips = shops.getByRole('group', { name: 'Shop filters', exact: true });
   const [f, s, c, g] = await Promise.all([field.boundingBox(), sort.boundingBox(), chips.boundingBox(), shops.getByRole('group', { name: 'Shop items', exact: true }).boundingBox()]);
@@ -1876,6 +1992,8 @@ test('on a phone a tapped tile or shop cell brings its card into view; a pointer
     ['inventory', invGrid, invGrid.locator('[data-testid^="tile-"]'), details(inv)],
     ['shops', shopGrid, shopGrid.locator('[data-shop-cell]'), offerDetails(shops)],
   ] as const) {
+    // Task 33: each grid in its own section.
+    await openSection(menu, name === 'inventory' ? 'Inventory' : 'Shops');
     // A phone shows the card under its grid: as far out of view below as the menu scrolls (at rest the Inventory's card shows only
     // its first lines). A pointer window shows it beside the grid, from the grid's top row up: the grid goes to the menu's top.
     if (mobile) await hideBelow(body, card); else await toTop(body, grid);
@@ -1944,6 +2062,7 @@ test('clearing a search with no match brings back the chosen piece in the Invent
     await expect(inv.getByTestId(`item-${chosen}`)).toBeVisible();
   }
   // The Shops already do so.
+  await openSection(menu, 'Shops');
   const shops = shopsRegion(menu), shopField = searchField(shops);
   await offerCell(shops, 'axe:1:common').click();
   await shopField.fill('dagger');

@@ -4,6 +4,7 @@ import { DUNGEON_FIXTURES } from '../fixtures/dungeons';
 import { MENUS } from '../../src/features/shell/menus';
 import { SUPABASE_URL, dungeonLiveData, emptyWorld, routeLiveReads, seedSession } from './live-routes';
 import { cornerChip, expectOwnerShown, joinButton, menuDialog, openMenu, railIcons, railMenus, revealRail, touchLayout } from './shell-helpers';
+import { openSection } from './section-helpers';
 
 // Task 13.5: the full-screen camp shell. The camp fills the window; a hidden rail on the left edge (a ☰ button and
 // bottom sheets on touch) opens one floating menu at a time; the corner chip sits top right.
@@ -284,15 +285,22 @@ test.describe('the camp shell on any device', () => {
     for (const label of LABELS) {
       const menu = await openMenu(page, label);
       if (GOLD_SAID[label]) await expect(menu, label).toContainText(GOLD_SAID[label], { useInnerText: true });
-      for (const select of await menu.locator('select').all()) {
-        for (const value of await select.locator('option').evaluateAll(options => options.map(option => (option as HTMLOptionElement).value))) {
-          await select.selectOption(value);
-          await expect(body, `${label}: ${value}`).not.toContainText(MONEY_WORD, { useInnerText: true });
-          expect(await moneyWords(page), `${label}: ${value}`).toEqual([]);
+      // Patch 1.9 Task 33: My gladiator and Inventory and shops show one named section at a time: every section's selects, each in turn.
+      const circles = menu.getByRole('navigation', { name: 'Sections', exact: true }).getByRole('button', { name: /^Go to section: / });
+      const sections = await circles.evaluateAll(nodes => nodes.map(node => node.getAttribute('aria-label')!.slice('Go to section: '.length)));
+      for (const section of sections.length ? sections : [null]) {
+        if (section) await openSection(menu, section);
+        const where = section ? `${label}, ${section}` : label;
+        for (const select of await menu.locator('select:visible').all()) {
+          for (const value of await select.locator('option').evaluateAll(options => options.map(option => (option as HTMLOptionElement).value))) {
+            await select.selectOption(value);
+            await expect(body, `${where}: ${value}`).not.toContainText(MONEY_WORD, { useInnerText: true });
+            expect(await moneyWords(page), `${where}: ${value}`).toEqual([]);
+          }
         }
+        await expect(body, where).not.toContainText(MONEY_WORD, { useInnerText: true });
+        expect(await moneyWords(page), where).toEqual([]);
       }
-      await expect(body, label).not.toContainText(MONEY_WORD, { useInnerText: true });
-      expect(await moneyWords(page), label).toEqual([]);
     }
   });
 

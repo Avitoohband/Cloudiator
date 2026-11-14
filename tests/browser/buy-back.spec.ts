@@ -10,6 +10,7 @@ import { worldToScreen } from '../../src/game/iso';
 import { emptyWorld, isPresence, routeLiveReads, seedSession, SUPABASE_URL } from './live-routes';
 import { contrastIssues, noHorizontalScroll } from './a11y-helpers';
 import { expectOwnerShown, menuDialog, openMenu, quietArrivals } from './shell-helpers';
+import { openSection } from './section-helpers';
 
 // Patch 1.9 Task 23: Buy back in the Shops (the approved mockup, .superpowers/design/2026-11-12-feedback-buyback, notes.md "Buy back"). The owner
 // read lists the gladiator's last 10 gear sales of the current game day (`OwnerState.buyBack`, Task 22's M34); the Shops show them behind a
@@ -140,7 +141,8 @@ async function clickStallBeside(page: Page, frame: 'stall-weapons' | 'stall-armo
 async function openBuyBack(page: Page) {
   await page.goto('/game/');
   await expectOwnerShown(page, ownerFixture.name);
-  const menu = await openMenu(page, 'Inventory and shops');
+  // Patch 1.9 Task 33: the Shops are the menu's second section.
+  const menu = await openSection(await openMenu(page, 'Inventory and shops'), 'Shops');
   const shops = shopsOf(menu);
   await chip(shops).click();
   await expect(chip(shops)).toHaveAttribute('aria-pressed', 'true');
@@ -190,10 +192,95 @@ test('the chip counts the sales; the card shows the sold time, the price and the
   await expect(cells(shops)).toHaveCount(4);
   await expect(shops).toContainText('4 items to buy back · your last 10 sales of this game day. 20 / 60 bag slots used.');
   await expect(shops).toContainText(/Available gold\s*61/);
-  // The sword is in the bag again, with its own id.
+  // The sword is in the bag again, with its own id (Task 33: in the Inventory section).
   const sword = flow.state.inventory.at(-1)!;
+  await openSection(menu, 'Inventory');
   await expect(menu.getByTestId(`tile-${sword.id}`)).toBeVisible();
+  await openSection(menu, 'Shops');
   await shot(page, info, 'buyback-after', shops);
+});
+
+// Patch 1.9 Task 33: the Buy back list pages at 5 (a list: the Show choice too); the chosen sale stays chosen while the pages turn.
+test('the Buy back list shows 5 sales a page, and the chosen sale stays chosen across pages', async ({ page, context }) => {
+  const more: typeof SALES = [...SALES, ['axe:1:common', 10, 110], ['spear:1:common', 10, 120]];
+  await shopFlow(context, { sales: more });
+  const { menu, shops } = await openBuyBack(page);
+  await expect(chip(shops)).toHaveAccessibleName('Buy back (7)');
+  const bar = menu.getByRole('navigation', { name: 'Pages', exact: true });
+  await expect(cells(shops)).toHaveCount(5);
+  await expect(bar.locator('b').first()).toHaveText('Page 1 of 2');
+  await expect(bar.getByRole('combobox', { name: 'Rows per page' })).toHaveValue('5');
+  await expect(bar.getByRole('combobox', { name: 'Rows per page' }).locator('option').first()).toHaveText('Fit (5)');
+  await expect(cells(shops).nth(0)).toHaveAttribute('aria-pressed', 'true');
+  await bar.getByRole('button', { name: 'Next page', exact: true }).click();
+  await expect(bar.locator('b').first()).toHaveText('Page 2 of 2');
+  await expect(cells(shops)).toHaveCount(2);
+  await expect(cells(shops).nth(0)).toHaveAccessibleName('Axe, level 1, common, buy back for 10 gold');
+  await expect(cells(shops).nth(0)).toBeFocused();
+  // Paging changes no choice: the card is still the newest sale's.
+  await expect(card(shops).getByRole('heading', { name: 'Sword', exact: true })).toBeVisible();
+  await cells(shops).nth(1).click();
+  await expect(card(shops).getByRole('heading', { name: 'Spear', exact: true })).toBeVisible();
+  // A sort goes back to page 1, unless it keeps the chosen sale further on: by name the Spear is sixth, so page 2 shows with it.
+  await shops.getByRole('combobox', { name: 'Sort the shops' }).selectOption('name');
+  await expect(bar.locator('b').first()).toHaveText('Page 2 of 2');
+  await expect(shops.locator('[data-buyback-cell][aria-pressed="true"]')).toHaveAccessibleName(/^Spear/);
+  await shops.getByRole('combobox', { name: 'Sort the shops' }).selectOption('price');
+  await expect(shops.locator('[data-buyback-cell][aria-pressed="true"]')).toHaveAccessibleName(/^Spear/);
+  await expect(card(shops).getByRole('heading', { name: 'Spear', exact: true })).toBeVisible();
+});
+
+// Task 33 fix 2 (seen while filming the 1.9 candidate): pressing "Buy back for N gold" moved the Shops down by about 106 px while the purchase
+// was on its way. Nothing moves while a command is pending.
+test('nothing in the Shops moves while a buy back is on its way', async ({ page, context }, info) => {
+  // Seen on a 1920 x 1080 desktop, after a sale and Open Buy back.
+  if (info.project.name === 'desktop') await page.setViewportSize({ width: 1920, height: 1080 });
+  const flow = await shopFlow(context);
+  let release = () => {}, sent = 0;
+  const held = new Promise<void>(resolve => { release = resolve; });
+  // Registered after the flow's handler, so it runs first: the buy back waits until released, then the flow answers it.
+  await context.route(`${SUPABASE_URL}/functions/v1/game-command`, async route => {
+    const request = route.request();
+    if (request.method() === 'POST' && !isPresence(request) && (request.postDataJSON() as GameCommand).kind === 'buy-back') { sent++; await held; }
+    return route.fallback();
+  });
+  await page.goto('/game/');
+  await expectOwnerShown(page, ownerFixture.name);
+  const menu = await openMenu(page, 'Inventory and shops');
+  const axe = flow.state.inventory[0];
+  await menu.getByTestId(`tile-${axe.id}`).click();
+  await menu.getByTestId(`item-${axe.id}`).getByRole('button', { name: 'Sell Axe · 10 gold' }).click();
+  await menu.getByRole('region', { name: 'Item details' }).getByRole('button', { name: 'Open Buy back' }).click();
+  const shops = shopsOf(menu);
+  await expect(chip(shops)).toHaveAttribute('aria-pressed', 'true');
+  const places = () => Promise.all([shops, shops.getByRole('group', { name: 'Items to buy back' }), card(shops)]
+    .map(locator => locator.evaluate(element => Math.round(element.getBoundingClientRect().top))));
+  // The menu scrolled to its end, as a player reading the whole card leaves it, with the button in view (the click itself scrolls nothing).
+  const buy = card(shops).getByRole('button', { name: 'Buy back for 10 gold' });
+  await menu.getByTestId('menu-body').evaluate(body => { body.scrollTop = body.scrollHeight; });
+  await buy.scrollIntoViewIfNeeded();
+  const before = await places();
+  // Every frame from the press while the purchase is on its way: where the Shops, their grid and the card are.
+  await shops.evaluate(element => {
+    const parts = [element, element.querySelector('[role="group"][aria-label="Items to buy back"]')!, element.querySelector('[aria-label="Offer details"]')!];
+    const seen: number[][] = [];
+    const state = { seen, on: true };
+    (window as unknown as { __shopsSeen: typeof state }).__shopsSeen = state;
+    const look = () => { if (!state.on) return; seen.push(parts.map(node => Math.round(node.getBoundingClientRect().top))); requestAnimationFrame(look); };
+    requestAnimationFrame(look);
+  });
+  await buy.click();
+  await expect.poll(() => sent).toBe(1);
+  for (let look = 0; look < 5; look++) {
+    expect(await places()).toEqual(before);
+    await page.waitForTimeout(100);
+  }
+  const seen = await page.evaluate(() => { const state = (window as unknown as { __shopsSeen: { seen: number[][]; on: boolean } }).__shopsSeen; state.on = false; return state.seen; });
+  expect(seen.length).toBeGreaterThan(5);
+  expect([...new Set(seen.map(at => at.join(',')))]).toEqual([before.join(',')]);
+  release();
+  await expect(card(shops).getByRole('status').filter({ hasText: 'Bought back. Axe is in your bag again.' })).toBeVisible();
+  expect(buyBacks(flow.commands)).toHaveLength(1);
 });
 
 test('not enough gold turns Buy back off and says why', async ({ page, context }, info) => {
@@ -230,14 +317,16 @@ test('the empty state, then a sale: the after-sale line and Open Buy back', asyn
   await expect(shops).toContainText('0 items to buy back · your last 10 sales of this game day.');
   await shot(page, info, 'buyback-empty', shops);
 
-  // Sell the axe: the line says where to buy it back, and Open Buy back shows it on top.
+  // Sell the axe (in the Inventory section, Task 33): the line says where to buy it back, and Open Buy back shows the Shops section on it.
   const axe = flow.state.inventory[0];
+  await openSection(menu, 'Inventory');
   await menu.getByTestId(`tile-${axe.id}`).click();
   await menu.getByTestId(`item-${axe.id}`).getByRole('button', { name: 'Sell Axe · 10 gold' }).click();
   const itemDetails = menu.getByRole('region', { name: 'Item details' });
   await expect(itemDetails.getByRole('status').filter({ hasText: 'Sold for 10 gold. You can buy it back in Shops until the next game day.' })).toBeVisible();
   await shot(page, info, 'after-sale');
   await itemDetails.getByRole('button', { name: 'Open Buy back' }).click();
+  await expect(menu.getByRole('navigation', { name: 'Sections', exact: true }).locator('b').first()).toHaveText('Shops');
   await expect(chip(shops)).toHaveAttribute('aria-pressed', 'true');
   await expect(chip(shops)).toHaveAccessibleName('Buy back (1)');
   await expect(chip(shops)).toBeFocused();
@@ -252,17 +341,20 @@ test('an older server without Buy back: no Buy back chip, and a sale says only w
   const flow = await shopFlow(context, { olderServer: true });
   await page.goto('/game/');
   await expectOwnerShown(page, ownerFixture.name);
-  const menu = await openMenu(page, 'Inventory and shops');
+  const menu = await openSection(await openMenu(page, 'Inventory and shops'), 'Shops');
   const shops = shopsOf(menu);
   await expect(filters(shops).getByRole('button')).toHaveText(['All', 'Weapons', 'Armor']);
   await expect(chip(shops)).toHaveCount(0);
   const axe = flow.state.inventory[0];
+  await openSection(menu, 'Inventory');
   await menu.getByTestId(`tile-${axe.id}`).click();
   await menu.getByTestId(`item-${axe.id}`).getByRole('button', { name: 'Sell Axe · 10 gold' }).click();
   const itemDetails = menu.getByRole('region', { name: 'Item details' });
   await expect(itemDetails.getByRole('status').filter({ hasText: 'Sold Axe for 10 gold.' })).toBeVisible();
   await expect(menu).not.toContainText('buy it back');
   await expect(menu.getByRole('button', { name: 'Open Buy back' })).toHaveCount(0);
+  await openSection(menu, 'Shops');
+  await expect(filters(shops).getByRole('button')).toHaveText(['All', 'Weapons', 'Armor']);
   await expect(chip(shops)).toHaveCount(0);
   expect(flow.commands.map(command => command.kind)).toEqual(['sell-item']);
 });
@@ -273,6 +365,7 @@ test('after Open Buy back, a stall opens its merchant shop, not Buy back', async
   const { menu, shops } = await openBuyBack(page);
   await shops.getByRole('group', { name: 'Shop filters', exact: true }).getByRole('button', { name: 'All', exact: true }).click();
   const axe = flow.state.inventory[0];
+  await openSection(menu, 'Inventory');
   await menu.getByTestId(`tile-${axe.id}`).click();
   await menu.getByTestId(`item-${axe.id}`).getByRole('button', { name: 'Sell Axe · 10 gold' }).click();
   await menu.getByRole('region', { name: 'Item details' }).getByRole('button', { name: 'Open Buy back' }).click();
@@ -288,6 +381,8 @@ test('after Open Buy back, a stall opens its merchant shop, not Buy back', async
     await expect(pressed()).toHaveText([filter]);
     await expect(chip(shopsOf(inventory))).not.toBeFocused();
   }
+  // The Inventory section keeps its after-sale line and its Open Buy back (Task 33: the merchant's shop is the Shops section).
+  await openSection(menu, 'Inventory');
   await expect(menu.getByRole('region', { name: 'Item details' }).getByRole('button', { name: 'Open Buy back' })).toBeVisible();
   // And a real click on each stall (the camp's click closes and reopens the menu).
   for (const [frame, filter] of [['stall-weapons', 'Weapons'], ['stall-armor', 'Armor']] as const) {
@@ -324,7 +419,7 @@ test('the fixture preview lists sample sales and refuses the command', async ({ 
   await quietArrivals(page.context());
   await page.goto('/game/?mode=fixture&bag=demo');
   await expectOwnerShown(page, 'Aster');
-  const menu = await openMenu(page, 'Inventory and shops');
+  const menu = await openSection(await openMenu(page, 'Inventory and shops'), 'Shops');
   const shops = shopsOf(menu);
   await expect(chip(shops)).toHaveAccessibleName('Buy back (5)');
   await chip(shops).click();

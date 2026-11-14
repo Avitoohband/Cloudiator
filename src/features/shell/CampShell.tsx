@@ -108,7 +108,7 @@ import { PAGED_MENUS, menusFor, originMenu, type MenuId } from './menus';
 import { COMPACT_QUERY, railReducer, railVisible, type RailEvent, type RailState } from './rail-reveal';
 import { SceneOverlay } from './SceneOverlay';
 import {
-  boutFilterOf, boutsFrom, historyOriginOf, sceneForResult, sceneFromOf, sceneKeyOf, type HistoryOrigin, type SceneAddress, type SceneFrom, type SceneView,
+  boutFilterOf, boutsFrom, historyOriginOf, sceneForResult, sceneFromOf, sceneKeyOf, withHistoryOrigin, type HistoryOrigin, type SceneAddress, type SceneFrom, type SceneView,
 } from './scene-url';
 import { AwayButton } from './AwayButton';
 import { useAwayTrip } from './useAwayTrip';
@@ -424,6 +424,8 @@ export function CampShell({ fixture, previewAs, previewResting = false, previewB
   const sceneCardKey = sceneCard ? `${sceneCard.gladiatorId}|${sceneCard.kind}` : null;
   const cameFrom = useRef<SceneFrom | null>(null);
   const cameFromCard = useRef<HistoryOrigin | null>(null);
+  /** Patch 1.9 Task 33: the open scene came from My gladiator's History (not a card's): Back goes back there, the menu open on it. */
+  const fromOwnHistory = useRef<string | null>(null);
   // Results opens on the tab and chip the scene came from (Task 4): Everyone for its rows, My bouts with the chip for a bout's. Task 27 fix
   // round 1: a scene a History row opened reopens that gladiator's card on its History, at the chip it came from.
   useEffect(() => {
@@ -432,6 +434,9 @@ export function CampShell({ fixture, previewAs, previewResting = false, previewB
     cameFrom.current = null;
     cameFromCard.current = null;
     if (!from) return;
+    const ownHistory = fromOwnHistory.current;
+    fromOwnHistory.current = null;
+    if (from === 'history' && historyCard && ownHistory === historyCard.gladiatorId) { show('gladiator'); return; }
     if (from === 'history' && historyCard) {
       openHistory(historyCard.gladiatorId, historyCard.kind, historyNames.current.get(historyCard.gladiatorId));
       return;
@@ -547,7 +552,10 @@ export function CampShell({ fixture, previewAs, previewResting = false, previewB
   const [wornAnswer, setWornAnswer] = useState<WornAnswer | null>(null);
   const wornTitle = owner ? shownWornTitle(owner, ownerReadStart, wornAnswer) : null;
   const pickerOwner = useMemo(() => (owner ? { ...owner, wornTitle } : null), [owner, wornTitle]);
-  const openTitlePicker = useCallback(() => { setTitleStatus(null); show('gladiator'); setTitleOpen(true); }, [show]);
+  // Patch 1.9 Task 33: My gladiator's section, kept while the page lives, so the menu reopens on the last section seen in this visit (a reload
+  // starts at the Overview, as does another gladiator). The Title button is on the Overview: the picker opens over it, and its close focuses it.
+  const [gladiatorSection, setGladiatorSection] = useState(0);
+  const openTitlePicker = useCallback(() => { setTitleStatus(null); setGladiatorSection(0); show('gladiator'); setTitleOpen(true); }, [show]);
   // An accepted wear, from the picker or a notice's Wear (each names the gladiator it wore for), told the moment it arrives, also after
   // the picker or the messages panel has closed.
   const titleAnswered = useCallback((gladiatorId: string, titleId: string | null) => {
@@ -563,7 +571,7 @@ export function CampShell({ fixture, previewAs, previewResting = false, previewB
     if (status && current) setTitleStatus({ gladiatorId: current.gladiatorId, text: status });
     focusTitleButton();
   }, []);
-  useEffect(() => { setTitleOpen(false); }, [lookOwner]);
+  useEffect(() => { setTitleOpen(false); setGladiatorSection(0); }, [lookOwner]);
   const shownTitleStatus = titleStatus && titleStatus.gladiatorId === lookOwner ? titleStatus.text : null;
   // The Notifications tab's titles (Task 11): the owner's, the title shown as worn (the same answered-wear rule as the Title button), Wear
   // (the picker's command, through the gateway the shell reads with: the fixture preview refuses it) and "Choose a title".
@@ -672,7 +680,13 @@ export function CampShell({ fixture, previewAs, previewResting = false, previewB
       case 'gladiator': return <CharacterPanel viewer={viewer} session={game.session} owner={owner} ownerError={game.ownerError} slotIndex={game.slotIndex}
         clock={clock} gateway={gateway} fixture={fixture} previewAs={previewAs} previewFailed={previewError} refreshOwner={game.refreshOwner}
         onCreate={joining.offer} resting={game.ownResting} rules={game.rules} location={ownLocation} titles={owner ? { worn: wornTitle, status: shownTitleStatus, onOpen: openTitlePicker } : undefined}
-        onPractice={viewer === 'player' && owner ? practice.open : undefined} />;
+        onPractice={viewer === 'player' && owner ? practice.open : undefined} section={gladiatorSection} onSection={setGladiatorSection}
+        history={owner && reads ? { reads, nowMs, onWatch: (view, kind) => {
+          // ▶ Watch in My gladiator's History: the scene's origin is the owner's own History, and Back comes back to this section.
+          historyNames.current.set(owner.gladiatorId, owner.name);
+          fromOwnHistory.current = owner.gladiatorId;
+          openScene(withHistoryOrigin(view, { gladiatorId: owner.gladiatorId, kind }));
+        } } : undefined} />;
       case 'schedule': return owner && !fixture ? <SchedulePanel key={owner.gladiatorId} owner={owner} gateway={gateway} refresh={game.refreshOwner} clock={clock} rules={game.rules} />
         : <SchedulePreview owner={owner} />;
       case 'inventory': return owner ? <InventoryPanel key={owner.gladiatorId} owner={owner} gateway={gateway} refresh={game.refreshOwner} clock={clock} preview={fixture} rules={game.rules}

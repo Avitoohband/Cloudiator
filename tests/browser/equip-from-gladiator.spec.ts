@@ -5,7 +5,7 @@ import type { ItemInstance, OwnerState } from '../../supabase/functions/_shared/
 import type { GameCommand } from '../../supabase/functions/_shared/contracts/commands';
 import { CATALOG_V1 } from '../../supabase/functions/_shared/domain/catalog-v1';
 import { SLOT_MS, emptyWorld, isPresence, routeLiveReads } from './live-routes';
-import { openMenu } from './shell-helpers';
+import { openMenuSection } from './section-helpers';
 import { slotTime } from './slot-time';
 import { contrastIssues, focusDrops, watchFocus } from './a11y-helpers';
 
@@ -99,7 +99,7 @@ test.describe('equip from My gladiator (live)', () => {
       state.currentBuild.equipment = { weapon: sword.id, offHand: shield.id, head: null, body: armor.id, feet: null };
     });
     await page.goto('/game/');
-    const menu = await openMenu(page, 'My gladiator');
+    const menu = await openMenuSection(page, 'My gladiator', 'Worn equipment');
     const weapon = slotButton(menu, 'Weapon'), worn = wornRegion(menu);
     await expect(weapon).toHaveAttribute('aria-haspopup', 'dialog');
     await expect(weapon).toHaveAttribute('aria-expanded', 'false');
@@ -231,7 +231,7 @@ test.describe('equip from My gladiator (live)', () => {
       state.currentBuild.equipment = { weapon: sword.id, offHand: shield.id, head: null, body: armor.id, feet: null };
     });
     await page.goto('/game/');
-    const menu = await openMenu(page, 'My gladiator');
+    const menu = await openMenuSection(page, 'My gladiator', 'Worn equipment');
     const weapon = slotButton(menu, 'Weapon'), offHand = slotButton(menu, 'Off hand');
     await weapon.click();
     const dialog = picker(menu, 'Weapon');
@@ -307,7 +307,7 @@ test.describe('equip from My gladiator (live)', () => {
       state.currentBuild.equipment = { weapon: axe.id, offHand: shield.id, head: helmet.id, body: light.id, feet: boots.id };
     });
     await page.goto('/game/');
-    const menu = await openMenu(page, 'My gladiator');
+    const menu = await openMenuSection(page, 'My gladiator', 'Worn equipment');
     await slotButton(menu, 'Body').click();
     const dialog = picker(menu, 'Body');
     await pick(dialog, heavy).click();
@@ -340,7 +340,7 @@ test.describe('equip from My gladiator (live)', () => {
         effectiveSlotIndex: state.processedSlotIndex + 1, reservedMoney: 0, reservedItemIds: [sword.id], operationId: randomUUID() };
     });
     await page.goto('/game/');
-    const menu = await openMenu(page, 'My gladiator');
+    const menu = await openMenuSection(page, 'My gladiator', 'Worn equipment');
     await expect(wornRegion(menu).getByText(/^Load /)).toHaveText('Load 4 / 26.8 (next slot)');
     await expect(pendingBox(menu)).toHaveCount(0);
   });
@@ -354,7 +354,7 @@ test.describe('equip from My gladiator (live)', () => {
       state.currentBuild.equipment = { ...state.currentBuild.equipment, weapon: sword.id };
     });
     await page.goto('/game/');
-    const menu = await openMenu(page, 'My gladiator');
+    const menu = await openMenuSection(page, 'My gladiator', 'Worn equipment');
     const weapon = slotButton(menu, 'Weapon'), worn = wornRegion(menu), dialog = picker(menu, 'Weapon');
     /** Puts the keyboard focus on `button` the way the Inventory's spec does (Tab away and back), so its press is a keyboard one. */
     const reach = async (button: Locator) => { await button.focus(); await page.keyboard.press('Tab'); await page.keyboard.press('Shift+Tab'); await expect(button).toBeFocused(); };
@@ -415,7 +415,7 @@ test.describe('equip from My gladiator (live)', () => {
       state.currentBuild.equipment = { ...state.currentBuild.equipment, weapon: sword.id };
     });
     await page.goto('/game/');
-    const menu = await openMenu(page, 'My gladiator');
+    const menu = await openMenuSection(page, 'My gladiator', 'Worn equipment');
     const weapon = slotButton(menu, 'Weapon'), worn = wornRegion(menu), dialog = picker(menu, 'Weapon');
     // A queued change (Undo, Cancel changes) and then a transient refusal (its outcome and Retry), all under the slot row.
     await weapon.click();
@@ -477,7 +477,7 @@ test.describe('equip from My gladiator (live)', () => {
       state.currentBuild.equipment = { ...state.currentBuild.equipment, weapon: sword.id };
     });
     await page.goto('/game/');
-    const menu = await openMenu(page, 'My gladiator');
+    const menu = await openMenuSection(page, 'My gladiator', 'Worn equipment');
     const weapon = slotButton(menu, 'Weapon'), worn = wornRegion(menu), dialog = picker(menu, 'Weapon');
     const refusal = 'The world is processing previous results. Retry shortly.';
     flow.reject('processing');
@@ -509,7 +509,7 @@ test.describe('equip from My gladiator (live)', () => {
       state.currentBuild.equipment = { ...state.currentBuild.equipment, weapon: sword.id };
     });
     await page.goto('/game/');
-    const menu = await openMenu(page, 'My gladiator');
+    const menu = await openMenuSection(page, 'My gladiator', 'Worn equipment');
     const weapon = slotButton(menu, 'Weapon'), dialog = picker(menu, 'Weapon');
     const load = wornRegion(menu).getByRole('button', { name: 'Load', exact: true });
     await weapon.focus();
@@ -527,8 +527,9 @@ test.describe('equip from My gladiator (live)', () => {
     await expect(weapon).toBeFocused();
   });
 
-  test('the card and Wear stay on the chosen one of two same-name pieces as hover and keyboard focus move', async ({ page, context, hasTouch }, info) => {
-    // AGENTS.md "Detail cards that apply an item": Sword level 1 (a stack of two) and Sword level 5, with different ids and stats.
+  test('the card and Wear agree on one of two same-name pieces as hover and keyboard focus move', async ({ page, context, hasTouch }, info) => {
+    // AGENTS.md "Detail cards that apply an item": Sword level 1 (a stack of two) and Sword level 5, with different ids and stats. Task 33 fix 1:
+    // hover and the keyboard's focus show a tile's card (they showed nothing before); Wear stays the chosen piece's and shows only beside its card.
     if (info.project.name === 'mobile') await page.setViewportSize({ width: 360, height: 740 });
     const low1 = piece('sword:1:common'), low2 = piece('sword:1:common'), high = piece('sword:5:common');
     const flow = await gearFlow(context, state => {
@@ -536,7 +537,7 @@ test.describe('equip from My gladiator (live)', () => {
       state.inventory = [low1, low2, high];
     });
     await page.goto('/game/');
-    const menu = await openMenu(page, 'My gladiator');
+    const menu = await openMenuSection(page, 'My gladiator', 'Worn equipment');
     const weapon = slotButton(menu, 'Weapon');
     // By keyboard: Enter on the slot opens the picker with the focus on the first tile.
     await weapon.focus();
@@ -549,9 +550,14 @@ test.describe('equip from My gladiator (live)', () => {
     await expect(pick(dialog, high)).toHaveAttribute('aria-pressed', 'true');
     await expectRow(dialog, 'Damage', ['–', '9', '+9']);
     await expect(wearButton(dialog)).toHaveAccessibleName('Wear Sword, level 5 common');
-    // The focus moves to the stack without choosing it: the card and Wear stay on the level 5 sword.
+    // The focus moves to the stack without choosing it: its card shows, and the level 5 sword's Wear waits out of reach (never beside
+    // the stack's card); back on the level 5 sword, its card and Wear again.
     await page.keyboard.press('ArrowLeft');
     await expect(pick(dialog, low1)).toBeFocused();
+    await expect(pick(dialog, high)).toHaveAttribute('aria-pressed', 'true');
+    await expectRow(dialog, 'Damage', ['–', '6', '+6']);
+    await expect(wearButton(dialog)).toHaveCount(0);
+    await page.keyboard.press('ArrowRight');
     await expectRow(dialog, 'Damage', ['–', '9', '+9']);
     await expect(wearButton(dialog)).toHaveAccessibleName('Wear Sword, level 5 common');
     await page.keyboard.press('Tab');
@@ -567,18 +573,83 @@ test.describe('equip from My gladiator (live)', () => {
     await expect(weapon).toBeFocused();
     await expect(wornRegion(menu).getByRole('status')).toHaveText('Sword will be worn from the next slot.');
     expect(flow.commands[0]).toMatchObject({ kind: 'queue-build', equipment: { weapon: high.id } });
-    // By pointer: the stack chosen, then the other piece hovered and focused: still the stack's card and Wear.
+    // By pointer: the stack chosen, then the other piece hovered: its card, and the stack's Wear out of reach; the pointer leaving it brings
+    // back the stack's card and Wear. The focus on the other piece shows its card too, never with the stack's Wear beside it.
     await weapon.click();
     await pick(dialog, low1).click();
     await expectRow(dialog, 'Damage', ['9', '6', '−3']);
     await expect(wearButton(dialog)).toHaveAccessibleName('Wear Sword, level 1 common (one of 2)');
-    if (!hasTouch) await pick(dialog, high).hover();
+    if (!hasTouch) {
+      await pick(dialog, high).hover();
+      await expectRow(dialog, 'Damage', ['9', '9', '=']);
+      await expect(wearButton(dialog)).toHaveCount(0);
+      await dialog.getByRole('heading', { name: 'Weapon', exact: true }).hover();
+    }
+    await expectRow(dialog, 'Damage', ['9', '6', '−3']);
+    await expect(wearButton(dialog)).toHaveAccessibleName('Wear Sword, level 1 common (one of 2)');
     await pick(dialog, high).focus();
+    await page.keyboard.press('ArrowLeft');
+    await expect(pick(dialog, low1)).toBeFocused();
     await expectRow(dialog, 'Damage', ['9', '6', '−3']);
     await expect(wearButton(dialog)).toHaveAccessibleName('Wear Sword, level 1 common (one of 2)');
     await wearButton(dialog).click();
     await expect(wornRegion(menu).getByRole('status')).toHaveText('Sword will be worn from the next slot. 1 left in the stack.');
     expect(flow.commands[1]).toMatchObject({ kind: 'queue-build', equipment: { weapon: low1.id } });
+  });
+
+  test('hover and keyboard focus show a replacement\'s card, and Wear shows only beside the chosen piece\'s own card (Task 33 fix 1)', async ({ page, context, hasTouch }, info) => {
+    // The 1.9 changelog: "hover, focus or tap worn gear and replacements". AGENTS.md "Detail cards that apply an item": the card shown and
+    // the piece Wear sends always agree, and the pointer never takes a keyboard action away.
+    if (info.project.name === 'mobile') await page.setViewportSize({ width: 360, height: 740 });
+    const low1 = piece('sword:1:common'), low2 = piece('sword:1:common'), high = piece('sword:5:common');
+    const flow = await gearFlow(context, state => {
+      state.progression.level = 5;
+      state.inventory = [low1, low2, high];
+    });
+    await page.goto('/game/');
+    const menu = await openMenuSection(page, 'My gladiator', 'Worn equipment');
+    const weapon = slotButton(menu, 'Weapon');
+    // By keyboard: the picker opens with the focus on the first tile, and the focused tile's card shows (nothing is chosen yet).
+    await weapon.focus();
+    await page.keyboard.press('Enter');
+    const dialog = picker(menu, 'Weapon');
+    await expect(pick(dialog, low1)).toBeFocused();
+    await expectRow(dialog, 'Damage', ['–', '6', '+6']);
+    await expect(wearButton(dialog)).toHaveCount(0);
+    await page.keyboard.press('ArrowRight');
+    await expect(pick(dialog, high)).toBeFocused();
+    await expectRow(dialog, 'Damage', ['–', '9', '+9']);
+    await expect(pick(dialog, high)).toHaveAttribute('aria-pressed', 'false');
+    await page.keyboard.press('Enter');
+    await expect(pick(dialog, high)).toHaveAttribute('aria-pressed', 'true');
+    await expect(wearButton(dialog)).toHaveAccessibleName('Wear Sword, level 5 common');
+    // The focus on the stack shows its card; Wear (the level 5 sword's) waits for its own card.
+    await page.keyboard.press('ArrowLeft');
+    await expectRow(dialog, 'Damage', ['–', '6', '+6']);
+    await expect(wearButton(dialog)).toHaveCount(0);
+    await page.keyboard.press('ArrowRight');
+    await expectRow(dialog, 'Damage', ['–', '9', '+9']);
+    await page.keyboard.press('Tab');
+    await expect(wearButton(dialog)).toBeFocused();
+    if (!hasTouch) {
+      // A pointer over the other tile while the keyboard is on Wear: the keyboard keeps Wear, the card stays the chosen piece's.
+      await pick(dialog, low1).hover();
+      await expect(wearButton(dialog)).toBeFocused();
+      await expectRow(dialog, 'Damage', ['–', '9', '+9']);
+      await expect(wearButton(dialog)).toHaveAccessibleName('Wear Sword, level 5 common');
+      // With the keyboard elsewhere, hovering a tile shows its card, and leaving it brings back the chosen one's with its Wear.
+      await dialog.getByRole('heading', { name: 'Weapon', exact: true }).click();
+      await pick(dialog, low1).hover();
+      await expectRow(dialog, 'Damage', ['–', '6', '+6']);
+      await expect(dialog).toContainText('Level 1 · common · Tradable · 2 owned');
+      await expect(wearButton(dialog)).toHaveCount(0);
+      await dialog.getByRole('heading', { name: 'Weapon', exact: true }).hover();
+      await expectRow(dialog, 'Damage', ['–', '9', '+9']);
+      await expect(wearButton(dialog)).toHaveAccessibleName('Wear Sword, level 5 common');
+    }
+    await wearButton(dialog).click();
+    await expect(wornRegion(menu).getByRole('status')).toHaveText('Sword will be worn from the next slot.');
+    expect(flow.commands[0]).toMatchObject({ kind: 'queue-build', equipment: { weapon: high.id } });
   });
 
   test('desktop: a popover under the slot row with a caret; phone: a sheet over the panel body with Back and a Wear bar', async ({ page, context, hasTouch }, info) => {
@@ -591,7 +662,7 @@ test.describe('equip from My gladiator (live)', () => {
       state.currentBuild.equipment = { weapon: null, offHand: shield.id, head: null, body: null, feet: null };
     });
     await page.goto('/game/');
-    const menu = await openMenu(page, 'My gladiator');
+    const menu = await openMenuSection(page, 'My gladiator', 'Worn equipment');
     const weapon = slotButton(menu, 'Weapon');
     await weapon.click();
     const dialog = picker(menu, 'Weapon');
@@ -619,7 +690,8 @@ test.describe('equip from My gladiator (live)', () => {
       expect(Math.abs(box.y + box.height - (surface.y + surface.height))).toBeLessThan(2);
       expect(Math.abs(box.width - surface.width)).toBeLessThan(3);
       await expect(dialog.getByRole('button', { name: 'Back', exact: true })).toBeVisible();
-      await expect(menu.getByRole('heading', { name: 'Aster' })).toBeHidden();
+      // (Task 33: the gladiator's name is on the Overview; what the sheet covers here is the Worn equipment section under it.)
+      await expect(menu.getByRole('heading', { name: 'Worn equipment', exact: true })).toBeHidden();
       const before = (await wear.boundingBox())!;
       expect(before.y + before.height).toBeGreaterThan(box.y + box.height - 70);
       await dialog.locator('[data-picker-body]').evaluate(element => { element.scrollTop = element.scrollHeight; });
@@ -634,7 +706,7 @@ test.describe('equip from My gladiator (live)', () => {
     else await dialog.getByRole('button', { name: 'Close Weapon choices', exact: true }).click();
     await expect(dialog).toHaveCount(0);
     await expect(weapon).toBeFocused();
-    await expect(menu.getByRole('heading', { name: 'Aster' })).toBeVisible();
+    await expect(menu.getByRole('heading', { name: 'Worn equipment', exact: true })).toBeVisible();
   });
 });
 
@@ -642,7 +714,7 @@ test('the fixture preview opens the picker with stacked duplicates and says gear
   test.skip(process.env.PLAYWRIGHT_STATIC === 'true', 'Production builds refuse the fixture preview.');
   if (info.project.name === 'mobile') await page.setViewportSize({ width: 360, height: 740 });
   await page.goto('/game/?mode=fixture&bag=demo');
-  const menu = await openMenu(page, 'My gladiator');
+  const menu = await openMenuSection(page, 'My gladiator', 'Worn equipment');
   await slotButton(menu, 'Feet').click();
   const dialog = picker(menu, 'Feet');
   const boots = dialog.getByRole('button', { name: /^Light boots, level 1 common, 3 owned/ });

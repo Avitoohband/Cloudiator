@@ -6,6 +6,7 @@ import type { OwnerState } from '../../supabase/functions/_shared/contracts/read
 import { contrastIssues, expectNamedControls, noHorizontalScroll } from './a11y-helpers';
 import { routeLiveReads, seedSession } from './live-routes';
 import { cornerChip, expectOwnerShown, openMenu } from './shell-helpers';
+import { openSection } from './section-helpers';
 
 // Patch 1.9 Task 10 (the approved xp-help mockups): My gladiator's XP bar under Stamina with the next expedition's XP as a ghost segment and
 // its line, a thin unlabeled XP line under the name in the corner chip, and the Attributes and Stats blocks with help on every label. Live mode
@@ -14,7 +15,8 @@ const production = process.env.PLAYWRIGHT_STATIC === 'true';
 const SLOT_MS = 4_800_000;
 const shotDir = process.env.XP_SHOT_DIR;
 
-async function openLive(page: Page, change: (owner: OwnerState) => void, where?: string) {
+/** Patch 1.9 Task 33: My gladiator's sections; the XP bar is in Level and stamina, the Attributes and Stats blocks in Attributes and stats. */
+async function openLive(page: Page, change: (owner: OwnerState) => void, where?: string, section = 'Level and stamina') {
   const context = page.context();
   await seedSession(context);
   const owner = structuredClone(ownerFixture);
@@ -24,7 +26,7 @@ async function openLive(page: Page, change: (owner: OwnerState) => void, where?:
   await routeLiveReads(context, { world, owner, rulesVersion: 'v2' });
   await page.goto('/game/');
   await expectOwnerShown(page, 'Aster');
-  return openMenu(page, 'My gladiator');
+  return openSection(await openMenu(page, 'My gladiator'), section);
 }
 const level = (state: OwnerState, levelNumber: number, xp: number) => { state.progression = { ...state.progression, level: levelNumber, xp }; };
 const rest = (state: OwnerState) => { state.schedule = { morning: { kind: 'rest' }, afternoon: { kind: 'rest' }, evening: { kind: 'rest' } }; };
@@ -69,8 +71,13 @@ test.describe('the XP bar (live)', () => {
     expect(await share(cornerChip(page).getByTestId('chip-xp-fill'), line)).toBe(0.8);
     expect(await share(cornerChip(page).getByTestId('chip-xp-ghost'), line)).toBe(0.2);
     await expect(cornerChip(page).getByTestId('chip-xp-ghost')).toHaveAttribute('data-crosses', 'true');
-    await expectNamedControls(menu, 'My gladiator');
-    expect(await contrastIssues(menu), 'My gladiator').toEqual([]);
+    // Task 33: every section of My gladiator (one shows at a time).
+    for (const section of ['Level and stamina', 'Overview', 'Attributes and stats', 'Worn equipment']) {
+      await openSection(menu, section);
+      await expectNamedControls(menu, `My gladiator, ${section}`);
+      expect(await contrastIssues(menu), `My gladiator, ${section}`).toEqual([]);
+    }
+    await openSection(menu, 'Level and stamina');
     await shot(page, info, info.project.name === 'mobile' ? 'xp-levelup-phone' : 'xp-levelup-desktop');
   });
 
@@ -127,7 +134,7 @@ test.describe('help on stats and attributes (live)', () => {
   test('the Attributes and Stats blocks list the build and explain each label by pointer, keyboard or tap', async ({ page }, info) => {
     const phone = info.project.name === 'mobile';
     if (phone) await page.setViewportSize({ width: 360, height: 740 });
-    const menu = await openLive(page, state => { level(state, 1, 80); });
+    const menu = await openLive(page, state => { level(state, 1, 80); }, undefined, 'Attributes and stats');
     const attributes = menu.getByRole('region', { name: 'Attributes', exact: true });
     const stats = menu.getByRole('region', { name: 'Stats', exact: true });
     await expect(attributes.getByRole('heading')).toHaveText('Attributes · 10 points');
@@ -170,7 +177,8 @@ test.describe('help on stats and attributes (live)', () => {
       await expect(tip).toContainText('Base 50, plus 10 for each Vitality.');
       await tip.hover();
       await expect(tip).toBeVisible();
-      await menu.getByRole('heading', { name: 'Aster' }).hover();
+      // The pointer off the label and its tooltip (Task 33: the name is on the Overview; the Attributes heading is in this section).
+      await attributes.getByRole('heading').hover();
       await expect(tip).toHaveCount(0);
       await attributes.getByRole('button', { name: 'Strength', exact: true }).focus();
       await page.keyboard.press('Tab');
@@ -204,7 +212,7 @@ test.describe('help on stats and attributes (live)', () => {
   test('renown armor shows its Arena figures under Armor, with both contexts in the tooltip; a gold weapon shows none under Damage', async ({ page }, info) => {
     const phone = info.project.name === 'mobile';
     if (phone) await page.setViewportSize({ width: 360, height: 740 });
-    const menu = await openLive(page, state => { level(state, 1, 0); wear(state, WORN); });
+    const menu = await openLive(page, state => { level(state, 1, 0); wear(state, WORN); }, undefined, 'Attributes and stats');
     const stats = menu.getByRole('region', { name: 'Stats', exact: true });
     const armor = stats.getByRole('listitem').filter({ hasText: 'Armor' });
     await expect(armor).toContainText('13 · blocks 26%');
@@ -227,7 +235,7 @@ test.describe('help on stats and attributes (live)', () => {
   test('a renown weapon adds the Arena line to Damage, and the tooltip names both figures', async ({ page }, info) => {
     const phone = info.project.name === 'mobile';
     if (phone) await page.setViewportSize({ width: 360, height: 740 });
-    const menu = await openLive(page, state => { level(state, 1, 0); wear(state, ['sword:10:renown']); });
+    const menu = await openLive(page, state => { level(state, 1, 0); wear(state, ['sword:10:renown']); }, undefined, 'Attributes and stats');
     const stats = menu.getByRole('region', { name: 'Stats', exact: true });
     const damage = stats.getByRole('listitem').filter({ hasText: /^Damage/ });
     const [, hit, arena] = (/^Damage(\d+)Arena (\d+)$/.exec((await damage.textContent())!) ?? []).map(Number);
@@ -249,12 +257,15 @@ test.describe('help on stats and attributes (live)', () => {
     const tip = menu.getByRole('tooltip');
     const staminaButton = menu.getByRole('button', { name: 'Stamina', exact: true });
     const loadButton = menu.getByRole('button', { name: 'Load', exact: true });
-    await loadButton.scrollIntoViewIfNeeded();
     await staminaButton.click();
     await expect(tip).toContainText('What your activities spend; resting gives it back. Endurance raises it.');
     await expect(tip).toContainText('Base 90, plus 2 for each Endurance.');
+    // Task 33: Stamina is in Level and stamina, Load in Worn equipment; still one tooltip in the whole panel, hidden sections too.
+    await openSection(menu, 'Worn equipment');
+    await loadButton.scrollIntoViewIfNeeded();
     await loadButton.click();
     await expect(tip).toHaveCount(1);
+    await expect(menu.locator('[role="tooltip"]')).toHaveCount(1);
     await expect(tip).toContainText('How much your worn gear weighs against what you can carry.');
     await expect(tip).toContainText('Capacity is 10, plus 2 for each Endurance.');
     await expect(tip).toContainText('down to 50%');

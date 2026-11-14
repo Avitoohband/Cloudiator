@@ -664,3 +664,9 @@
     background: #191b22;
   }
 }
+
+/* Patch 1.9 Task 33 (fix 1): while another tile's card shows (hover or the keyboard's focus), the chosen tile's action keeps its place, out of
+   sight and out of reach, so nothing moves and the card shown is always the piece the action sends. */
+.act[data-waiting] > * {
+  visibility: hidden;
+}

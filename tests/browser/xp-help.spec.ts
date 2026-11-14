@@ -192,7 +192,11 @@ test.describe('help on stats and attributes (live)', () => {
       await stats.getByRole('button', { name: 'Critical', exact: true }).hover();
       await expect(tip).toContainText('Chance for a landed hit to be a critical hit, which deals 50% more damage. Precision raises it.');
       await expect(tip).toContainText('Base 5%, plus 0.3% for each Precision, up to 40%.');
-      await stats.getByRole('button', { name: 'Critical damage', exact: true }).hover();
+      // Task 33: in the Attributes and stats section the panel has room below, so the tooltip opens under its row and covers the next label,
+      // as a tooltip under a label does; the next label is reached by keyboard (Tab), which also leaves one tooltip open.
+      await stats.getByRole('button', { name: 'Critical', exact: true }).focus();
+      await page.keyboard.press('Tab');
+      await expect(stats.getByRole('button', { name: 'Critical damage', exact: true })).toBeFocused();
       await expect(tip).toHaveCount(1);
       await expect(tip).toContainText('How much more a critical hit deals than a normal hit.');
       await expect(tip).toContainText('A critical hit deals 1.5 times the damage of a normal hit.');

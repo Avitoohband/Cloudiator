@@ -152,7 +152,7 @@
     {
       "id": "tournament-look",
       "title": "Tournaments look different",
-      "body": "Tournament fights get a gold header band, their own rows in history, and a fancier arena called League Stands, with stands in the four league colours and league banners.",
+      "body": "Tournament fights get a gold header band, their own rows in history, and a fancier arena called League Stands, with stands in the four league colours and league banners. You can also open any league's tournament and watch its bouts, even when your gladiator is not in it.",
       "patch": "1.9"
     },
     {

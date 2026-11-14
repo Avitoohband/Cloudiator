@@ -45,6 +45,8 @@ export async function revealRail(page: Page) {
 /**
  * Opens the menu named `label` and returns its dialog. Desktop: the pointer to x = 2, then the rail icon. Touch: ☰,
  * then the icon in the row (an open sheet is closed first, as it hides the row). A menu already open is returned as is.
+ * It returns once the panel's opening slide (`pop`, 0.16 s) has finished: a click on a still-moving panel is retried by
+ * Playwright, whose fourth try scrolls its target to the top of the menu, a scroll no player makes (2026-11-13).
  */
 export async function openMenu(page: Page, label: string): Promise<Locator> {
   const dialog = menuDialog(page, label);
@@ -52,6 +54,8 @@ export async function openMenu(page: Page, label: string): Promise<Locator> {
   await revealRail(page);
   await page.getByTestId('menu-rail').getByRole('button', { name: label, exact: true }).click();
   await expect(dialog).toBeVisible();
+  // The panel's own animations only (not its content's, which may loop); a canceled one counts as done.
+  await dialog.evaluate(panel => Promise.allSettled(panel.getAnimations().map(animation => animation.finished)).then(() => undefined));
   return dialog;
 }
 

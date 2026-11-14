@@ -24,6 +24,16 @@ test('management shell labels local fixture data and exposes an accessible sched
   await page.screenshot({ path: testInfo.outputPath('fixture-shell.png'), fullPage: true });
 });
 
+// A panel opens with a 0.16 s slide (`pop`). A click sent while it still moves finds its target "not stable", and Playwright's
+// fourth try scrolls the target to the top of the menu (block: 'start'), which no player does: the inventory card beside the grid
+// then sat above the menu's view (the inventory spec's intermittent "viewport ratio 0", 2026-11-13). `openMenu` hands back a panel at rest.
+test('openMenu returns the panel once its opening slide has finished', async ({ page }) => {
+  test.skip(production, 'Fixture data is deliberately unavailable in production.');
+  await page.goto('/game/?mode=fixture');
+  const schedule = await openMenu(page, 'Schedule');
+  expect(await schedule.evaluate(panel => panel.getAnimations().filter(animation => animation.playState === 'running').length)).toBe(0);
+});
+
 // Task 24.0b (Avi, 2026-10-20): the activity's end is a short local time, as every slot time is (Task 23.10), never the fixed
 // two-digit form (`04:20 AM`), and it stays on one line in a 360 px viewport.
 test('My gladiator ends its activity line with a short end time, on one line at 360 px', async ({ page }, testInfo) => {

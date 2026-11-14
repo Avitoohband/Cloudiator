@@ -293,13 +293,18 @@ function OfferList({ reads, seller, version, onRefresh, ...view }: {
     if (loadingMore.current) return;
     loadingMore.current = true;
     try {
-      while (refreshing.current) await refreshing.current;
-      const base = latest.current;
-      if (!base?.nextCursor) return;
-      const mine = generation.current;
-      const next = await readOffers(reads, seller, base);
-      // A page whose base list is no longer the shown one (a refresh landed meanwhile) is dropped: older offers never replace a refreshed list.
-      if (mine === generation.current && latest.current === base) { latest.current = next; setList(next); }
+      // A page whose base list is no longer the shown one (a refresh landed meanwhile) is dropped, so older offers never replace a refreshed list;
+      // it is then read once more from the new base, so the Next completes (at most three tries, each after a newer read landed).
+      for (let tries = 0; tries < 3; tries += 1) {
+        while (refreshing.current) await refreshing.current;
+        const base = latest.current;
+        if (!base?.nextCursor) return;
+        const mine = generation.current;
+        const next = await readOffers(reads, seller, base);
+        if (mine === generation.current && latest.current === base) { latest.current = next; setList(next); return; }
+        // Overtaken with no newer read to wait for (the list moved on without one): nothing to extend.
+        if (!refreshing.current && latest.current === base) return;
+      }
     } finally {
       loadingMore.current = false;
     }

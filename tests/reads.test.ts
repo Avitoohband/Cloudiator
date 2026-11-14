@@ -1,16 +1,110 @@
 import { describe, expect, it } from 'vitest';
 import { createClient } from '@supabase/supabase-js';
-import { HISTORY_PAGE, readHistory, readHistoryCounts, readMarket, readOwnRewards, readProfile, readRecent, readSeasons, readStandingOf, readStandings, readTimeline, readTournament,
+import { HISTORY_PAGE, readHistory, readHistoryCounts, readMarket, readOwnRewards, readProfile, readRecent, readResultsSince, readSeasons, readStandingOf, readStandings, readTimeline, readTournament,
   readTournamentLog, readWorld } from '../src/lib/api/reads';
 import { tournamentLookupId } from '../src/lib/tournament-id';
 
 function transport(rows: Record<string, unknown>, calls: string[]) {
   return createClient('http://127.0.0.1:54321', 'test-key', { auth: { persistSession: false }, global: { fetch: async (input) => {
     const url = new URL(String(input)); calls.push(url.pathname + url.search);
-    const body = rows[url.pathname.split('/').at(-1)!];
+    const answer = rows[url.pathname.split('/').at(-1)!];
+    const body = typeof answer === 'function' ? answer(url) : answer;
     return new Response(JSON.stringify(body), { status: 200, headers: { 'Content-Type': 'application/json' } });
   } } });
 }
+
+describe('owner results since a visit', () => {
+  const NOW = 1_791_592_800_000, SINCE = NOW - 7_200_000;
+  const GLADIATOR = '0d5f8471-d919-428f-9ab7-058c95821757';
+  const OTHER = '9fce3cd5-e831-4a66-8ca1-16b4576b1499';
+  const kinds = ['training', 'expedition', 'arena', 'tournament', 'dungeon'] as const;
+  const revision = { revision: '1', server_now_ms: NOW, slot_index: Math.floor(NOW / 4_800_000) };
+  const resultId = (index: number) => `00000000-0000-4000-8000-${String(index).padStart(12, '0')}`;
+  function result(index: number, kind: typeof kinds[number] | 'rest' = 'training', settled = NOW - 60_000) {
+    return { id: resultId(index), gladiator_id: GLADIATOR, slot_index: index, settled_at_ms: settled, status: 'completed', resolved_kind: kind,
+      destination: kind === 'expedition' ? 'outpost' : null, gladiators: { level: 2, xp: 50, newer: [{ count: 0 }] },
+      summary: { activityId: resultId(index), resolvedKind: kind, result: 'completed', success: true, settledAtMs: settled,
+        rewards: { xp: kind === 'expedition' ? 75 : 0, money: 0, renown: 0, attributePoints: 0, items: [], overflowMoney: 0 },
+        ...(kind === 'dungeon' ? { dungeon: { id: 'wolf-den', terminalFight: 4, partyWon: true } } : {}) } };
+  }
+  function serveRows(rows: ReturnType<typeof result>[], url: URL) {
+    const params = url.searchParams;
+    const before = /settled_at_ms\.lt\.(\d+).*slot_index\.lt\.(\d+)/.exec(params.get('or') ?? '');
+    const lower = Number(params.getAll('settled_at_ms').find(bound => bound.startsWith('gt.'))?.slice(3));
+    const upper = Number(params.getAll('settled_at_ms').find(bound => bound.startsWith('lte.'))?.slice(4));
+    return rows.filter(row => params.get('gladiator_id') === `eq.${row.gladiator_id}` && params.get('status') === `eq.${row.status}`
+      && params.get('resolved_kind')?.slice(4, -1).split(',').includes(row.resolved_kind)
+      && row.settled_at_ms > lower && row.settled_at_ms <= upper && (!before || row.settled_at_ms < Number(before[1])
+        || (row.settled_at_ms === Number(before[1]) && row.slot_index < Number(before[2]))))
+      .sort((a, b) => b.settled_at_ms - a.settled_at_ms || b.slot_index - a.slot_index).slice(0, Number(params.get('limit')));
+  }
+  const queries = (calls: string[]) => calls.filter(path => path.startsWith('/rest/v1/activities?')).map(path => new URL(`http://local${path}`).searchParams);
+
+  it('requests only the owner’s five completed, settled result kinds within the server-time bounds', async () => {
+    const calls: string[] = [];
+    const sameTime = NOW - 1;
+    const rows = [...kinds.map((kind, index) => result(index + 1, kind, sameTime)),
+      result(8, 'arena', SINCE), result(9, 'arena', NOW + 1), result(10, 'rest'),
+      { ...result(11, 'arena'), gladiator_id: OTHER }, { ...result(12, 'arena'), status: 'active' }];
+    const client = transport({ world_revision: revision, activities: (url: URL) => serveRows(rows, url) }, calls);
+    const read = await readResultsSince(client, GLADIATOR.toUpperCase(), SINCE);
+    expect(read).toMatchObject({ serverNowMs: NOW, newestSettledMs: sameTime, progression: { level: 2, xp: 50 } });
+    expect(read.items.map((row) => [row.kind, row.destination, row.levelAfter])).toEqual([
+      ['dungeon', 'Wolf Den', null], ['tournament', null, null], ['arena', null, null], ['expedition', 'Ruined Outpost', 2], ['training', null, null],
+    ]);
+    const [query, ...extra] = queries(calls);
+    expect(extra).toHaveLength(0);
+    expect(query.get('select')).toBe('id,slot_index,settled_at_ms,summary,destination:requested->>expeditionId,gladiators(level,xp,newer:activities(count))');
+    expect(query.get('order')).toBe('settled_at_ms.desc,slot_index.desc');
+    expect(query.get('limit')).toBe('50');
+    expect(query.getAll('settled_at_ms')).toEqual([`gt.${SINCE}`, `lte.${NOW}`]);
+    expect(query.get('gladiators.newer.settled_at_ms')).toBe(`gt.${NOW}`);
+  });
+
+  it('uses the last fetched slot as tie-break and stops at 150, with no unproved progression arrow', async () => {
+    const calls: string[] = [];
+    const rows = Array.from({ length: 160 }, (_, index) => result(index + 1));
+    const client = transport({ world_revision: revision, activities: (url: URL) => serveRows(rows, url) }, calls);
+    const read = await readResultsSince(client, GLADIATOR, SINCE);
+    const pageQueries = queries(calls);
+    expect(pageQueries).toHaveLength(3);
+    expect(pageQueries.every(query => query.get('limit') === '50')).toBe(true);
+    expect(pageQueries[0].get('or')).toBeNull();
+    expect(pageQueries[1].get('or')).toBe(`(settled_at_ms.lt.${NOW - 60_000},and(settled_at_ms.eq.${NOW - 60_000},slot_index.lt.111))`);
+    expect(pageQueries[2].get('or')).toBe(`(settled_at_ms.lt.${NOW - 60_000},and(settled_at_ms.eq.${NOW - 60_000},slot_index.lt.61))`);
+    expect(read.items.map(row => row.activityId)).toEqual(Array.from({ length: 150 }, (_, index) => resultId(160 - index)));
+    expect(read.progression).toBeNull();
+  });
+
+  it('retains valid results while withholding an untrusted level change', async () => {
+    const expedition = result(1, 'expedition');
+    const unreadable = { ...result(3, 'expedition', NOW - 1), summary: null };
+    for (const rows of [
+      [{ ...expedition, gladiators: { ...expedition.gladiators, newer: [{ count: 1 }] } }],
+      [unreadable, expedition],
+      [{ ...expedition, gladiators: { level: 2, xp: 200, newer: [{ count: 0 }] } }],
+      [{ ...expedition, gladiators: { level: 1, xp: 0, newer: [{ count: 0 }] } }],
+    ]) {
+      const read = await readResultsSince(transport({ world_revision: revision, activities: rows }, []), GLADIATOR, SINCE);
+      expect(read).toMatchObject({ progression: null, items: [{ activityId: expedition.id, levelAfter: null }] });
+    }
+    const changed = Array.from({ length: 51 }, (_, index) => result(index + 1));
+    changed[0].gladiators.xp = 51;
+    const read = await readResultsSince(transport({ world_revision: revision, activities: (url: URL) => serveRows(changed, url) }, []), GLADIATOR, SINCE);
+    expect(read.progression).toBeNull();
+    expect(read.items).toHaveLength(51);
+  });
+
+  it('refuses a malformed visit time or gladiator before querying anything', async () => {
+    const calls: string[] = [];
+    const client = transport({ world_revision: revision }, calls);
+    for (const malformed of [NaN, Infinity, -1, 1.5, '100' as unknown as number]) {
+      await expect(readResultsSince(client, GLADIATOR, malformed)).rejects.toMatchObject({ code: 'unavailable' });
+    }
+    await expect(readResultsSince(client, 'not-an-id', SINCE)).rejects.toMatchObject({ code: 'unavailable' });
+    expect(calls).toEqual([]);
+  });
+});
 describe('protected Data API adapters', () => {
   it('loads safe world pages with a stable revision and no eager owner/log/profile query', async () => {
     const calls: string[] = [], revision = { revision: '7:20', server_now_ms: 99_000_000, slot_index: 20 };

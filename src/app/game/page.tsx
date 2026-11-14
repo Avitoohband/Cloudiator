@@ -21,13 +21,15 @@ function GameRoute() {
   // `?as=visitor` previews the visitor view, and `?as=resting` a player whose gladiator rests at home, in fixture mode only.
   const previewAs = fixture && search.get('as') === 'visitor' ? 'visitor' : undefined;
   const previewResting = fixture && search.get('as') === 'resting';
+  const day = search.get('day');
+  const previewAway = fixture && search.get('as') === 'away' ? day === 'small' || day === 'empty' ? day : 'big' : undefined;
   const previewBag = fixture && search.get('bag') === 'demo' ? 'demo' : undefined;
   const signin = search.get('signin');
   const signInResult: SignInResult | null = signin === 'cancelled' || signin === 'failed' ? signin : null;
   const scene = useMemo(() => sceneOf(search), [search]);
   // `?perf=1` shows the frame-rate overlay (plan Decision 2), in every build; nothing samples frames without it.
   const perf = search.get('perf') === '1';
-  return <CampShell fixture={fixture} previewAs={previewAs} previewResting={previewResting} previewBag={previewBag} fixtureRefused={requested && !fixture} signInResult={signInResult}
+  return <CampShell fixture={fixture} previewAs={previewAs} previewResting={previewResting} previewAway={previewAway} previewBag={previewBag} fixtureRefused={requested && !fixture} signInResult={signInResult}
     scene={scene} perf={perf} />;
 }
 

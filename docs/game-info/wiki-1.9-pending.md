@@ -92,6 +92,10 @@ Tournament fights stand out: they are gold rows with a trophy, the round (Final,
 
 The Schedule tells you when a planned activity will not run. A part your gladiator will not have the stamina for shows "Not enough stamina: your gladiator will rest instead", with what it needs and what it will have: add a Rest before it or pick a cheaper activity. A third Training of a game day shows "Training limit: this becomes Rest (2 a game day)". Parts that will run show the stamina left after them. When the next part will not run, a Stamina notice in camp says so, with Open schedule. While your gladiator rests instead of its plan, a pop-up in camp says so (for example "Aster is resting instead of the Woodland Path expedition: not enough stamina (had 12, needed 30)."), and the Schedule shows it on the running part with what was planned. Dismiss a notice or the pop-up and it stays away for that part, also after a reload. Afterwards, Notifications and your own Results line say it rested instead and why; other players only see that it rested. After a lost expedition fight, the expedition view and the away button say your gladiator is resting at the safe return point until the slot ends.
 
+## While you were away (results and notifications topic)
+
+After 30 minutes away, returning to camp can show what your gladiator earned while you were gone. The summary covers XP, level changes, gold, renown, fights, trips, training points, titles, loot, and rests that replaced planned activities. See all results takes you to Notifications, where you can watch replays and read individual results. Got it marks the summarized notifications as seen. The game uses this device’s last visit and your account’s Notifications mark, with up to seven days and 150 results.
+
 ## Also
 
 - Renown now uses a gold laurel icon, in the corner chip too. Update any Wiki text or picture that shows the old icon.

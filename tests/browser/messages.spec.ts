@@ -1008,6 +1008,23 @@ test.describe('Watch from Notifications', () => {
     await expect(panel.getByText('Arena victory')).toBeVisible();
   });
 
+  test('Got it in the away summary marks the added results without reading messages', async ({ page }) => {
+    const { commands } = await player(page, { notifications: RESULTS, seenMs: NOW - 3 * 60 * MIN });
+    await page.addInitScript(({ id, time }) => {
+      localStorage.setItem('cloudiator.away-seen.v1', JSON.stringify({ [id]: time }));
+    }, { id: ownerFixture.gladiatorId, time: NOW - 2 * 60 * MIN });
+    await openLive(page);
+    const summary = page.getByRole('dialog', { name: 'While you were away' });
+    await expect(summary).toBeVisible();
+    expect(sent(commands, 'see-notifications')).toEqual([]);
+    await summary.getByRole('button', { name: 'Got it', exact: true }).click();
+    await expect(summary).toBeHidden();
+    await expect.poll(() => sent(commands, 'see-notifications')).toEqual([
+      { kind: 'see-notifications', operationId: expect.any(String), upToMs: newest(RESULTS) },
+    ]);
+    await expect(badge(page)).toHaveText('2');
+  });
+
   test('opening Notifications lists each result and sends see-notifications once, with the newest shown time', async ({ page }, testInfo) => {
     const { live, commands } = await player(page, { notifications: RESULTS });
     await openLive(page);

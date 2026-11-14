@@ -215,6 +215,7 @@ them, don't promise them on an end card, and expect details to change). Avi's vi
 
 | Feature | What players get | Patch | Status | How to film it | Shown in video |
 | --- | --- | --- | --- | --- | --- |
+| While you were away | Return to camp after 30 minutes away to see your gladiator's XP, level, rewards, results, titles, and missed activities. Got it marks the summarized notifications as seen. | 1.9 | Built | Fixture camp with `?mode=fixture&as=away`, or add `&day=small` for one expedition | — |
 | Messages | A button beside your name, with a count, where patch notes and news from the game arrive. | 1.3 | Live | Fixture camp: the button beside your name | Messages update; Too Tiny (a drawn copy) |
 | Notifications | See what your training, expeditions, Arena fights and tournaments earned: XP, level-ups, gear and gold. | 1.3 | Live | Messages → Notifications | Messages update (named as coming in Looks update) |
 | Patch numbers | The menu under your name shows the patch you play, each patch note shows its number, and Patch history lists what every patch added. | 1.4 | Live | The chip menu: tap or click your name for "Patch 1.4" and Patch history ›; a patch note's number opens the history at that patch | — |

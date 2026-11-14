@@ -103,6 +103,9 @@ import { PatchNotice, reloadPage } from './PatchNotice';
 import { StaminaNotice } from './StaminaNotice';
 import { dismissSlot, readDismissedSlots, type NoticeKind } from './stamina-dismissals';
 import { modalOpen, useModalOpen } from './modal';
+import { AwaySummaryDialog, type AwaySummaryAction } from '../away-summary/AwaySummaryDialog';
+import { writeAwaySeen } from '../away-summary/away-seen';
+import { useAwaySummary } from '../away-summary/useAwaySummary';
 import { PerfOverlay, perfPhaseOf } from './PerfOverlay';
 import { PAGED_MENUS, menusFor, originMenu, type MenuId } from './menus';
 import { COMPACT_QUERY, railReducer, railVisible, type RailEvent, type RailState } from './rail-reveal';
@@ -237,11 +240,12 @@ function ResultsMenu({ fixture, samples, previewFailed, reads, viewerId, clock, 
   </>;
 }
 
-export function CampShell({ fixture, previewAs, previewResting = false, previewBag, fixtureRefused = false, signInResult = null, scene = null, perf = false }: {
+export function CampShell({ fixture, previewAs, previewResting = false, previewAway, previewBag, fixtureRefused = false, signInResult = null, scene = null, perf = false }: {
   fixture: boolean;
   previewAs?: 'visitor' | 'player';
   /** `?as=resting` (fixture mode only): the player's gladiator rests at home (Task 23.9). */
   previewResting?: boolean;
+  previewAway?: 'big' | 'small' | 'empty';
   /** `?bag=demo` (fixture mode only): Aster gets 18 extra items in her bag. */
   previewBag?: 'demo';
   /** `?mode=fixture` was asked for in a build without the preview: say so over the live camp. */
@@ -268,12 +272,12 @@ export function CampShell({ fixture, previewAs, previewResting = false, previewB
         .then(({ createFixtureGateway, FIXTURE_REPLAYS, FIXTURE_EXPEDITIONS, FIXTURE_DUNGEONS, FIXTURE_ARENA, FIXTURE_TOURNAMENTS }) => {
           if (!active) return;
           setSamples({ replays: FIXTURE_REPLAYS, expeditions: FIXTURE_EXPEDITIONS, dungeons: FIXTURE_DUNGEONS, arena: FIXTURE_ARENA, tournaments: FIXTURE_TOURNAMENTS });
-          setFixtureReads(createFixtureGateway({ resting: previewResting, bag: previewBag }));
+          setFixtureReads(createFixtureGateway({ resting: previewResting, bag: previewBag, away: previewAway }));
         })
         .catch(() => { if (active) setPreviewError(true); });
     }
     return () => { active = false; };
-  }, [fixture, previewResting, previewBag]);
+  }, [fixture, previewResting, previewAway, previewBag]);
 
   const reads = fixture ? fixtureReads : gateway;
   // One sync controller, display clock and owner state for the camp and every menu (the fixture gateway once loaded).
@@ -322,7 +326,12 @@ export function CampShell({ fixture, previewAs, previewResting = false, previewB
   const show = useCallback((id: MenuId) => { if (openRef.current !== id) send({ toggle: id }); }, [send]);
 
   const account = game.session.userId;
-  const joining = useJoining({ viewer, account, ownerCreated: game.ownerCreated, show });
+  const { ownerCreated } = game;
+  const joined = useCallback((created: OwnerState) => {
+    writeAwaySeen(created.gladiatorId, clock.synced() ? clock.now() : created.inbox.notificationsSeenMs);
+    ownerCreated(created);
+  }, [clock, ownerCreated]);
+  const joining = useJoining({ viewer, account, ownerCreated: joined, show });
 
   // A sign-in that did not complete: keep its message, and take the parameter out of the address.
   const [signInNotice, setSignInNotice] = useState<SignInResult | null>(signInResult);
@@ -583,6 +592,25 @@ export function CampShell({ fixture, previewAs, previewResting = false, previewB
   // before they open), and Later hides it for this page's life for that number; a newer number shows it again. Visitors see it too.
   const modal = useModalOpen();
   const compact = useSyncExternalStore(subscribeCompact, readCompact, () => false);
+  const returned = useAwaySummary({
+    owner: viewer === 'player' && (!fixture || previewAway) && !game.ownerError ? owner : null,
+    reads, clock, clockReady: clock.synced(), rules: game.rules, tick: nowMs,
+    blocked: modal || scene !== null || practising || practice.dialogOpen || joining.creating || lookOpen || titleOpen || game.sceneStatus === 'loading',
+  });
+  const summaryOpen = returned.summary !== null;
+  function closeAwaySummary(action: AwaySummaryAction) {
+    const mark = returned.summary?.seenUpToMs;
+    returned.dismiss();
+    if (action === 'acknowledge' && mark && messaging) void messaging.seeNotifications(mark).catch(() => undefined);
+    if (action === 'gladiator' || action === 'schedule') show(action);
+    else if (action === 'messages' || action === 'results') {
+      send('escape');
+      setMessagesRequest({ tab: action === 'results' ? 'notifications' : 'messages', n: ++messageRequests.current, account: requestAccount, owner: choiceKey });
+    } else {
+      const active = document.activeElement;
+      if (!active || active === document.body || active.closest('[data-testid="away-summary"]')) focusCamp();
+    }
+  }
   // The pin and the edge are the pointer layout's (Settings); the touch layout always has its ☰ button.
   const [savedPrefs, setPrefs] = useMenuPrefs();
   const prefs = compact ? DEFAULT_MENU_PREFS : savedPrefs;
@@ -615,7 +643,7 @@ export function CampShell({ fixture, previewAs, previewResting = false, previewB
   }, [prefs.pinned, prefs.place]);
   const railShown = railVisible(rail, prefs.pinned);
   const [patchLater, setPatchLater] = useState<string | null>(null);
-  const patchNotice = noticeFor({ latest: game.latestPatch, build: PATCH, blocked: scene !== null || modal || joining.creating || lookOpen || titleOpen,
+  const patchNotice = noticeFor({ latest: game.latestPatch, build: PATCH, blocked: scene !== null || modal || summaryOpen || joining.creating || lookOpen || titleOpen,
     later: patchLater });
 
   // Patch 1.9 Task 29: "Not enough stamina for your next Expedition (starts in 18 min)…". The player's own saved day, walked from the slot the
@@ -648,8 +676,8 @@ export function CampShell({ fixture, previewAs, previewResting = false, previewB
   const runningRest = useRunningRest(viewer === 'player' && reads ? reads : NO_OWNER_READS, viewer === 'player' && owner ? owner : NO_ACTIVITY, runningSlot);
   const restingPopup = owner && viewer === 'player' ? restingNowPopup({ rested: runningRest, name: owner.name, slot: runningSlot, had: owner.stamina.current,
     needed: runningRest && ownCosts ? ownCosts[runningRest.planned] ?? null : null, dismissed: dismissedNow }, game.rules) : null;
-  const restingShown = restingPopup && scene === null && !practising ? restingPopup : null;
-  const staminaShown = staminaNotice && scene === null && !practising ? staminaNotice : null;
+  const restingShown = restingPopup && scene === null && !practising && !summaryOpen ? restingPopup : null;
+  const staminaShown = staminaNotice && scene === null && !practising && !summaryOpen ? staminaNotice : null;
 
   const press = useRef<{ x: number; y: number } | null>(null);
   const sceneUnavailable = game.sceneStatus === 'unavailable';
@@ -660,7 +688,7 @@ export function CampShell({ fixture, previewAs, previewResting = false, previewB
   // not while a scene covers the camp. Find is the Gladiators list's Find: the camp view's centre, the menu closed, the camp keyboard.
   const arrivals = useArrivals(world, ownerId);
   const place = useBannerPlace(shellRef, game.viewer, open, prefs.place);
-  const arrival = arrivals.banner !== null && scene === null && !practising && game.viewer !== 'loading' && !(place.coversPanel && open !== null) ? arrivals.banner : null;
+  const arrival = arrivals.banner !== null && scene === null && !practising && !summaryOpen && game.viewer !== 'loading' && !(place.coversPanel && open !== null) ? arrivals.banner : null;
   const { dismiss: dismissArrival } = arrivals;
   const arrivalSlot = (
     <ArrivalSlot stacked={place.stacked}>
@@ -672,7 +700,8 @@ export function CampShell({ fixture, previewAs, previewResting = false, previewB
   // that is known (a short time, Task 23.10), else only that it rests. Its own Gladiators row and profile card say this, never the public sentence.
   const ownPlace = owner && (owner.restingUntilSlot !== null || game.ownResting) ? ownRestingText(owner.restingUntilSlot, nowMs, clockMode) : null;
   // Where the owner's gladiator is in the world (`expedition:<id>` while away): the destination of a running expedition, for the XP bar.
-  const ownLocation = world?.actors.find(actor => actor.gladiatorId === ownerId)?.location ?? null;
+  const ownActor = world?.actors.find(actor => actor.gladiatorId === ownerId);
+  const ownLocation = ownActor?.location ?? null;
   const content = (id: MenuId) => {
     switch (id) {
       case 'gladiator': return <CharacterPanel viewer={viewer} session={game.session} owner={owner} ownerError={game.ownerError} slotIndex={game.slotIndex}
@@ -705,7 +734,7 @@ export function CampShell({ fixture, previewAs, previewResting = false, previewB
   };
 
   return (
-    <div ref={shellRef} className={styles.shell} data-rail={railShown ? 'shown' : 'hidden'} data-menu-place={prefs.place} data-sheet={open ? 'open' : undefined} data-arrival={arrival ? 'shown' : undefined}
+    <div ref={shellRef} className={styles.shell} data-rail={railShown ? 'shown' : 'hidden'} data-menu-place={prefs.place} data-sheet={open || summaryOpen ? 'open' : undefined} data-arrival={arrival ? 'shown' : undefined}
       data-card={card ? 'open' : undefined} data-owner-menu={owner ? '' : undefined} data-pill={fixture || fixtureRefused ? 'shown' : undefined}
       style={{ '--chip-w': `${place.chipWidth}px`, '--chip-bottom': `${place.chipBottom}px`,
         '--panel-clear-left': `${place.panelClearLeft}px`, '--panel-clear-right': `${place.panelClearRight}px`, '--menu-clear-top': `${place.menuClearTop}px` } as CSSProperties}>
@@ -739,7 +768,7 @@ export function CampShell({ fixture, previewAs, previewResting = false, previewB
           </div>}
         </div>
       </div>
-      {away.state && scene === null && !practising && <AwayButton state={away.state} onOpen={openFromAway} onClose={away.close} />}
+      {away.state && scene === null && !practising && !summaryOpen && <AwayButton state={away.state} onOpen={openFromAway} onClose={away.close} />}
       {menus.map(menu => (menu.id === open || menu.id === 'arena') && (
         <MenuSurface key={menu.id} menu={menu} open={menu.id === open} covered={covering && menu.id === open} paged={PAGED_MENUS.has(menu.id)} onClose={() => close(menu.id)}>{content(menu.id)}</MenuSurface>
       ))}
@@ -775,6 +804,8 @@ export function CampShell({ fixture, previewAs, previewResting = false, previewB
         <TitlePicker key={pickerOwner.gladiatorId} owner={pickerOwner} gateway={reads} refresh={refreshTitle} preview={fixture} onWorn={titleAnswered}
           onClose={closeTitle} />
       )}
+      {returned.summary && owner && <AwaySummaryDialog key={owner.gladiatorId} summary={returned.summary}
+        owner={owner} actor={ownActor} compact={compact} onClose={closeAwaySummary} />}
       {perf && <PerfOverlay phase={perfPhase.label} phaseKey={perfPhase.key} />}
     </div>
   );

@@ -34,6 +34,9 @@ function isBackdrop(event: MouseEvent<HTMLDialogElement>): boolean {
 function ItemTiles({ items, compact }: { items: AwaySummary['items']; compact: boolean }) {
   const limit = compact ? 7 : 8;
   const shown = items.slice(0, limit);
+  const names = shown.map(item => item.name).join(', ');
+  const hiddenRare = items.slice(limit).filter(item => item.rarity === 'rare');
+  const rareCount = hiddenRare.reduce((total, item) => total + item.quantity, 0);
   return <div className={styles.items}>
     <p className={styles.eyebrow}>New items · {count(items.length)}</p>
     <div className={styles.itemTiles}>
@@ -44,7 +47,12 @@ function ItemTiles({ items, compact }: { items: AwaySummary['items']; compact: b
         {item.quantity > 1 && <span aria-hidden="true" className={styles.quantity}>×{count(item.quantity)}</span>}
       </span>)}
     </div>
-    <p className={styles.itemNames}>{shown.map(item => item.name).join(', ')}{items.length > limit && <> · <strong>+{count(items.length - limit)} more</strong></>}</p>
+    <p className={styles.itemNames}>
+      <span title={names}>{names}</span>
+      {items.length > limit && <strong aria-label={hiddenRare.length ? `${count(items.length - limit)} more items, including ${hiddenRare.map(item => item.label).join(', ')}` : undefined}
+        title={hiddenRare.length ? hiddenRare.map(item => item.label).join(', ') : undefined}>
+        {' · +'}{count(items.length - limit)} more{rareCount > 0 && `, ${count(rareCount)} Rare`}</strong>}
+    </p>
   </div>;
 }
 
@@ -65,6 +73,11 @@ export function AwaySummaryDialog({ summary, owner, actor, compact, onClose }: {
   const levelBefore = summary.levelBefore;
   const levelUp = levelBefore !== null;
   const overflow = summary.lines.find(line => line.kind === 'overflow');
+  const dense = summary.lines.length + summary.titles.length > 8 || summary.items.length > 5;
+  const titles = dense ? summary.titles.slice(0, 2) : summary.titles;
+  const otherTitles = summary.titles.length - titles.length;
+  const lines = summary.lines.filter(line => line.kind !== 'overflow');
+  const displayedLines = dense ? [...lines.filter(line => line.label), ...(overflow ? [overflow] : []), ...lines.filter(line => !line.label)] : lines;
 
   useEffect(() => {
     const element = dialog.current;
@@ -85,7 +98,7 @@ export function AwaySummaryDialog({ summary, owner, actor, compact, onClose }: {
     onClose(action);
   }
 
-  return <dialog ref={dialog} className={styles.dialog} data-compact={compact || undefined}
+  return <dialog ref={dialog} className={styles.dialog} data-compact={compact || undefined} data-dense={dense || undefined}
     data-testid="away-summary" aria-labelledby={id}
     onCancel={event => { event.preventDefault(); finish('dismiss'); }} onClose={() => finish('dismiss')}
     onMouseDown={event => { backdropPress.current = event.button === 0 && isBackdrop(event); }}
@@ -140,15 +153,24 @@ export function AwaySummaryDialog({ summary, owner, actor, compact, onClose }: {
         </div>}
 
         {(summary.lines.length > 0 || summary.titles.length > 0) && <ul className={styles.lines}>
-          {summary.lines.filter(line => line.kind !== 'overflow').map((line, index) => <li key={`${line.kind}-${index}`}>
+          {displayedLines.map((line, index) => <li key={`${line.kind}-${index}`} data-full-width={!line.label || undefined}>
             <AtlasIcon frame={icons[line.kind]} size={16} />
-            <span>{line.label}: <strong>{line.main}</strong>{line.detail}</span>
+            <span title={dense ? `${line.label ? `${line.label}: ` : ''}${line.main}${line.detail ?? ''}` : undefined}>
+              {line.label && `${line.label}: `}<strong>{line.main}</strong>{line.detail}
+            </span>
           </li>)}
-          {summary.titles.map(row => <li key={row.id}>
+          {dense && titles.length > 0 ? <li data-full-width="">
+            <span className={styles.star} aria-hidden="true">✦</span>
+            <span title={summary.titles.map(row => `${row.name}${row.detail ? `: ${row.detail}` : ''}`).join('\n')}>
+              {summary.titles.length === 1 ? 'New title: ' : 'New titles: '}
+              {titles.map((row, index) => <span key={row.id}>{index > 0 && ', '}<em>{row.name}</em></span>)}
+              {otherTitles > 0 && <> · {count(otherTitles)} more {otherTitles === 1 ? 'title' : 'titles'}</>}
+            </span>
+          </li> : titles.map(row => <li key={row.id}>
             <span className={styles.star} aria-hidden="true">✦</span>
             <span>New title: <em>{row.name}</em>{row.detail && <> · <span className={styles.dim}>{row.detail}</span></>}</span>
           </li>)}
-          {overflow && <li>
+          {!dense && overflow && <li>
             <AtlasIcon frame={icons.overflow} size={16} /><span>{overflow.label}: {overflow.main}</span>
           </li>}
         </ul>}

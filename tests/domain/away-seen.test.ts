@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { AWAY_SEEN_KEY, readAwaySeen, resetAwaySeenMemory, writeAwaySeen } from '../../src/features/away-summary/away-seen';
+import { AWAY_SEEN_KEY, heartbeatAwaySeen, onAwaySeenStorage, readAwaySeen, resetAwaySeenMemory, writeAwaySeen } from '../../src/features/away-summary/away-seen';
 
 let stored: Map<string, string>;
 beforeEach(() => {
@@ -10,6 +10,26 @@ beforeEach(() => {
 afterEach(() => vi.unstubAllGlobals());
 
 describe('While you were away device store', () => {
+  it('two simulated tabs stop exchanging storage writes and throttle their heartbeats', () => {
+    const handlers = [0, 1].map(() => (event: Pick<StorageEvent, 'key'>) => onAwaySeenStorage('a', event));
+    const pending: (() => void)[] = [];
+    let side = 0;
+    const setItem = vi.fn((key: string, value: string) => {
+      stored.set(key, value);
+      const next = 1 - side;
+      pending.push(() => { side = next; handlers[next]({ key }); });
+    });
+    vi.stubGlobal('localStorage', { getItem: (key: string) => stored.get(key) ?? null, setItem });
+    writeAwaySeen('a', 120_000);
+    for (let remaining = 4; remaining > 0 && pending.length; remaining--) pending.shift()!();
+    expect(setItem).toHaveBeenCalledTimes(1);
+    expect(pending).toHaveLength(0);
+    heartbeatAwaySeen('a', 149_999);
+    expect(setItem).toHaveBeenCalledTimes(1);
+    heartbeatAwaySeen('a', 150_000);
+    expect(setItem).toHaveBeenCalledTimes(2);
+  });
+
   it('returns no visit when storage is missing or malformed and skips invalid values', () => {
     expect(readAwaySeen('a')).toBeNull();
     stored.set(AWAY_SEEN_KEY, 'invalid json');

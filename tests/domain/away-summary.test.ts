@@ -4,6 +4,7 @@ import type { EarnedTitle, GameMessage, GameNotification, HistoryEntry } from '@
 import { RULES_V2 } from '@domain/rules-v2';
 import { awaySince, awayTimeText, buildAwaySummary, type AwaySummaryInput } from '../../src/features/away-summary/away-summary';
 import { notificationLines } from '../../src/features/messages/notifications';
+import { restedActivityName, restedNoteLines } from '../../src/features/schedule/stamina-text';
 import { ownerFixture } from '../fixtures/domain';
 
 const MINUTE = 60_000, DAY = 1440 * MINUTE;
@@ -86,6 +87,29 @@ describe('While you were away model', () => {
       { kind: 'tournament', label: 'Silver Tournament', main: '3rd place' },
       { kind: 'tournament', label: 'Silver Tournament', main: '5th place' },
     ]);
+  });
+
+  it('keeps a known tournament league when its history has no placement', () => {
+    const bout = { ...history('1', 3, 'Semifinal'), league: 'bronze' as const, place: null };
+    expect(buildAwaySummary(input({ results: [result('1', 'tournament')], history: [bout] }))?.lines)
+      .toEqual([{ kind: 'tournament', label: 'Bronze Tournament', main: 'finished' }]);
+  });
+
+  it('lists the three newest runs of each kind, summarizing older runs and their loot', () => {
+    const runs = Array.from({ length: 7 }, (_, i) => [
+      result(`dungeon-${i}`, 'dungeon', { at: nowMs - i * MINUTE, destination: `Dungeon ${i}`, rewards: { items: [salvage] } }),
+      result(`tournament-${i}`, 'tournament', { at: nowMs - i * MINUTE }),
+    ]).flat().reverse();
+    const placements = Array.from({ length: 7 }, (_, i) => history(`tournament-${i}`, i + 1, 'Semifinal'));
+    const summary = buildAwaySummary(input({ results: runs, history: placements }));
+    expect(summary?.resultCount).toBe(14);
+    expect(summary?.lines.filter(line => line.kind === 'tournament').map(line => line.main))
+      .toEqual(['1st place', '2nd place', '3rd place', '4 more tournaments']);
+    expect(summary?.lines.filter(line => line.kind === 'dungeon')).toMatchObject([
+      { label: 'Dungeon 0' }, { label: 'Dungeon 1' }, { label: 'Dungeon 2' },
+      { main: '4 more dungeon runs', detail: ' · 8 items' },
+    ]);
+    expect(summary?.items).toMatchObject([{ catalogId: 'salvage', quantity: 14 }]);
   });
 
   it('groups expedition destinations and counts kept loot, with the dungeon member or party outcome', () => {
@@ -186,11 +210,32 @@ describe('While you were away model', () => {
     expect(buildAwaySummary({ ...data, messages: [reply] })?.teamReply).toBe(false);
   });
 
+  it('orders loot by rarity and then newest-first, with stacked salvage last', () => {
+    const oldRare = { ...spear, catalogId: 'dagger:5:rare' };
+    const uncommon = { ...spear, catalogId: 'spear:5:uncommon', rarity: 'uncommon' as const };
+    const common = { ...spear, catalogId: 'spear:5:common', rarity: 'common' as const };
+    const summary = buildAwaySummary(input({ results: [
+      result('old', 'expedition', { at: nowMs - 2 * MINUTE, rewards: { items: [oldRare, salvage] } }),
+      result('new', 'expedition', { rewards: { items: [salvage, common, uncommon, spear] } }),
+    ] }));
+    expect(summary?.items.map(({ catalogId, quantity }) => [catalogId, quantity])).toEqual([
+      [spear.catalogId, 1], [oldRare.catalogId, 1], [uncommon.catalogId, 1], [common.catalogId, 1], [salvage.catalogId, 4],
+    ]);
+  });
+
   it('summarizes limit and stamina rests without borrowing activity numbers', () => {
     const limit = { activityId: 'rest', settledAtMs: nowMs, planned: 'training' as const, destination: null, reason: 'limit' as const, name: 'Aster' };
     expect(buildAwaySummary(input({ rests: [limit] }))?.rested)
       .toBe('Rested once instead of Training: the Training limit (2 a game day).');
     expect(buildAwaySummary(input({ rests: [limit, { ...limit, activityId: 'r2', planned: 'arena', reason: 'stamina' }] }))?.rested)
       .toBe('Rested 2 times instead of planned activities: not enough stamina or the Training limit (2 a game day).');
+  });
+
+  it('shares the planned-activity phrase with the owner’s notification', () => {
+    const rest = { activityId: 'r', settledAtMs: nowMs, planned: 'dungeon' as const, destination: null, reason: 'stamina' as const, name: 'Aster' };
+    const phrase = restedActivityName(rest);
+    expect(phrase).toBe('a dungeon');
+    expect(restedNoteLines(rest, rest.name, RULES_V2).title).toBe(`Aster rested instead of ${phrase}`);
+    expect(buildAwaySummary(input({ rests: [rest] }))?.rested).toBe(`Rested once instead of ${phrase}: not enough stamina.`);
   });
 });

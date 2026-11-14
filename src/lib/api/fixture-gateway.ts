@@ -7,7 +7,7 @@ import { RULES_V2 } from '@domain/rules-v2';
 import type { GameGateway } from './gateway';
 import {
   AWAY_RESULTS_LIMIT, BOUTS_PAGE, GatewayReadError, HISTORY_PAGE, boutOf, historyEntryOf, nextBoutsCursor, ownRewardsOf, parseBoutsRead, parseDungeonFightRef, parseHistoryRead, parseMarketRead,
-  parseOwnRewardsRead, parseResultsCursor, parseResultsSince, parseRestAfter, parseStandingOf, parseStandingsRead, type LastBout,
+  parseOwnRewardsRead, parseResultsCursor, parseResultsInterval, parseResultsSince, parseRestAfter, parseStandingOf, parseStandingsRead, type LastBout,
 } from './reads';
 import { replayKept } from '../replay-retention';
 import { worldFixture } from '../../../tests/fixtures/domain';
@@ -212,6 +212,10 @@ export function createFixtureGateway(options: { resting?: boolean; bag?: 'demo';
       const items = id === OWNER_ID ? notifications.filter(note => note.settledAtMs > sinceMs && note.settledAtMs <= serverNowMs).slice(0, AWAY_RESULTS_LIMIT) : [];
       const progression = items.length && items.length < AWAY_RESULTS_LIMIT ? { level: summaryProgression.level, xp: summaryProgression.xp } : null;
       return { items: structuredClone(items), newestSettledMs: items[0]?.settledAtMs ?? null, serverNowMs, progression };
+    },
+    hasResultsBetween: async (gladiatorId, afterMs, throughMs) => {
+      const id = parseResultsInterval(gladiatorId, afterMs, throughMs);
+      return id === OWNER_ID && notifications.some(note => note.settledAtMs > afterMs && note.settledAtMs <= throughMs);
     },
     ...(away ? { rested: async (ids?: readonly string[]) => away === 'big'
       ? structuredClone(AWAY_SAMPLE_RESTS.filter(rest => !ids || ids.includes(rest.activityId))) : [] } : {}),

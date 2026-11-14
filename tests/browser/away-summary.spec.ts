@@ -1,11 +1,11 @@
 import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
 import { expect, test, type Page } from './fixtures';
-import { contrastIssues } from './a11y-helpers';
+import { contrastIssues, expectNamedControls } from './a11y-helpers';
 import { worldFixture, ownerFixture } from '../fixtures/domain';
 import { arenaActivityId } from '../fixtures/arena-ids';
-import { emptyWorld, routeLiveReads, seedSession, SLOT_MS, SUPABASE_URL } from './live-routes';
-import { menuDialog } from './shell-helpers';
+import { emptyWorld, routeLiveReads, seedSession, SLOT_MS, SUPABASE_URL, type LiveNotification } from './live-routes';
+import { campReady, menuDialog, openMenu, spendSuggestedPoints } from './shell-helpers';
 
 test.skip(process.env.PLAYWRIGHT_STATIC === 'true', 'Uses the fixture camp or development-only player transport.');
 
@@ -15,8 +15,24 @@ const key = 'cloudiator.away-seen.v1';
 const id = ownerFixture.gladiatorId;
 const away = (page: Page) => page.getByRole('dialog', { name: 'While you were away' });
 const fixtureUrl = '/game/?mode=fixture&as=away';
-const campReady = (page: Page) => page.waitForFunction(() => window.__cloudiatorCamp?.state()?.ready === true);
 const seen = (page: Page) => page.evaluate(({ key, id }) => JSON.parse(localStorage.getItem(key) ?? '{}')[id], { key, id });
+const slotOf = (time: number) => Math.floor((time - 1) / SLOT_MS);
+
+function result(kind: LiveNotification['summary']['resolvedKind'], settledAtMs: number, items: LiveNotification['summary']['rewards']['items'] = []): LiveNotification {
+  return { ...(kind === 'expedition' ? { expeditionId: 'woodland' } : {}), summary: {
+    activityId: randomUUID(), receiptId: randomUUID(), resolvedKind: kind, result: 'completed', success: true, settledAtMs,
+    replayExpiry: { state: 'expired' }, rewards: { xp: 0, money: 4, renown: 1, attributePoints: 0, items, overflowMoney: 0 },
+    ...(kind === 'dungeon' ? { dungeon: { id: 'wolf-den', terminalFight: 4, partyWon: true } as const } : {}),
+  } };
+}
+
+async function expectFits(page: Page) {
+  const dialog = away(page);
+  await expect(dialog).toBeVisible();
+  await expect.poll(() => dialog.getByTestId('away-summary-body').evaluate(body => body.scrollHeight - body.clientHeight)).toBeLessThanOrEqual(1);
+  await expectNamedControls(dialog, 'away summary');
+  expect(await contrastIssues(dialog)).toEqual([]);
+}
 
 async function seedVisit(page: Page, time = now - 1_180 * minute) {
   await page.addInitScript(({ key, id, time }) => {
@@ -42,14 +58,87 @@ test('shows the big day once and marks the results seen on Got it', async ({ pag
     /Wolf Den: your party won/, /Training ×2: \+2 attribute points to spend/, /Rare Find/, /Rested once instead of the Ruined Outpost expedition/,
     /2 new messages/, /answer to your feedback/]) await expect(dialog).toContainText(copy);
   await expect(dialog.getByRole('img', { name: 'Rare Spear (tier 5)' })).toBeVisible();
-  await expect.poll(() => seen(page)).toBeGreaterThanOrEqual(now);
+  await expectFits(page);
+  await expect(dialog.getByTestId('away-summary-item').first()).toHaveAccessibleName('Rare Spear (tier 5)');
+  expect(await seen(page)).toBe(now - 1_180 * minute);
   await capture(page, hasTouch, 'big');
   await dialog.getByRole('button', { name: 'Got it' }).click();
   await expect(dialog).toBeHidden();
+  await expect.poll(() => seen(page)).toBeGreaterThanOrEqual(now);
   await expect(page.getByTestId('corner-chip').locator('[data-messages-button]')).toHaveAccessibleName('Messages, 2 new');
   await page.reload();
   await campReady(page);
   await expect(dialog).toBeHidden();
+});
+
+test('a background owner read failure leaves the summary open and Got it still marks the results', async ({ page, context }) => {
+  const user = await seedSession(context);
+  const since = now - 120 * minute;
+  const owner = structuredClone(ownerFixture);
+  owner.inbox.notificationsSeenMs = since;
+  const note = result('expedition', now - 15 * minute);
+  const world = emptyWorld(now);
+  const live = await routeLiveReads(context, { world, owner, notifications: [note], ownerAccountId: user.id, serverNowMs: () => now });
+  const marks: number[] = [];
+  await context.route(`${SUPABASE_URL}/functions/v1/game-command`, async route => {
+    if (route.request().method() !== 'POST') return route.fallback();
+    const command = route.request().postDataJSON();
+    if (command.kind !== 'see-notifications') return route.fallback();
+    marks.push(command.upToMs);
+    await route.fulfill({ status: 200, headers: { 'access-control-allow-origin': '*' }, json: { ok: true, value: { seenMs: command.upToMs } } });
+  });
+  await seedVisit(page, since);
+  await visit(page, '/game/');
+  await expect(away(page)).toBeVisible();
+  live.fail('owner_state');
+  live.setWorld({ ...world, revision: 'away-owner-error' });
+  const failed = page.waitForResponse(response => new URL(response.url()).pathname.endsWith('/owner_state') && !response.ok());
+  await page.evaluate(() => window.dispatchEvent(new Event('focus')));
+  await failed;
+  await expect(away(page).getByRole('button', { name: 'Got it' })).toBeEnabled();
+  expect(await seen(page)).toBe(since);
+  await away(page).getByRole('button', { name: 'Got it' }).click();
+  await expect.poll(() => marks).toEqual([note.summary.settledAtMs]);
+  await expect.poll(() => seen(page)).toBeGreaterThanOrEqual(now);
+});
+
+test('fits a week of tournament and dungeon results with the footer in view', async ({ page, context, hasTouch }) => {
+  await page.setViewportSize(hasTouch ? { width: 360, height: 780 } : { width: 1280, height: 720 });
+  const user = await seedSession(context);
+  const since = now - 7 * 24 * 60 * minute;
+  const owner = structuredClone(ownerFixture);
+  owner.inbox.notificationsSeenMs = since;
+  owner.inbox.unread = 1;
+  owner.titles = ['rare-find', 'victor', 'tiro'].map(id => ({ id, earnedAtMs: now - SLOT_MS, activityId: null, source: 'result', detail: null }));
+  const item = (rarity: 'common' | 'rare') => ({ catalogId: `spear:5:${rarity}`, catalogVersion: 'v1' as const, tier: 5 as const, rarity, quantity: 1 });
+  const tournaments = Array.from({ length: 7 }, (_, index) => result('tournament', now - (index * 9 + 1) * SLOT_MS));
+  const dungeons = Array.from({ length: 7 }, (_, index) => result('dungeon', now - (index * 9 + 2) * SLOT_MS,
+    index === 6 ? [item('rare')] : Array.from({ length: 2 }, () => item('common'))));
+  const history = tournaments.map(({ summary }) => ({ gladiator_id: id, kind: 'tournament', entry_id: randomUUID(), activity_id: summary.activityId,
+    fought_at_ms: summary.settledAtMs - 2 * minute, settled_at_ms: summary.settledAtMs, result: 'victory', success: true,
+    league: 'silver', tournament_id: `tournament:${slotOf(summary.settledAtMs)}:silver`, round: 'Final', place: 1 }));
+  const extra: LiveNotification[] = [result('arena', now - 3 * SLOT_MS), result('training', now - 4 * SLOT_MS),
+    ...(['woodland', 'outpost', 'mountain'] as const).map((expeditionId, index) => ({
+      ...result('expedition', now - (5 + index) * SLOT_MS), expeditionId,
+    }))];
+  extra[0].summary.rewards.overflowMoney = 4;
+  await routeLiveReads(context, { world: emptyWorld(now), owner, notifications: [...tournaments, ...dungeons, ...extra], history,
+    rests: [{ activityId: randomUUID(), slotIndex: slotOf(now) - 8, requested: { kind: 'expedition', expeditionId: 'woodland' }, fallback: true, settled: true, name: 'Aster' }],
+    messages: [{ id: 1124, kind: 'team-reply', title: 'We replied', preview: 'Thanks for writing in', body: [], action: null, publishedAtMs: now - SLOT_MS }],
+    ownerAccountId: user.id, serverNowMs: () => now });
+  await seedVisit(page, since);
+  await visit(page, '/game/');
+  const dialog = away(page);
+  await expect(dialog).toContainText('19 results');
+  await expect(dialog).toContainText(/4 more dungeon runs.*7 items/);
+  await expect(dialog).toContainText('4 more tournaments');
+  await expect(dialog).toContainText('1 more title');
+  await expect(dialog).toContainText('Bag full');
+  await expect(dialog.getByRole('button', { name: 'Open schedule' })).toBeInViewport({ ratio: 1 });
+  await expect(dialog.getByRole('button', { name: 'Read' })).toBeInViewport({ ratio: 1 });
+  await expect(dialog.getByTestId('away-summary-item').first()).toHaveAccessibleName('Rare Spear (tier 5)');
+  await expectFits(page);
+  await expect(dialog.getByRole('button', { name: /All results/i })).toBeInViewport({ ratio: 1 });
 });
 
 test('opens on a new device from the notification mark and ignores an ordinary fixture visit', async ({ page }) => {
@@ -71,6 +160,23 @@ test('quiet visits stay quiet and advance the record', async ({ page }) => {
   await expect(away(page)).toBeHidden();
 });
 
+test('a storage event does not write a heartbeat back to the other tab', async ({ page }) => {
+  await seedVisit(page, now - 10 * minute);
+  await visit(page, fixtureUrl + '&day=empty');
+  await expect.poll(() => seen(page)).toBeGreaterThanOrEqual(now);
+  const writes = await page.evaluate(({ key, id }) => {
+    const mark = JSON.parse(localStorage.getItem(key)!)[id];
+    const original = Storage.prototype.setItem;
+    let writes = 0;
+    Storage.prototype.setItem = function (name, value) { if (name === key) writes++; original.call(this, name, value); };
+    try {
+      window.dispatchEvent(new StorageEvent('storage', { key, newValue: JSON.stringify({ [id]: mark }), storageArea: localStorage }));
+      return writes;
+    } finally { Storage.prototype.setItem = original; }
+  }, { key, id });
+  expect(writes).toBe(0);
+});
+
 test('never opens for a visitor or signed-in account without a gladiator', async ({ page, context }) => {
   await seedVisit(page);
   await visit(page, '/game/?mode=fixture&as=visitor');
@@ -80,6 +186,32 @@ test('never opens for a visitor or signed-in account without a gladiator', async
   await visit(page, '/game/');
   await expect(page.getByRole('dialog', { name: 'Create your gladiator' })).toBeVisible();
   await expect(away(page)).toBeHidden();
+});
+
+test('the visit that creates a gladiator writes its record and never opens the summary', async ({ page, context }) => {
+  const user = await seedSession(context);
+  const since = now - 120 * minute;
+  const owner = structuredClone(ownerFixture);
+  owner.inbox.notificationsSeenMs = since;
+  const live = await routeLiveReads(context, { world: emptyWorld(now), owner: null, ownerAccountId: user.id,
+    serverNowMs: () => now, notifications: [result('training', now - 10 * minute)] });
+  await context.route(`${SUPABASE_URL}/functions/v1/game-command`, async route => {
+    if (route.request().method() !== 'POST') return route.fallback();
+    const command = route.request().postDataJSON();
+    if (command.kind !== 'create-character') return route.fallback();
+    live.setOwner({ ...owner, name: command.name });
+    await route.fulfill({ status: 200, headers: { 'access-control-allow-origin': '*' }, json: { ok: true, receiptId: randomUUID(), value: { gladiatorId: id } } });
+  });
+  await seedVisit(page, since);
+  await visit(page, '/game/');
+  const creation = page.getByRole('dialog', { name: 'Create your gladiator' });
+  await creation.getByRole('textbox', { name: /name/i }).fill('New Fighter');
+  await spendSuggestedPoints(page);
+  await creation.getByRole('button', { name: 'Create gladiator', exact: true }).click();
+  await expect(creation).toBeHidden();
+  await expect.poll(() => seen(page)).toBeGreaterThanOrEqual(now);
+  await expect(away(page)).toBeHidden();
+  expect(live.requests.filter(request => request.table === 'activities' && request.query.get('limit') === '50')).toHaveLength(0);
 });
 
 for (const method of ['close', 'Escape', 'backdrop'] as const) {
@@ -203,6 +335,50 @@ test('retries a failed summary on a later return even when a dialog must close f
   await expect(away(page)).toContainText('Rested once');
 });
 
+test('retries a failed summary after the clock wakes without focus or visibility events', async ({ page, context }) => {
+  const user = await seedSession(context);
+  const since = now - 120 * minute;
+  let serverNow = now;
+  const owner = structuredClone(ownerFixture);
+  owner.inbox.notificationsSeenMs = since;
+  await routeLiveReads(context, { world: emptyWorld(now), owner, notifications: [result('expedition', now - 15 * minute)], ownerAccountId: user.id,
+    serverNowMs: () => serverNow });
+  let unavailable = true;
+  const failed = page.waitForResponse(response => !response.ok() && new URL(response.url()).searchParams.get('limit') === '50');
+  await context.route(`${SUPABASE_URL}/rest/v1/activities?**`, async route => {
+    if (!unavailable || new URL(route.request().url()).searchParams.get('limit') !== '50') return route.fallback();
+    await route.fulfill({ status: 400, headers: { 'access-control-allow-origin': '*' }, json: { message: 'Temporary failure' } });
+  });
+  await seedVisit(page, since);
+  await visit(page, '/game/');
+  await failed;
+  await expect(away(page)).toBeHidden();
+  serverNow += 45 * minute;
+  unavailable = false;
+  await page.evaluate(end => window.__cloudiatorShell!.clock.freeze(end), serverNow);
+  await expect(away(page)).toContainText('Woodland Path: won');
+});
+
+test('My gladiator opens Overview when the previous visit left a different section selected', async ({ page, context }) => {
+  const user = await seedSession(context);
+  const owner = structuredClone(ownerFixture);
+  owner.inbox.notificationsSeenMs = now - 2 * minute;
+  let serverNow = now;
+  const live = await routeLiveReads(context, { world: emptyWorld(now), owner, ownerAccountId: user.id, serverNowMs: () => serverNow });
+  await seedVisit(page, now - 2 * minute);
+  await visit(page, '/game/');
+  const menu = await openMenu(page, 'My gladiator');
+  await menu.getByRole('button', { name: 'Go to section: History' }).click();
+  await expect(menu.getByRole('button', { name: 'Go to section: History' })).toHaveAttribute('aria-current', 'step');
+  await menu.getByRole('button', { name: 'Close', exact: true }).click();
+  await expect(menu).toBeHidden();
+  serverNow += 45 * minute;
+  live.setNotifications([result('expedition', now + 30 * minute)]);
+  await page.evaluate(end => window.__cloudiatorShell!.clock.freeze(end), serverNow);
+  await away(page).getByRole('button', { name: /^(Open )?My gladiator$/ }).click();
+  await expect(menu.getByRole('button', { name: 'Go to section: Overview' })).toHaveAttribute('aria-current', 'step');
+});
+
 test('uses the shared return read for a newly earned title', async ({ page, context }) => {
   let serverNowMs = now;
   const user = await seedSession(context);
@@ -263,6 +439,22 @@ test('finds the placement of a tournament settled while away when its bout preda
   await seedVisit(page, since);
   await visit(page, '/game/');
   await expect(away(page)).toContainText(/Silver Tournament: 3rd place/);
+});
+
+test('stops after three tournament history pages and keeps the run without a place', async ({ page, context }) => {
+  const user = await seedSession(context);
+  const owner = structuredClone(ownerFixture);
+  const since = now - 120 * minute;
+  owner.inbox.notificationsSeenMs = since;
+  const note = result('tournament', since + 10 * minute);
+  const history = Array.from({ length: 61 }, (_, index) => ({ gladiator_id: id, kind: 'tournament', entry_id: randomUUID(),
+    activity_id: index === 60 ? note.summary.activityId : randomUUID(), fought_at_ms: since - index * minute,
+    settled_at_ms: since + 5 * minute, result: 'defeat', success: false, league: 'silver', tournament_id: 'tournament:40:silver', round: 'Semifinal', place: 3 }));
+  const live = await routeLiveReads(context, { world: emptyWorld(now), owner, ownerAccountId: user.id, serverNowMs: () => now, history, notifications: [note] });
+  await seedVisit(page, since);
+  await visit(page, '/game/');
+  await expect(away(page)).toContainText('Tournament: finished');
+  expect(live.count('gladiator_history_reads')).toBe(3);
 });
 
 test('shows only small-day gains and fits the approved phone sheet', async ({ page, hasTouch }) => {

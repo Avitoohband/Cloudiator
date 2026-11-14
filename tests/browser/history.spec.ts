@@ -478,7 +478,7 @@ test.describe('A gladiator’s history from the live views', () => {
 
   test('a failed read for the row to land on says so, and the card stays on its first page', async ({ page, context }) => {
     await quietArrivals(context);
-    const many = Array.from({ length: 30 }, (_, i) => row(lucilla.id, i + 1, { opponent: { name: `Rival ${i + 1}`, npc: false } }));
+    const many = Array.from({ length: 50 }, (_, i) => row(lucilla.id, i + 1, { opponent: { name: `Rival ${i + 1}`, npc: false } }));
     await routeLiveReads(context, { world, history: many });
     // The reads that continue after the first twenty (they carry the cursor's `or` filter) fail once this is set.
     let failCursor = false;
@@ -494,7 +494,7 @@ test.describe('A gladiator’s history from the live views', () => {
     await expect(historyRows(card)).toHaveCount(per);
     await bar.getByRole('button', { name: `Go to page ${known}`, exact: true }).click();
     await bar.getByRole('button', { name: 'Next page', exact: true }).click();
-    await expect(label).toHaveText(`Page ${known + 1} of ${Math.ceil(30 / per)}`);
+    await expect(label).toHaveText(`Page ${known + 1}`);
     await historyRows(card).filter({ hasText: `vs Rival ${n}` }).getByRole('button', { name: new RegExp(`^Watch: vs Rival ${n},`) }).click();
     const replay = page.getByRole('dialog', { name: 'Replay', exact: true });
     await expect(replay).toBeVisible();
@@ -507,7 +507,12 @@ test.describe('A gladiator’s history from the live views', () => {
     failCursor = false;
     await bar.getByRole('button', { name: `Go to page ${known}`, exact: true }).click();
     await bar.getByRole('button', { name: 'Next page', exact: true }).click();
-    await expect(label).toHaveText(`Page ${known + 1} of ${Math.ceil(30 / per)}`);
+    await expect(label).toHaveText(`Page ${known + 1}`);
+    await expect(card.locator('[data-landing-failed]')).toHaveCount(0);
+    // The second server page succeeded. The + circle requests the next cursor directly on either layout.
+    failCursor = true;
+    await bar.getByRole('button', { name: 'Load more', exact: true }).click();
+    await expect(bar).toContainText('Could not load more. Try Next again.');
     await expect(card.locator('[data-landing-failed]')).toHaveCount(0);
   });
 

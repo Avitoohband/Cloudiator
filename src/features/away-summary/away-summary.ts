@@ -11,7 +11,7 @@ import { xpView } from '../character/xp-progress';
 import { dungeonOutcome } from '../dungeon/dungeon-text';
 import { isUnread } from '../messages/messages';
 import { rewardItemName } from '../messages/notifications';
-import { restedNoteLines } from '../schedule/stamina-text';
+import { restedActivityName } from '../schedule/stamina-text';
 import { ordinal } from '../tournaments/tournament-text';
 import { earnedTitleRows, type TitleRow } from '../titles/title-notices';
 
@@ -19,6 +19,7 @@ const MINUTE_MS = 60_000;
 const DAY_MS = 24 * 60 * MINUTE_MS;
 export const MIN_AWAY_MS = 30 * MINUTE_MS;
 export const MAX_AWAY_RESULTS = 150;
+export const MAX_DETAILED_RUNS = 3;
 
 export function awaySince(nowMs: number, deviceSeenMs: number | null, notificationsSeenMs: number): number {
   return Math.floor(Math.max(0, nowMs - 7 * DAY_MS, deviceSeenMs ?? 0, notificationsSeenMs));
@@ -34,7 +35,7 @@ export function awayTimeText(elapsedMs: number): string {
 
 type AwayLine = {
   kind: GameNotification['kind'] | 'overflow';
-  label: string;
+  label?: string;
   main: string;
   detail?: string;
 };
@@ -89,15 +90,20 @@ function arenaLine(arena: readonly GameNotification[]): AwayLine | null {
 function tournamentLines(tournaments: readonly GameNotification[], history: readonly HistoryEntry[]): AwayLine[] {
   const places = new Map<string, HistoryEntry>();
   for (const bout of history) {
-    if (bout.kind === 'tournament' && bout.place !== null && !places.has(bout.activityId)) places.set(bout.activityId, bout);
+    if (bout.kind !== 'tournament') continue;
+    const previous = places.get(bout.activityId);
+    if (!previous || (previous.place === null && bout.place !== null)) places.set(bout.activityId, bout);
   }
-  return tournaments.map(result => {
+  const lines: AwayLine[] = tournaments.slice(0, MAX_DETAILED_RUNS).map(result => {
     const row = places.get(result.activityId);
     return { kind: 'tournament',
       label: row?.league ? `${capital(row.league)} Tournament` : 'Tournament',
       main: row?.place ? `${ordinal(row.place)} place` : 'finished',
     };
   });
+  const more = tournaments.length - MAX_DETAILED_RUNS;
+  if (more > 0) lines.push({ kind: 'tournament', main: `${count(more)} more ${more === 1 ? 'tournament' : 'tournaments'}` });
+  return lines;
 }
 
 function expeditionLines(expeditions: readonly GameNotification[]): AwayLine[] {
@@ -128,6 +134,17 @@ function dungeonLine(result: GameNotification): AwayLine {
   return { kind: 'dungeon', label, main, ...(loot ? { detail: ` · ${counted(loot, 'item')}` } : {}) };
 }
 
+function dungeonLines(dungeons: readonly GameNotification[]): AwayLine[] {
+  const lines = dungeons.slice(0, MAX_DETAILED_RUNS).map(dungeonLine);
+  const older = dungeons.slice(MAX_DETAILED_RUNS);
+  if (older.length) {
+    const loot = older.reduce((total, result) => total + lootCount(result), 0);
+    lines.push({ kind: 'dungeon', main: `${count(older.length)} more dungeon ${older.length === 1 ? 'run' : 'runs'}`,
+      ...(loot ? { detail: ` · ${counted(loot, 'item')}` } : {}) });
+  }
+  return lines;
+}
+
 function trainingLine(training: readonly GameNotification[], unspent: number): AwayLine | null {
   if (!training.length) return null;
   const points = training.reduce((total, result) => total + result.summary.rewards.attributePoints, 0);
@@ -143,10 +160,7 @@ function restText(rests: readonly RestedActivity[], rules: Rules): string | null
   const limit = trainingDailyLimit(rules) ?? trainingDailyLimit(RULES_V2);
   const reason = [stamina && 'not enough stamina', limited && `the Training limit (${limit} a game day)`].filter(Boolean).join(' or ');
   if (rests.length === 1) {
-    // Use the same planned activity name as its notification. The summary adds the count and reason.
-    const prefix = 'Your gladiator rested instead of ';
-    const activity = restedNoteLines(rests[0], null, rules).title.slice(prefix.length);
-    return `Rested once instead of ${activity}: ${reason}.`;
+    return `Rested once instead of ${restedActivityName(rests[0])}: ${reason}.`;
   }
   return `Rested ${count(rests.length)} times instead of planned activities: ${reason}.`;
 }
@@ -165,7 +179,10 @@ function newItems(results: readonly GameNotification[]): AwaySummary['items'] {
       }
     }
   }
-  return items.map(item => ({ ...item, name: rewardItemName(item, false), label: rewardItemName(item) }));
+  const order: Record<ItemReward['rarity'], number> = { rare: 0, uncommon: 1, common: 2 };
+  const rank = (item: ItemReward) => item.catalogId === 'salvage' ? 4 : order[item.rarity] ?? 3;
+  // Stable order keeps the newest drops first when their rarities match.
+  return items.sort((a, b) => rank(a) - rank(b)).map(item => ({ ...item, name: rewardItemName(item, false), label: rewardItemName(item) }));
 }
 
 function xpSummary(owner: OwnerState, rules: Rules, nowMs: number, xpGained: number, trusted: boolean) {
@@ -227,7 +244,7 @@ export function buildAwaySummary({ owner, rules, sinceMs, nowMs, results, rests,
     arenaLine(byKind.arena),
     ...tournamentLines(byKind.tournament, history),
     ...expeditionLines(byKind.expedition),
-    ...byKind.dungeon.map(dungeonLine),
+    ...dungeonLines(byKind.dungeon),
     trainingLine(byKind.training, owner.progression.unspentAttributePoints),
   ].filter((line): line is AwayLine => line !== null);
   if (overflowGold > 0) lines.push({ kind: 'overflow', label: 'Bag full',

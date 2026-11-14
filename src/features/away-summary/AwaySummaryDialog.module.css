@@ -411,6 +411,28 @@
 .dialog[data-compact] .actions button { min-width: 0; padding: 0 6px; }
 .dialog[data-compact] .messages button { min-width: 44px; }
 
+.dialog[data-dense] .gladiator, .dialog[data-dense] .xp, .dialog[data-dense] .currencies,
+.dialog[data-dense] .lines, .dialog[data-dense] .rest { margin-bottom: 6px; }
+
+.dialog[data-dense] .gladiator { grid-template-columns: 42px minmax(0, 1fr) auto; }
+.dialog[data-dense] .portrait > [data-testid='profile-look'] { width: 42px; height: 46px; background-position: center -12px; }
+.dialog[data-dense] .portrait > [data-testid='profile-look'] > div { top: 38px; transform: scale(.4); }
+.dialog[data-dense] .currency { padding-block: 2px; }
+.dialog[data-dense] .lines { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 3px 10px; }
+.dialog[data-dense] .lines li { min-width: 0; gap: 5px; font-size: 12px; line-height: 1.25; }
+.dialog[data-dense] .lines li > span:last-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dialog[data-dense] .lines li[data-full-width] { grid-column: 1 / -1; }
+.dialog[data-dense] .lines em { font-size: 12px; }
+
+.dialog[data-dense] .itemTile { width: 36px; height: 36px; }
+.dialog[data-dense] .itemNames { display: flex; }
+.dialog[data-dense] .itemNames > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dialog[data-dense] .itemNames > strong { flex: none; white-space: pre; }
+.dialog[data-dense] .messages { margin: 4px 0; }
+.dialog[data-dense] .header { padding-block-end: 8px; }
+.dialog[data-dense] .body { padding-block-start: 7px; }
+.dialog[data-dense] .xpBar { margin-top: 3px; }
+
 @media (prefers-reduced-motion: reduce) {
   .dialog[open] { animation: none; }
 }

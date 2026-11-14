@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { createClient } from '@supabase/supabase-js';
-import { HISTORY_PAGE, readHistory, readHistoryCounts, readMarket, readOwnRewards, readProfile, readRecent, readResultsSince, readSeasons, readStandingOf, readStandings, readTimeline, readTournament,
+import { HISTORY_PAGE, hasResultsBetween, readHistory, readHistoryCounts, readMarket, readOwnRewards, readProfile, readRecent, readResultsSince, readSeasons, readStandingOf, readStandings, readTimeline, readTournament,
   readTournamentLog, readWorld } from '../src/lib/api/reads';
 import { tournamentLookupId } from '../src/lib/tournament-id';
 
@@ -103,6 +103,36 @@ describe('owner results since a visit', () => {
     }
     await expect(readResultsSince(client, 'not-an-id', SINCE)).rejects.toMatchObject({ code: 'unavailable' });
     expect(calls).toEqual([]);
+  });
+
+  it('checks the owner badge’s older interval, including an unreadable result exactly at its upper bound', async () => {
+    const unreadable = result(1, 'arena', SINCE);
+    unreadable.summary.rewards.money = -1;
+    const calls: string[] = [];
+    const client = transport({ activities: (url: URL) => serveRows([unreadable], url).map(row => ({ settled_at_ms: row.settled_at_ms })) }, calls);
+    await expect(hasResultsBetween(client, GLADIATOR.toUpperCase(), SINCE - 1000, SINCE)).resolves.toBe(true);
+    const [query] = queries(calls);
+    expect(calls).toHaveLength(1);
+    expect(query.get('select')).toBe('settled_at_ms');
+    expect(query.get('gladiator_id')).toBe(`eq.${GLADIATOR}`);
+    expect(query.get('status')).toBe('eq.completed');
+    expect(query.get('resolved_kind')).toBe(`in.(${kinds.join(',')})`);
+    expect(query.get('summary')).toBe('not.is.null');
+    expect(query.getAll('settled_at_ms')).toEqual([`gt.${SINCE - 1000}`, `lte.${SINCE}`]);
+    expect(query.get('limit')).toBe('1');
+  });
+
+  it('distinguishes an empty gap from a malformed interval without issuing unnecessary reads', async () => {
+    const calls: string[] = [];
+    const client = transport({ activities: [] }, calls);
+    await expect(hasResultsBetween(client, GLADIATOR, SINCE, SINCE)).resolves.toBe(false);
+    await expect(hasResultsBetween(client, GLADIATOR, SINCE + 1, SINCE)).resolves.toBe(false);
+    await expect(hasResultsBetween(client, GLADIATOR, SINCE, NaN)).rejects.toMatchObject({ code: 'unavailable' });
+    await expect(hasResultsBetween(client, GLADIATOR, -1, SINCE)).rejects.toMatchObject({ code: 'unavailable' });
+    await expect(hasResultsBetween(client, 'wrong', SINCE, NOW)).rejects.toMatchObject({ code: 'unavailable' });
+    expect(calls).toEqual([]);
+    await expect(hasResultsBetween(client, GLADIATOR, SINCE, NOW)).resolves.toBe(false);
+    expect(calls).toHaveLength(1);
   });
 });
 describe('protected Data API adapters', () => {

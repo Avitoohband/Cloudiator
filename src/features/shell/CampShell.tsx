@@ -601,17 +601,19 @@ export function CampShell({ fixture, previewAs, previewResting = false, previewA
   const modal = useModalOpen();
   const compact = useSyncExternalStore(subscribeCompact, readCompact, () => false);
   const returned = useAwaySummary({
-    owner: viewer === 'player' && (!fixture || previewAway) && !game.ownerError ? owner : null,
+    owner: viewer === 'player' && (!fixture || previewAway) ? owner : null,
     reads, clock, clockReady: clock.synced(), ownerForSummary: game.ownerForSummary, rules: game.rules, tick: nowMs,
-    blocked: modal || scene !== null || practising || practice.dialogOpen || joining.creating || lookOpen || titleOpen || game.sceneStatus === 'loading',
+    blocked: !!game.ownerError || modal || scene !== null || practising || practice.dialogOpen || joining.creating || lookOpen || titleOpen || game.sceneStatus === 'loading',
   });
   const summaryOpen = returned.summary !== null;
   function closeAwaySummary(action: AwaySummaryAction) {
     const mark = returned.summary?.seenUpToMs;
     returned.dismiss();
     if (action === 'acknowledge' && mark && messaging) void messaging.seeNotifications(mark).catch(() => undefined);
-    if (action === 'gladiator' || action === 'schedule') show(action);
-    else if (action === 'messages' || action === 'results') {
+    if (action === 'gladiator' || action === 'schedule') {
+      if (action === 'gladiator') setGladiatorSection(0);
+      show(action);
+    } else if (action === 'messages' || action === 'results') {
       send('escape');
       setMessagesRequest({ tab: action === 'results' ? 'notifications' : 'messages', n: ++messageRequests.current, account: requestAccount, owner: choiceKey });
     } else {

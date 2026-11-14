@@ -1,5 +1,6 @@
 /** Visit timestamps use estimated server time, keyed by gladiator on this device. */
 export const AWAY_SEEN_KEY = 'cloudiator.away-seen.v1';
+const HEARTBEAT_GAP_MS = 30_000;
 
 const memory = new Map<string, number>();
 const validTime = (value: unknown): value is number => typeof value === 'number' && Number.isSafeInteger(value) && value >= 0;
@@ -23,6 +24,16 @@ export function readAwaySeen(gladiatorId: string): number | null {
   const stored = readStored().get(gladiatorId);
   if (stored !== undefined) remember(gladiatorId, stored);
   return memory.get(gladiatorId) ?? null;
+}
+
+/** Record another tab's visit without writing back to it. */
+export function onAwaySeenStorage(gladiatorId: string, event: Pick<StorageEvent, 'key'>): void {
+  if (event.key === AWAY_SEEN_KEY) readAwaySeen(gladiatorId);
+}
+
+export function heartbeatAwaySeen(gladiatorId: string, now: number): void {
+  const previous = readAwaySeen(gladiatorId);
+  if (previous === null || now - previous >= HEARTBEAT_GAP_MS) writeAwaySeen(gladiatorId, now);
 }
 
 export function writeAwaySeen(gladiatorId: string, serverMs: number): void {

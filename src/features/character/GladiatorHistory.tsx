@@ -107,6 +107,8 @@ export function GladiatorHistory({ store, kind, onKind, name, own, nowMs, onBack
   const last = useMemo(() => runLastRows(list.rows), [list.rows]);
   const empty = emptyHistory(kind, name);
   const chipRefs = useRef(new Map<HistoryKind, HTMLButtonElement>());
+  // The pager knows only about its own reads. Report a failed replay landing here until it takes over.
+  const [landingFailed, setLandingFailed] = useState(false);
   // Six a page (Patch 1.9 Task 32); a chip goes back to page 1. Next past the loaded rows reads the next server page; a failed read
   // rejects, so the pager says so and Next tries again.
   // On the touch layout the sheet holds four of its rows, so a page is four there (the hook's `size`, as a grid passes its layout's): no Show.
@@ -114,6 +116,7 @@ export function GladiatorHistory({ store, kind, onKind, name, own, nowMs, onBack
   const paged = usePagedList(list.rows, {
     list: 'history', resetKey: kind, size: compact ? 4 : undefined,
     more: list.nextCursor ? { hasMore: true, load: async () => {
+      setLandingFailed(false);
       const done = await store.more(kind);
       if (!done && store.list(kind).moreFailed) throw new Error('More could not be loaded.');
     } } : undefined,
@@ -132,8 +135,6 @@ export function GladiatorHistory({ store, kind, onKind, name, own, nowMs, onBack
     window.addEventListener('popstate', back);
     return () => window.removeEventListener('popstate', back);
   }, []);
-  // The read for the landing failed: the page stays where it is and says so, as the pager does for a Next that fails (it knows nothing of this read).
-  const [landingFailed, setLandingFailed] = useState(false);
   useEffect(() => {
     const found = gladiatorId ? takeHistoryRow(gladiatorId, kind) : null;
     if (found) landing.current = { kind, entryId: found };

@@ -52,7 +52,22 @@ export function PageDots({ count, current, names, more = false, onGo, onMore }: 
   const flash = useRef(0);
   const shown = useRef(current);
   useEffect(() => { shown.current = current; });
-  useEffect(() => () => { window.clearTimeout(flash.current); if (press.current) window.clearTimeout(press.current.timer); }, []);
+  useEffect(() => {
+    const cancelOutsideRelease = (event: PointerEvent) => {
+      const held = press.current;
+      const box = row.current;
+      if (!held || held.type !== 'mouse' || held.scrub || held.pointer !== event.pointerId || !box || event.composedPath().includes(box)) return;
+      window.clearTimeout(held.timer);
+      press.current = null;
+    };
+    // Before a hold captures the mouse, a release can reach the window without passing through the row.
+    window.addEventListener('pointerup', cancelOutsideRelease, true);
+    return () => {
+      window.removeEventListener('pointerup', cancelOutsideRelease, true);
+      window.clearTimeout(flash.current);
+      if (press.current) window.clearTimeout(press.current.timer);
+    };
+  }, []);
 
   const dots = frozen ?? dotWindow(current, count, max);
   /** A bubble whose circle has left the row (the row re-centred under a hover) is not shown (fix round 1, M5). */
@@ -112,12 +127,12 @@ export function PageDots({ count, current, names, more = false, onGo, onMore }: 
       scrub: false, frozen: null, type: event.pointerType, on,
       timer: window.setTimeout(() => {
         if (press.current !== held || on === 'more') return;
+        try { box.setPointerCapture(pointer); } catch { endPress(false); return; }
         held.scrub = true;
         // The slide is measured from where the finger is when the hold fires, so a drift before it moves nothing (fix round 2, R2-5).
         held.startX = held.x;
         held.frozen = dotWindow(shown.current, count, max);
         setFrozen(held.frozen);
-        try { box.setPointerCapture(pointer); } catch { /* The pointer is gone already. */ }
         scrubAt(held.x, held.frozen, held);
       }, HOLD_MS) };
     press.current = held;

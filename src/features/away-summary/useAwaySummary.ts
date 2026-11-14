@@ -6,10 +6,11 @@ import type { Rules } from '@domain/types';
 import type { DisplayClock } from '../../game/display-clock';
 import type { GameGateway } from '../../lib/api/gateway';
 import { modalOpen } from '../shell/modal';
-import { AWAY_SEEN_KEY, readAwaySeen, writeAwaySeen } from './away-seen';
-import { awaySince, buildAwaySummary, MIN_AWAY_MS, type AwaySummary } from './away-summary';
+import { heartbeatAwaySeen, onAwaySeenStorage, readAwaySeen, writeAwaySeen } from './away-seen';
+import { awaySince, buildAwaySummary, MAX_DETAILED_RUNS, MIN_AWAY_MS, type AwaySummary } from './away-summary';
 
-type OpenSummary = { gladiatorId: string; summary: AwaySummary };
+const PLACEMENT_PAGE_LIMIT = 3;
+type OpenSummary = { gladiatorId: string; through: number; summary: AwaySummary };
 
 export function useAwaySummary({ owner, reads, clock, clockReady, ownerForSummary, rules, blocked, tick }: {
   owner: OwnerState | null;
@@ -23,10 +24,12 @@ export function useAwaySummary({ owner, reads, clock, clockReady, ownerForSummar
 }) {
   const gladiatorId = owner?.gladiatorId;
   const [opened, setOpened] = useState<OpenSummary | null>(null);
+  const openVisit = useRef<OpenSummary | null>(null);
   const checking = useRef<(() => void) | null>(null);
   const snapshot = useEffectEvent(() => ({ owner, rules, blocked }));
 
   useEffect(() => {
+    openVisit.current = null;
     setOpened(null);
     if (!gladiatorId || !reads?.resultsSince) return;
     const gateway = reads;
@@ -35,19 +38,25 @@ export function useAwaySummary({ owner, reads, clock, clockReady, ownerForSummar
     let active = true;
     let inFlight = false;
     let readFailed = false;
+    let previousTick: number | null = null;
+    let returnedWhileReading = false;
 
     const isBlocked = () => snapshot().blocked || modalOpen() || document.visibilityState !== 'visible';
     function saveRecentVisit() {
-      if (inFlight || readFailed || !clock.synced()) return;
+      if (inFlight || readFailed || openVisit.current || !clock.synced()) return;
       const previous = readAwaySeen(id);
       const now = Math.floor(clock.now());
-      if (previous !== null && now - previous < MIN_AWAY_MS) writeAwaySeen(id, now);
+      if (previous !== null && now - previous < MIN_AWAY_MS) heartbeatAwaySeen(id, now);
     }
 
     async function check(returning: boolean) {
       if (!active || !clock.synced()) return;
+      if (inFlight) {
+        returnedWhileReading ||= returning;
+        return;
+      }
       if (returning) readFailed = false;
-      if (inFlight || readFailed) return;
+      if (readFailed || openVisit.current) return;
       if (isBlocked()) {
         if (document.visibilityState === 'visible') saveRecentVisit();
         return;
@@ -59,7 +68,7 @@ export function useAwaySummary({ owner, reads, clock, clockReady, ownerForSummar
       const since = awaySince(now, previous, initial.inbox.notificationsSeenMs);
       // A real owner read floors the mark at creation. Zero is an uninitialized or sample inbox.
       if ((initial.inbox.notificationsSeenMs === 0 && previous === null) || now - since < MIN_AWAY_MS) {
-        writeAwaySeen(id, now);
+        heartbeatAwaySeen(id, now);
         return;
       }
 
@@ -72,7 +81,7 @@ export function useAwaySummary({ owner, reads, clock, clockReady, ownerForSummar
         // Read rests and placements after the results cutoff. The model filters out anything that settled later.
         const [rests, history] = await Promise.all([
           gateway.rested?.() ?? [],
-          readPlacements(gateway, id, result.items.filter(item => item.kind === 'tournament').map(item => item.activityId)),
+          readPlacements(gateway, id, result.items.filter(item => item.kind === 'tournament').slice(0, MAX_DETAILED_RUNS).map(item => item.activityId)),
         ]);
         if (!active) return;
         const messages = latest.inbox.unread > 0 ? await gateway.messages() : [];
@@ -80,7 +89,8 @@ export function useAwaySummary({ owner, reads, clock, clockReady, ownerForSummar
         if (!active || current.owner?.gladiatorId !== id || isBlocked()) return;
         const through = result.serverNowMs;
         const device = readAwaySeen(id);
-        const floor = Math.max(since, device ?? 0, current.owner.inbox.notificationsSeenMs, latest.inbox.notificationsSeenMs);
+        const serverMark = Math.max(current.owner.inbox.notificationsSeenMs, latest.inbox.notificationsSeenMs);
+        const floor = Math.max(since, device ?? 0, serverMark);
         if (through - floor < MIN_AWAY_MS) {
           writeAwaySeen(id, through);
           return;
@@ -90,12 +100,32 @@ export function useAwaySummary({ owner, reads, clock, clockReady, ownerForSummar
           history, messages, rules: current.rules,
           progressionTrusted: result.progression?.level === latest.progression.level && result.progression?.xp === latest.progression.xp,
         });
-        writeAwaySeen(id, through);
-        if (summary) setOpened({ gladiatorId: id, summary });
+        if (!summary) {
+          writeAwaySeen(id, through);
+          return;
+        }
+        const newest = result.newestSettledMs;
+        const mark = Math.max(summary.seenUpToMs ?? 0, newest !== null && newest > floor && newest <= through ? newest : 0);
+        // The account mark is one timestamp. Leave it alone if advancing would include older unseen records outside this summary.
+        let canMark = mark > floor;
+        if (canMark && serverMark < floor) {
+          const olderTitle = [...latest.titles, ...current.owner.titles].some(title => title.activityId === null && title.source !== 'joined'
+            && title.earnedAtMs > serverMark && title.earnedAtMs <= floor);
+          canMark = !olderTitle && gateway.hasResultsBetween !== undefined
+            && !await gateway.hasResultsBetween(id, serverMark, floor).catch(() => true);
+        }
+        if (!active || isBlocked() || (readAwaySeen(id) ?? 0) > floor) return;
+        const visit = { gladiatorId: id, through, summary: { ...summary, seenUpToMs: canMark ? mark : null } };
+        openVisit.current = visit;
+        setOpened(visit);
       } catch {
         readFailed = true;
       } finally {
         inFlight = false;
+        if (returnedWhileReading) {
+          returnedWhileReading = false;
+          void check(true);
+        }
       }
     }
 
@@ -104,10 +134,14 @@ export function useAwaySummary({ owner, reads, clock, clockReady, ownerForSummar
       else saveRecentVisit();
     };
     const onFocus = () => { void check(true); };
-    const onStorage = (event: StorageEvent) => {
-      if (event.key === AWAY_SEEN_KEY) void check(false);
+    const onStorage = (event: StorageEvent) => onAwaySeenStorage(id, event);
+    const scheduled = () => {
+      if (!clock.synced()) return;
+      const now = clock.now();
+      const woke = previousTick !== null && now - previousTick >= MIN_AWAY_MS;
+      previousTick = now;
+      void check(woke);
     };
-    const scheduled = () => { void check(false); };
     checking.current = scheduled;
     document.addEventListener('visibilitychange', onVisible);
     window.addEventListener('focus', onFocus);
@@ -126,21 +160,28 @@ export function useAwaySummary({ owner, reads, clock, clockReady, ownerForSummar
   const summary = opened && opened.gladiatorId === gladiatorId ? opened.summary : null;
   useEffect(() => { checking.current?.(); }, [blocked, reads, gladiatorId, clockReady, tick, summary]);
 
-  return { summary, dismiss() { setOpened(null); } };
+  return { summary, dismiss() {
+    const visit = openVisit.current;
+    if (visit && visit.gladiatorId === gladiatorId) writeAwaySeen(visit.gladiatorId, visit.through);
+    openVisit.current = null;
+    setOpened(null);
+  } };
 }
 
 async function readPlacements(gateway: GameGateway, gladiatorId: string, activityIds: string[]) {
   const pending = new Set(activityIds);
-  const placements: HistoryEntry[] = [];
+  const placements = new Map<string, HistoryEntry>();
   let cursor: string | undefined;
-  while (pending.size && gateway.history) {
+  for (let i = 0; i < PLACEMENT_PAGE_LIMIT && pending.size && gateway.history; i++) {
     const page = await gateway.history(gladiatorId, 'tournament', cursor);
     for (const row of page.rows) {
-      if (row.activityId && pending.delete(row.activityId)) placements.push(row);
+      if (!pending.has(row.activityId)) continue;
+      if (!placements.has(row.activityId) || row.place !== null) placements.set(row.activityId, row);
+      if (row.place !== null) pending.delete(row.activityId);
     }
     // History is ordered by bout time, while the summary window uses settlement time.
     if (!page.nextCursor || page.nextCursor === cursor) break;
     cursor = page.nextCursor;
   }
-  return placements;
+  return [...placements.values()];
 }

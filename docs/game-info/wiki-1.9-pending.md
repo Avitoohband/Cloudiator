@@ -94,7 +94,7 @@ The Schedule tells you when a planned activity will not run. A part your gladiat
 
 ## While you were away (results and notifications topic)
 
-After 30 minutes away, returning to camp can show what your gladiator earned while you were gone. The summary covers XP, level changes, gold, renown, fights, trips, training points, titles, loot, and rests that replaced planned activities. See all results takes you to Notifications, where you can watch replays and read individual results. Got it marks the summarized notifications as seen. The game uses this device’s last visit and your account’s Notifications mark, with up to seven days and 150 results.
+After 30 minutes away, returning to camp can show what your gladiator earned while you were gone. The summary covers XP, level changes, gold, renown, fights, trips, training points, titles, loot, and rests that replaced planned activities. See all results takes you to Notifications, where you can watch replays and read individual results. Got it marks the summarized notifications as seen when there are no older unseen results. If there are, you can review them in Notifications. The game uses this device’s last visit and your account’s Notifications mark, with up to seven days and 150 results.
 
 ## Also
 

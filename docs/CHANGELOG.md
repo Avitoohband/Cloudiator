@@ -39,17 +39,17 @@ Project folders under `D:\Avi\Projects\Animation\Cloudiator\`.
 - Identical items stack with a count and Sell lets you choose how many. Buy back any of the last 10 pieces of gear you sold to a merchant, until the next game day, for the gold you got.
 - Mark messages as read one by one or all at once, and notifications all at once.
 - Click or tap a camp NPC to hear a line from them, and again for the next. The Weaponsmith's and Armorer's stalls open the shops.
-- Resting gladiators lie straight on their beds, with an eye cover and a floating ZzZ, and take off their armor while they sleep.
+- Resting gladiators lie straight on their beds, with an eye cover and a floating ZzZ, and take off their armor while they sleep. Camp patrols walk around the sleeping area.
 - My gladiator and gladiator cards show the extra damage of a critical hit, and how much renown armor and weapons add in the Arena.
 - Compare your gladiator's stats with any other gladiator's from their card. Practice fights: test your build against a dummy with stats you choose, or spar a copy of any gladiator. No stamina, no slot, no rating, nothing saved.
 - See any gladiator's Arena, tournament and expedition history from their card and watch kept replays. Tournament fights look different: gold rows, a gold header and their own arena.
 - Phones scroll a tapped item's card into view, plus small fixes to the inventory, shops, messages, Settings and the Wiki list.
 - A Feedback button: send a bug report or an idea from the game, and read the team's answer.
 - The schedule warns when your gladiator will not have the stamina for a planned activity, and says when he rested instead.
-- Long menus turn into pages with Back and Next: jump with the circles, choose how many rows a page shows; My gladiator and Inventory open as named sections.
+- Long menus turn into pages with Back and Next. Jump with the circles, and choose how many rows a page shows with Show. My gladiator opens as five named sections; Inventory and shops as two.
 - When you come back, a pop-up sums up what your gladiators gained since your last visit: XP and levels, gold and renown, items, and fight, tournament and expedition results.
 - Newly earned titles carry a small New mark in the titles menu until you have seen them.
-- Watch any league's tournament and its bout replays, even when your gladiator is not in it.
+- Watch any league's tournament and its bout replays, even when your gladiator is not in it. It opens on your own league, marked (yours).
 
 ## 1.8.1 — Clearer gladiator stats (2026-11-11)
 

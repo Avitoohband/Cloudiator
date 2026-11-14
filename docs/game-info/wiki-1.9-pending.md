@@ -36,7 +36,15 @@ On desktop, open Settings (⚙) to pin the menu and choose whether it sits on th
 
 ## Menus (interface topic)
 
-Long menus show one page at a time instead of a long scroll. The bar at the bottom of the menu says which page you are on ("Page 2 of 8"); use ‹ Back and Next ›, or press PageDown and PageUp. Each circle under it is a page: click or tap one to jump there, and point at it (or tap it) to see which page it is. On a phone you can also press and hold a circle, then slide along the row to move through the pages. Show sets how many rows a page holds: Fit (what fits the menu), 10, 25 or 50; it is saved in this browser. Typing in a filter goes back to page 1. My gladiator and Inventory and shops open as named sections, moved through the same way (← and → work too).
+Long menus show one page at a time instead of a long scroll. The bar at the bottom of the menu says which page you are on ("Page 2 of 8"); use ‹ Back and Next ›, or press PageDown and PageUp. Each circle under it is a page: click or tap one to jump there, and point at it (or tap it) to see which page it is. On a phone you can also press and hold a circle, then slide along the row to move through the pages. Show sets how many rows a page holds: Fit (what fits the menu), 10, 25 or 50; it is saved in this browser. Typing in a filter goes back to page 1. Grids page whole rows, and on a phone the item you choose opens its card over the grid. My gladiator opens as five sections: Overview, Level and stamina, Attributes and stats, Worn equipment and History. Inventory and shops open as two. Move through them the same way (← and → work too).
+
+## New title mark (titles topic)
+
+A title you have just earned shows a small New mark in the titles menu. The mark goes away once you have seen the title there.
+
+## Watch any tournament (tournaments topic)
+
+You can open any league's tournament and watch its bouts, even when your gladiator is not in it. It opens on your own league, marked "(yours)". Pick another league to see its bracket and replays.
 
 ## Names and titles (camp and interface topics)
 

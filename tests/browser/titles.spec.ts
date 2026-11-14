@@ -294,17 +294,30 @@ test.describe('the Title button and "Choose your title" in live mode', () => {
     await bar.getByRole('button', { name: 'Go to page 3', exact: true }).click();
     await expect(choices).toHaveCount(1);
     await dialog.getByRole('button', { name: 'All · 35', exact: true }).click();
-    await expect(label).toHaveText('Page 1 of 10');
+    await expect(label).toHaveText('Page 1 of 9');
     await expect(choices).toHaveCount(4);
     // Choose No title on page 1, turn to the last page, come back: still chosen.
     await dialog.getByRole('radio', { name: 'No title', exact: true }).check();
-    await bar.getByRole('button', { name: 'Go to page 10', exact: true }).click();
+    await bar.getByRole('button', { name: 'Go to page 9', exact: true }).click();
     await expect(dialog.getByText('4 more arrive later', { exact: false })).toBeVisible();
     await bar.getByRole('button', { name: 'Go to page 1', exact: true }).click();
     await expect(dialog.getByRole('radio', { name: 'No title', exact: true })).toBeChecked();
     await dialog.getByRole('button', { name: 'Earned · 8', exact: true }).click();
     await expect(label).toHaveText('Page 1 of 3');
     expect(wears(commands)).toEqual([]);
+  });
+
+  test('the line about titles that arrive later follows the rows of the last page, never a page of its own', async ({ page }) => {
+    await player(page);
+    await openLive(page);
+    const { dialog } = await openPicker(page);
+    await dialog.getByRole('button', { name: 'All · 35', exact: true }).click();
+    const bar = dialog.getByRole('navigation', { name: 'Pages' });
+    await expect(bar.locator('b').first()).toHaveText('Page 1 of 9');
+    await expect(dialog.getByText('4 more arrive later')).toHaveCount(0);
+    await bar.getByRole('button', { name: 'Go to page 9', exact: true }).click();
+    await expect(dialog.getByText('4 more arrive later')).toBeVisible();
+    await expect(dialog.locator('[data-page-row]').first()).toBeVisible();
   });
 
   test('opens on the page that holds the worn title', async ({ page }) => {
@@ -328,10 +341,15 @@ test.describe('the Title button and "Choose your title" in live mode', () => {
       const scroller = dialog.getByTestId('title-picker-body').locator('xpath=..');
       const room = () => scroller.evaluate(el => ({ scroll: el.scrollHeight, client: el.clientHeight }));
       const earned = await room();
+      for (const page of [1, 2, 3]) {
+        await dialog.getByRole('navigation', { name: 'Pages' }).getByRole('button', { name: `Go to page ${page}`, exact: true }).click();
+        const earnedPage = await room();
+        expect.soft(earnedPage.scroll, `Earned page ${page}: ${JSON.stringify(earnedPage)}`).toBeLessThanOrEqual(earnedPage.client + 1);
+      }
       expect.soft(earned.scroll, `Earned page 1: ${JSON.stringify(earned)}`).toBeLessThanOrEqual(earned.client + 1);
       await dialog.getByRole('button', { name: 'All · 35', exact: true }).click();
       const bar = dialog.getByRole('navigation', { name: 'Pages' });
-      for (const page of [1, 2, 3, 9, 10]) {
+      for (const page of [1, 2, 3, 4, 5, 6, 7, 8, 9]) {
         await bar.getByRole('button', { name: `Go to page ${page}`, exact: true }).click();
         const all = await room();
         expect.soft(all.scroll, `All page ${page}: ${JSON.stringify(all)}`).toBeLessThanOrEqual(all.client + 1);
@@ -532,6 +550,7 @@ test.describe('the Title button and "Choose your title" in live mode', () => {
       await expect(special).toContainText("The game's Game Master");
       await expect(dialog.getByText('High Ground', { exact: true })).toHaveCount(0);
       await which.getByRole('button', { name: 'All · 36', exact: true }).click();
+      await showAll(dialog);
       await expect(dialog.getByRole('radio')).toHaveCount(10);
       await expect(dialog.getByTestId('locked-title')).toHaveCount(27);
       await expect(dialog.getByRole('group', { name: 'Special', exact: true }).getByRole('radio', { name: 'Game Master', exact: true })).toBeVisible();
@@ -570,6 +589,7 @@ test.describe('the Title button and "Choose your title" in live mode', () => {
       const { dialog } = await openPicker(page);
       await settled(dialog);
       await dialog.getByRole('button', { name: 'All · 36', exact: true }).click();
+      await showAll(dialog);
       await expect(dialog.getByRole('radio', { name: 'Game Master', exact: true })).toBeAttached();
       expect(await noHorizontalScroll(page)).toBe(true);
       expect(await dialog.evaluate(el => el.scrollWidth <= el.clientWidth)).toBe(true);
@@ -640,6 +660,7 @@ test.describe('the Title button and "Choose your title" in live mode', () => {
     await a11yShot(page, testInfo, 'title-picker-360-earned');
     // In All the titles scroll inside the body; the preview stays at the top and the foot at the bottom.
     await dialog.getByRole('button', { name: 'All · 35', exact: true }).click();
+    await showAll(dialog);
     // Task 31: the scrolling part is the paging surface's body, the parent of the list; a page of 8 still scrolls on this short phone.
     const body = dialog.getByTestId('title-picker-body').locator('xpath=..');
     expect(await body.evaluate(el => el.scrollHeight > el.clientHeight)).toBe(true);

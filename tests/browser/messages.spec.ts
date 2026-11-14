@@ -203,6 +203,8 @@ const spills = (panel: Locator) => panel.evaluate(root => {
   return out;
 });
 
+/** Patch 1.9 Task 31: the Messages list is paged (3 a page); a test that reads every message chooses Show 10, which holds them on one page. */
+const showAllMessages = (panel: Locator) => panel.getByRole('combobox', { name: 'Rows per page' }).selectOption('10');
 const messagesButton = (page: Page) => cornerChip(page).getByRole('button', { name: /^Messages(, \d+ new)?$/ });
 const badge = (page: Page) => page.getByTestId('messages-badge');
 const panelOf = (page: Page) => page.getByRole('region', { name: 'Messages', exact: true });
@@ -508,6 +510,7 @@ test.describe('Watch from Notifications', () => {
     await player(page, { messages: [AVI, ...MESSAGES], readIds: [EVENING.id] });
     await openLive(page);
     const panel = await openPanel(page);
+    await showAllMessages(panel);
     await expect(rows(panel)).toHaveCount(5);
     // Newest first.
     expect(await rows(panel).evaluateAll(els => els.map(el => el.getAttribute('data-message-row')))).toEqual(['5', '3', '2', '1', '4']);
@@ -767,6 +770,7 @@ test.describe('Watch from Notifications', () => {
     await player(page, { messages: [long, AVI, ...MESSAGES], readIds: [EVENING.id], readDelayMs: 500, failReadOnce: [AVI.id], notifications: RESULTS });
     await openLive(page);
     const panel = await openPanel(page);
+    await showAllMessages(panel);
     await expect(panel.locator('[data-mark-button]')).toHaveCount(4);
     expect(await spills(panel), 'the list with its ✓ buttons').toEqual([]);
     await panel.locator('[data-mark-all]').click();
@@ -812,6 +816,7 @@ test.describe('Watch from Notifications', () => {
     await openLive(page);
     const button = messagesButton(page);
     let panel = await openPanel(page);
+    await showAllMessages(panel);
     await expect(button).toHaveAttribute('aria-expanded', 'true');
     // Opening a message moves the focus to Back (the row it came from is gone); Back returns to that row.
     await row(panel, /Evening Arena/).click();
@@ -892,6 +897,7 @@ test.describe('Watch from Notifications', () => {
     await openLive(page);
     await poll.idle();
     const panel = await openPanel(page);
+    await showAllMessages(panel);
     await expect(rows(panel)).toHaveCount(4);
     await expect(badge(page)).toHaveCount(0);
     const lists = live.count('game_messages');
@@ -947,6 +953,7 @@ test.describe('Watch from Notifications', () => {
     await expect(messagesButton(page)).toHaveAccessibleName('Messages');
     await expect(badge(page)).toHaveCount(0);
     const panel = await openPanel(page);
+    await showAllMessages(panel);
     await expect(rows(panel)).toHaveCount(4);
     await expect(panel.locator('[data-unread-dot]')).toHaveCount(0);
     for (const title of [/Messages, gold/, /New: choose your gladiator/, /Evening Arena/, /Welcome/]) await expect(row(panel, title)).not.toHaveAccessibleName(/Unread/);
@@ -959,6 +966,7 @@ test.describe('Watch from Notifications', () => {
     await expect(messagesButton(page)).toHaveAccessibleName('Messages, 3 new');
     await expect(badge(page)).toHaveText('3');
     const panel = await openPanel(page);
+    await showAllMessages(panel);
     await expect(panel.locator('[data-unread-dot]')).toHaveCount(3);
     await expect(row(panel, /Welcome/)).not.toHaveAccessibleName(/Unread/);
   });
@@ -971,6 +979,7 @@ test.describe('Watch from Notifications', () => {
     await expect(panel.getByRole('alert')).toHaveText(/could not be loaded/i);
     live.fail('game_messages', false);
     await panel.getByRole('button', { name: 'Try again' }).click();
+    await showAllMessages(panel);
     await expect(rows(panel)).toHaveCount(4);
     await expect(panel.getByRole('alert')).toHaveCount(0);
   });

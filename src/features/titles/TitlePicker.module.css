@@ -397,9 +397,10 @@ label.option:hover {
 }
 
 .later {
-  margin: 12px 0 0;
+  margin: 6px 0 0;
   color: var(--muted);
-  font-size: 12.5px;
+  font-size: 12px;
+  line-height: 1.3;
 }
 
 /* The foot: Wear title and Cancel, always in view. */

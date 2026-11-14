@@ -127,6 +127,7 @@ test.describe('patch numbers in live mode', () => {
     await expect(panel.getByRole('heading', { name: 'Messages, gold, fixed builds and bigger beds', exact: true })).toBeVisible();
     await expect(panel.getByRole('button', { name: /Back to messages/ })).toBeFocused();
     await panel.getByRole('button', { name: /Back to messages/ }).click();
+    await panel.getByRole('combobox', { name: 'Rows per page' }).selectOption('10');
     await expect(panel.locator('[data-message-row]')).toHaveCount(5);
     // Escape closes the panel and gives the focus back to the account button the history was opened from.
     await page.keyboard.press('Escape');
@@ -140,6 +141,8 @@ test.describe('patch numbers in live mode', () => {
     await openLive(page);
     await messagesButton(page).click();
     const panel = panelOf(page);
+    // Patch 1.9 Task 31: Messages is paged (3 a page); Show 10 holds all five on one page.
+    await panel.getByRole('combobox', { name: 'Rows per page' }).selectOption('10');
     await expect(panel.locator('[data-message-row]')).toHaveCount(5);
     const item = (id: number) => panel.getByRole('listitem').filter({ has: page.locator(`[data-message-row="${id}"]`) });
     await expect(item(3)).toContainText('Patch 1.3');
@@ -235,6 +238,7 @@ test.describe('patch numbers in live mode', () => {
     await openLive(page);
     await expect(notice(page)).toContainText(`Patch ${NEWER_PATCH}`);
     await messagesButton(page).click();
+    await panelOf(page).getByRole('combobox', { name: 'Rows per page' }).selectOption('10');
     await panelOf(page).locator('[data-message-row="2"]').click();
     await panelOf(page).getByRole('button', { name: 'Change look', exact: true }).click();
     const dialog = page.getByRole('dialog', { name: 'Change your look', exact: true });

@@ -1826,8 +1826,9 @@
  * 96 px when the banner goes.
  */
 @media (hover: none), (max-width: 480px) {
+  /* 12, above the profile card's sheet (11): a menu or panel under the chip is never under a card. */
   .chip[data-popover] {
-    z-index: 11;
+    z-index: 12;
   }
 
   .shell[data-arrival] .surface[data-paged] {

@@ -11,11 +11,12 @@ import { awaySince, buildAwaySummary, MIN_AWAY_MS, type AwaySummary } from './aw
 
 type OpenSummary = { gladiatorId: string; summary: AwaySummary };
 
-export function useAwaySummary({ owner, reads, clock, clockReady, rules, blocked, tick }: {
+export function useAwaySummary({ owner, reads, clock, clockReady, ownerForSummary, rules, blocked, tick }: {
   owner: OwnerState | null;
   reads: GameGateway | null;
   clock: DisplayClock;
   clockReady: boolean;
+  ownerForSummary(refresh: boolean): Promise<OwnerState | null>;
   rules: Rules;
   blocked: boolean;
   tick: number;
@@ -64,15 +65,16 @@ export function useAwaySummary({ owner, reads, clock, clockReady, rules, blocked
 
       inFlight = true;
       try {
-        const result = await readResults(id, since);
+        const [result] = await Promise.all([readResults(id, since), ownerForSummary(true)]);
         if (!active || isBlocked()) return;
-        // Read rests and titles after the results cutoff. The model filters out anything that settled later.
-        const [rests, latest, history] = await Promise.all([
+        const latest = await ownerForSummary(false);
+        if (latest?.gladiatorId !== id) return;
+        // Read rests and placements after the results cutoff. The model filters out anything that settled later.
+        const [rests, history] = await Promise.all([
           gateway.rested?.() ?? [],
-          gateway.owner(),
           readPlacements(gateway, id, result.items.filter(item => item.kind === 'tournament').map(item => item.activityId)),
         ]);
-        if (!active || latest.gladiatorId !== id) return;
+        if (!active) return;
         const messages = latest.inbox.unread > 0 ? await gateway.messages() : [];
         const current = snapshot();
         if (!active || current.owner?.gladiatorId !== id || isBlocked()) return;
@@ -119,7 +121,7 @@ export function useAwaySummary({ owner, reads, clock, clockReady, rules, blocked
       window.removeEventListener('pagehide', saveRecentVisit);
       window.removeEventListener('storage', onStorage);
     };
-  }, [gladiatorId, reads, clock]);
+  }, [gladiatorId, reads, clock, ownerForSummary]);
 
   const summary = opened && opened.gladiatorId === gladiatorId ? opened.summary : null;
   useEffect(() => { checking.current?.(); }, [blocked, reads, gladiatorId, clockReady, tick, summary]);

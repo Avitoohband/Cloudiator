@@ -203,6 +203,48 @@ test('retries a failed summary on a later return even when a dialog must close f
   await expect(away(page)).toContainText('Rested once');
 });
 
+test('uses the shared return read for a newly earned title', async ({ page, context }) => {
+  let serverNowMs = now;
+  const user = await seedSession(context);
+  const owner = structuredClone(ownerFixture);
+  owner.inbox.notificationsSeenMs = now - 180 * minute;
+  const live = await routeLiveReads(context, { world: emptyWorld(now), owner, ownerAccountId: user.id, serverNowMs: () => serverNowMs });
+  let releaseOwner!: () => void;
+  const held = new Promise<void>(resolve => { releaseOwner = resolve; });
+  let attempts = 0;
+  let returning = false;
+  await context.route(`${SUPABASE_URL}/rest/v1/owner_state?**`, async route => {
+    if (returning) {
+      attempts += 1;
+      await held;
+    }
+    await route.fallback();
+  });
+  await page.clock.install();
+  await seedVisit(page, now - 10 * minute);
+  await visit(page, '/game/');
+  await expect.poll(() => seen(page)).toBeGreaterThanOrEqual(now);
+  await page.clock.fastForward(2_500);
+  const before = await seen(page);
+  serverNowMs = now + 45 * minute;
+  owner.titles = [{ id: 'rare-find', earnedAtMs: now + 30 * minute, source: 'result', activityId: null, detail: null }];
+  live.setOwner(owner);
+  returning = true;
+  try {
+    await page.evaluate(end => {
+      window.__cloudiatorShell!.clock.freeze(end);
+      window.dispatchEvent(new Event('focus'));
+    }, serverNowMs);
+    await expect.poll(() => attempts).toBeGreaterThan(0);
+    await expect(away(page)).toBeHidden();
+    expect(await seen(page)).toBe(before);
+  } finally {
+    releaseOwner();
+  }
+  await expect(away(page)).toContainText('Rare Find');
+  expect(attempts).toBe(1);
+});
+
 test('finds the placement of a tournament settled while away when its bout predates the last visit', async ({ page, context }) => {
   const user = await seedSession(context);
   const owner = structuredClone(ownerFixture);

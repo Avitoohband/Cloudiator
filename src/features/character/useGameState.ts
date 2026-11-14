@@ -39,6 +39,8 @@ export type GameUiState = {
    */
   ownerReadStart: number;
   ownerReadsStarted(): number;
+  /** Fresh on return, shared with the camp's focus and visibility refresh. */
+  ownerForSummary(refresh: boolean): Promise<OwnerState | null>;
   refreshOwner(): Promise<void>; setSceneStatus(status: GameUiState['sceneStatus']): void;
   /**
    * Reads the world's revision (and a changed world) now, after any refresh in flight, for a command that changed what the camp draws (a
@@ -111,32 +113,45 @@ export function useGameState(gateway: GameGateway | null, options: { fixture: bo
   const [clock] = useState(createDisplayClock);
   const [sync, setSync] = useState<SyncState | null>(null);
   const [ownerRead, setOwnerRead] = useState<OwnerRead | null>(null);
+  const ownerSnapshot = useRef<OwnerRead | null>(null);
+  const publishOwner = useCallback((read: OwnerRead | null) => {
+    ownerSnapshot.current = read;
+    setOwnerRead(read);
+  }, []);
   const [sceneStatus, setSceneStatus] = useState<GameUiState['sceneStatus']>('loading');
   const ticket = useRef(0);
   /** Owner reads started and in flight, and when the last one completed (`performance.now()`), for tab returns. */
   const ownerReads = useRef({ started: 0, inFlight: 0, doneAt: Number.NEGATIVE_INFINITY });
+  const pendingOwner = useRef<{ account: string; gateway: GameGateway; promise: Promise<void> } | null>(null);
+  const pendingReturn = useRef<{ account: string; gateway: GameGateway; promise: Promise<void> } | null>(null);
   const controllerRef = useRef<SyncController | null>(null);
   const account = fixture ? (previewAs === 'visitor' ? null : FIXTURE_ACCOUNT)
     : session.status === 'signed-in' ? session.userId : null;
 
-  const loadOwner = useCallback(async (): Promise<void> => {
-    if (!gateway || account === null) return;
+  const loadOwner = useCallback((): Promise<void> => {
+    if (!gateway || account === null) return Promise.resolve();
     const mine = ++ticket.current;
     ownerReads.current.started += 1;
     ownerReads.current.inFlight += 1;
-    try {
-      const owner = await gateway.owner();
-      if (mine === ticket.current) setOwnerRead({ account, owner, missing: false, failed: false, start: mine });
-    } catch (error) {
-      if (mine !== ticket.current) return;
-      if (codeOf(error) === 'not-found') { setOwnerRead({ account, owner: null, missing: true, failed: false, start: mine }); return; }
-      setOwnerRead(previous => previous?.account === account && previous.owner ? { ...previous, failed: true } : { account, owner: null, missing: false, failed: true, start: mine });
-      throw error;
-    } finally {
-      ownerReads.current.inFlight -= 1;
-      ownerReads.current.doneAt = performance.now();
-    }
-  }, [gateway, account]);
+    const promise = Promise.resolve().then(async () => {
+      try {
+        const owner = await gateway.owner();
+        if (mine === ticket.current) publishOwner({ account, owner, missing: false, failed: false, start: mine });
+      } catch (error) {
+        if (mine !== ticket.current) return;
+        if (codeOf(error) === 'not-found') { publishOwner({ account, owner: null, missing: true, failed: false, start: mine }); return; }
+        const previous = ownerSnapshot.current;
+        publishOwner(previous?.account === account && previous.owner ? { ...previous, failed: true } : { account, owner: null, missing: false, failed: true, start: mine });
+        throw error;
+      } finally {
+        ownerReads.current.inFlight -= 1;
+        ownerReads.current.doneAt = performance.now();
+        if (pendingOwner.current?.promise === promise) pendingOwner.current = null;
+      }
+    });
+    pendingOwner.current = { account, gateway, promise };
+    return promise;
+  }, [gateway, account, publishOwner]);
   /**
    * The latest `loadOwner`, for work that resumes after an await (the session refresh below): the account may have
    * changed meanwhile, and the read must be the current account's, never the one captured before the await (Task 23.5,
@@ -173,9 +188,9 @@ export function useGameState(gateway: GameGateway | null, options: { fixture: bo
   // A new account (or none) invalidates reads in flight; a signed-out view keeps no private owner.
   useEffect(() => {
     ticket.current++;
-    if (account === null) { setOwnerRead(null); return; }
+    if (account === null) { publishOwner(null); return; }
     void loadOwner().catch(() => undefined);
-  }, [account, loadOwner]);
+  }, [account, loadOwner, publishOwner]);
 
   const syncWorld = sync?.world ?? null;
   const revision = syncWorld?.revision ?? null;
@@ -185,35 +200,60 @@ export function useGameState(gateway: GameGateway | null, options: { fixture: bo
   useEffect(() => { renderedPatch.current = latestPatch; }, [latestPatch]);
   const rules = displayRules(sync?.rulesVersion);
 
+  const refreshReturnedOwner = useCallback((): Promise<void> => {
+    const reads = ownerReads.current;
+    const current = pendingReturn.current;
+    if (current && current.account === account && current.gateway === gateway) return current.promise;
+    if (!gateway || account === null || clockOnly || document.visibilityState !== 'visible'
+      || reads.inFlight > 0 || performance.now() - reads.doneAt < RETURN_READ_GAP_MS) return Promise.resolve();
+    const before = reads.started;
+    // The revision refresh may already have launched the owner read. Both the event and the summary wait for that work.
+    const promise = (controllerRef.current?.refresh() ?? Promise.resolve())
+      .then(() => {
+        if (pendingReturn.current?.promise !== promise) return;
+        if (ownerReads.current.started === before) return loadOwner();
+        const pending = pendingOwner.current;
+        if (pending && pending.account === account && pending.gateway === gateway) return pending.promise;
+      })
+      .catch(() => undefined)
+      .finally(() => { if (pendingReturn.current?.promise === promise) pendingReturn.current = null; });
+    pendingReturn.current = { account, gateway, promise };
+    return promise;
+  }, [account, gateway, clockOnly, loadOwner]);
+
   useEffect(() => {
-    if (!gateway || account === null || clockOnly) return;
-    let returning = false;
-    const refresh = () => {
-      const reads = ownerReads.current;
-      if (returning || document.visibilityState !== 'visible' || reads.inFlight > 0 || performance.now() - reads.doneAt < RETURN_READ_GAP_MS) return;
-      returning = true;
-      const before = reads.started;
-      // The sync reads the revision on the same return (its own focus handler starts the refresh this one joins); a new
-      // revision or slot has read the owner already by the time it resolves, so the return reads it only otherwise.
-      void (controllerRef.current?.refresh() ?? Promise.resolve())
-        .then(() => (ownerReads.current.started === before ? latestLoadOwner.current() : undefined))
-        .catch(() => undefined)
-        .finally(() => { returning = false; });
-    };
+    const refresh = () => { void refreshReturnedOwner(); };
     window.addEventListener('focus', refresh);
     document.addEventListener('visibilitychange', refresh);
-    return () => { window.removeEventListener('focus', refresh); document.removeEventListener('visibilitychange', refresh); };
-  }, [gateway, account, clockOnly]);
+    return () => {
+      window.removeEventListener('focus', refresh);
+      document.removeEventListener('visibilitychange', refresh);
+      pendingReturn.current = null;
+    };
+  }, [refreshReturnedOwner]);
+
+  const ownerForSummary = useCallback(async (refresh: boolean) => {
+    if (refresh) await refreshReturnedOwner();
+    await controllerRef.current?.waitForRefresh();
+    for (;;) {
+      const pending = pendingReturn.current ?? pendingOwner.current;
+      if (!pending || pending.account !== account || pending.gateway !== gateway) break;
+      await pending.promise;
+    }
+    const latest = ownerSnapshot.current;
+    if (latest?.account !== account || latest?.failed) throw new Error('Owner summary unavailable');
+    return latest?.owner ?? null;
+  }, [account, gateway, refreshReturnedOwner]);
 
   const ownerCreated = useCallback((owner: OwnerState) => {
     if (account === null) return;
     // Reads in flight (started before the creation) would say there is no gladiator: they no longer land.
     const start = ++ticket.current;
-    setOwnerRead({ account, owner, missing: false, failed: false, start });
+    publishOwner({ account, owner, missing: false, failed: false, start });
     // The creation changed the world: read its revision now, after any refresh in flight; the new revision reads the
     // owner once more, and the camp shows the new gladiator without waiting for the next poll.
     void controllerRef.current?.refresh({ fresh: true });
-  }, [account]);
+  }, [account, publishOwner]);
 
   const refreshWorld = useCallback((): Promise<void> => controllerRef.current?.refresh({ fresh: true }) ?? Promise.resolve(), []);
   const ownerReadsStarted = useCallback(() => ticket.current, []);
@@ -294,6 +334,6 @@ export function useGameState(gateway: GameGateway | null, options: { fixture: bo
 
   return {
     viewer, session, world, owner, ownerError: read?.failed ? 'unavailable' : null, syncError, revision, slotIndex, publishedSlotIndex, latestPatch, rules, ownResting, clock,
-    sceneStatus, refreshOwner, setSceneStatus, ownerCreated, refreshWorld, ownerReadStart: read?.start ?? 0, ownerReadsStarted,
+    sceneStatus, refreshOwner, setSceneStatus, ownerCreated, refreshWorld, ownerReadStart: read?.start ?? 0, ownerReadsStarted, ownerForSummary,
   };
 }

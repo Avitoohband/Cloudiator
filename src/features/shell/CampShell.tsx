@@ -594,7 +594,7 @@ export function CampShell({ fixture, previewAs, previewResting = false, previewA
   const compact = useSyncExternalStore(subscribeCompact, readCompact, () => false);
   const returned = useAwaySummary({
     owner: viewer === 'player' && (!fixture || previewAway) && !game.ownerError ? owner : null,
-    reads, clock, clockReady: clock.synced(), rules: game.rules, tick: nowMs,
+    reads, clock, clockReady: clock.synced(), ownerForSummary: game.ownerForSummary, rules: game.rules, tick: nowMs,
     blocked: modal || scene !== null || practising || practice.dialogOpen || joining.creating || lookOpen || titleOpen || game.sceneStatus === 'loading',
   });
   const summaryOpen = returned.summary !== null;

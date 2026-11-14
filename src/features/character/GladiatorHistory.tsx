@@ -77,7 +77,7 @@ function Row({ entry, text, onWatch }: { entry: HistoryEntry; text: HistoryRowTe
   </li>;
 }
 
-export function GladiatorHistory({ store, kind, onKind, name, own, nowMs, onBack, onWatch, backRef, timeZone, gladiatorId }: {
+export function GladiatorHistory({ store, kind, onKind, name, own, nowMs, onBack, onWatch, backRef, timeZone, gladiatorId, active = true }: {
   store: HistoryStore;
   kind: HistoryKind;
   onKind(kind: HistoryKind): void;
@@ -93,6 +93,11 @@ export function GladiatorHistory({ store, kind, onKind, name, own, nowMs, onBack
   backRef?: Ref<HTMLButtonElement>;
   /** The card's gladiator: with it, Back from a replay opened from a row reopens the page and row it was opened from. */
   gladiatorId?: string;
+  /**
+   * Shown (the default). My gladiator keeps its History section mounted while another section shows, so the page and the chip are kept;
+   * meanwhile its bar, which `PanelFooter` puts at the menu's bottom edge, is not rendered (the 1.9 merge).
+   */
+  active?: boolean;
   /** Tests only: the time zone of the days and times (the viewer's own otherwise). */
   timeZone?: string;
 }) {
@@ -172,7 +177,7 @@ export function GladiatorHistory({ store, kind, onKind, name, own, nowMs, onBack
               </section>
             ))}
           </div>
-          <PanelFooter><Pager list={paged} show={!compact} /></PanelFooter>
+          {active && <PanelFooter><Pager list={paged} show={!compact} /></PanelFooter>}
           {landingFailed && list.moreFailed && <p className={styles.failed} role="alert" data-landing-failed="">Could not load more. Try Next again.</p>}
           {/* The end of a list that paged is said on its last page. */}
           {!list.nextCursor && list.pages > 1 && paged.page === paged.knownPages ? <p className={styles.everything}>{EVERYTHING}</p> : null}

@@ -1,7 +1,8 @@
 import { mkdirSync } from 'node:fs';
-import { expect, test, type Locator, type Page, type TestInfo } from './fixtures';
+import { expect, test, type BrowserContext, type Locator, type Page, type TestInfo } from './fixtures';
 import { contrastIssues, expectNamedControls, noHorizontalScroll } from './a11y-helpers';
-import { expectOwnerShown, openMenu, quietArrivals, touchLayout, pageTo } from './shell-helpers';
+import { expectOwnerShown, menuDialog, openMenu, quietArrivals, touchLayout, pageTo } from './shell-helpers';
+import { openMenuSection, openSection, shownSection } from './section-helpers';
 import { routeLiveReads, seedSession } from './live-routes';
 import type { RevealedTimeline } from '../../supabase/functions/_shared/contracts/events';
 import type { PublicActor, WorldSnapshot } from '../../supabase/functions/_shared/contracts/reads';
@@ -508,6 +509,65 @@ test.describe('A gladiator’s history from the live views', () => {
     await bar.getByRole('button', { name: 'Next page', exact: true }).click();
     await expect(label).toHaveText(`Page ${known + 1} of ${Math.ceil(30 / per)}`);
     await expect(card.locator('[data-landing-failed]')).toHaveCount(0);
+  });
+
+  // The 1.9 merge (Tasks 32 and 33): My gladiator's History section is the same paged History. Its bar is the section's one bottom bar; the
+  // other sections keep their Section bar and never show the history's, and Back from a replay opened there comes back to its page.
+  const mine = Array.from({ length: 30 }, (_, i) => row(aster, i + 1, { league: 'bronze', opponent: { name: `Rival ${i + 1}`, npc: false } }));
+  const pagesBar = (menu: Locator) => menu.getByRole('navigation', { name: 'Pages', exact: true });
+  const sectionBar = (menu: Locator) => menu.getByRole('navigation', { name: 'Section bar', exact: true });
+  async function ownHistory(page: Page, context: BrowserContext) {
+    await quietArrivals(context);
+    await seedSession(context);
+    await routeLiveReads(context, { world, owner: ownerFixture, history: mine });
+    await page.goto('/game/');
+    await expectOwnerShown(page, ownerFixture.name);
+    const menu = await openMenuSection(page, 'My gladiator', 'History');
+    await expect(menu.getByRole('heading', { name: 'My history', level: 2 })).toBeVisible();
+    return menu;
+  }
+
+  test('My gladiator’s History section pages the own history, and its bar is the only bottom bar there and in no other section', async ({ page, context }) => {
+    const menu = await ownHistory(page, context);
+    const per = await perPage(page), label = pagesBar(menu).locator('b').first();
+    await expect(historyRows(menu)).toHaveCount(per);
+    await expect(historyRows(menu).first()).toContainText('vs Rival 1');
+    await expect(pagesBar(menu)).toHaveCount(1);
+    await expect(sectionBar(menu)).toHaveCount(0);
+    await expect(label).toHaveText(/^Page 1( of \d+)?$/);
+    await pagesBar(menu).getByRole('button', { name: 'Next page', exact: true }).click();
+    await expect(label).toHaveText(/^Page 2( of \d+)?$/);
+    await expect(historyRows(menu).first()).toContainText(`vs Rival ${per + 1}`);
+    // The other sections: their Section bar only, never the history's (30 rows here, more than a page).
+    for (const name of ['Overview', 'Level and stamina', 'Attributes and stats', 'Worn equipment']) {
+      await openSection(menu, name);
+      await expect(sectionBar(menu), name).toHaveCount(1);
+      await expect(pagesBar(menu), name).toHaveCount(0);
+    }
+    // History again: its bar alone, on the page it was left on.
+    await openSection(menu, 'History');
+    await expect(pagesBar(menu)).toHaveCount(1);
+    await expect(sectionBar(menu)).toHaveCount(0);
+    await expect(label).toHaveText(/^Page 2( of \d+)?$/);
+    await expect(historyRows(menu).first()).toContainText(`vs Rival ${per + 1}`);
+  });
+
+  test('Back from a replay opened in My gladiator’s History comes back to that section, on the page and row it was opened from', async ({ page, context }) => {
+    const menu = await ownHistory(page, context);
+    const per = await perPage(page), n = per + 2;
+    await expect(historyRows(menu)).toHaveCount(per);
+    await pagesBar(menu).getByRole('button', { name: 'Next page', exact: true }).click();
+    await expect(pagesBar(menu).locator('b').first()).toHaveText(/^Page 2( of \d+)?$/);
+    await historyRows(menu).filter({ hasText: `vs Rival ${n}` }).getByRole('button', { name: new RegExp(`^Watch: vs Rival ${n},`) }).click();
+    const replay = page.getByRole('dialog', { name: 'Replay', exact: true });
+    await expect(replay).toBeVisible();
+    await replay.getByRole('button', { name: 'Back to My history', exact: true }).click();
+    await expect(replay).toHaveCount(0);
+    const again = menuDialog(page, 'My gladiator');
+    await expect(shownSection(again)).toHaveText('History');
+    await expect(pagesBar(again).locator('b').first()).toHaveText(/^Page 2( of \d+)?$/);
+    await expect(historyRows(again).filter({ hasText: `vs Rival ${n}` })).toBeVisible();
+    await expect(sectionBar(again)).toHaveCount(0);
   });
 
   test('desktop: Show 25 makes a page taller than the card, and the bar stays the card’s bottom edge', async ({ page, context }) => {

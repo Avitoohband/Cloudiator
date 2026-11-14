@@ -248,13 +248,15 @@ function OwnerSections({ owner, slotIndex, clock, fixture, stale, resting, onRet
         </div>
       </SectionBox>
       <SectionBox id="history" at={at}>
-        {/* The History holds the cards' own History (Task 27); ← there goes back to the Overview, this menu's card. */}
+        {/* The History holds the cards' own History (Task 27), paged (Task 32); ← there goes back to the Overview, this menu's card. Kept
+            mounted once seen (its page and chip stay), its bar shows only in this section (`active`), where it is the one bottom bar; with
+            `gladiatorId`, Back from a replay opened here lands on the page and row it was opened from (the 1.9 merge). */}
         {store && seenHistory ? <GladiatorHistory store={store} kind={kind} onKind={setKind} name={owner.name} own nowMs={history?.nowMs ?? null}
-          onBack={() => onSection(0)} onWatch={view => history?.onWatch(view, kind)} />
+          onBack={() => onSection(0)} onWatch={view => history?.onWatch(view, kind)} gladiatorId={owner.gladiatorId} active={index === HISTORY} />
           : <p className="muted" role="status">Loading the history…</p>}
       </SectionBox>
     </div>
-    {/* The bottom bar of a section with no paged list of its own; History's list pages with its own bar (the list rule). */}
+    {/* The bottom bar of a section with no paged list of its own; History's list pages with its own bar (the list rule), its only bottom bar. */}
     {index !== HISTORY && <PanelFooter><div inert={picking}><SectionPager sections={GLADIATOR_SECTIONS} index={index} onGo={go} /></div></PanelFooter>}
   </>;
 }

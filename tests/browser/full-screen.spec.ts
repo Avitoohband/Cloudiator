@@ -4,6 +4,7 @@ import { DUNGEON_FIXTURES } from '../fixtures/dungeons';
 import { MENUS } from '../../src/features/shell/menus';
 import { SUPABASE_URL, dungeonLiveData, emptyWorld, routeLiveReads, seedSession } from './live-routes';
 import { cornerChip, expectOwnerShown, joinButton, menuDialog, openMenu, railIcons, railMenus, revealRail, touchLayout } from './shell-helpers';
+import { showChoice } from './show-choice';
 
 // Task 13.5: the full-screen camp shell. The camp fills the window; a hidden rail on the left edge (a ☰ button and
 // bottom sheets on touch) opens one floating menu at a time; the corner chip sits top right.
@@ -453,7 +454,9 @@ test.describe('the camp shell on touch', () => {
     for (const id of ['chip-stamina', 'chip-money', 'chip-renown']) await expect(chip.getByTestId(id), id).toBeHidden();
   });
 
-  test('scrolling inside a sheet never pans the camp', async ({ page }) => {
+  test('scrolling inside a sheet never pans the camp', async ({ page, context }) => {
+    // The sheet must have rows to scroll through: Show 50 puts the fifty standings read on the page (Patch 1.9 Task 32).
+    await showChoice(context, { standings: 50 });
     await openCamp(page);
     const before = await camera(page);
     const sheet = await settled(await openMenu(page, 'Arena'));

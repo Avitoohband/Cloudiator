@@ -122,6 +122,10 @@ export function PatchHistory({ load, build, latest, open, notes, onReadNote }: {
             </li>;
           })}
         </ul>
+        {failed && <div className={styles.state}>
+          <p role="alert">Older patches could not be loaded.</p>
+          <button type="button" className={styles.retry} onClick={() => { const last = items[items.length - 1]; if (last) void read(last.sortKey).catch(() => undefined); }}>Try again</button>
+        </div>}
         <PanelFooter><Pager list={paged} show /></PanelFooter>
       </>}
     </div>

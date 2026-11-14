@@ -417,6 +417,20 @@ test.describe('Game Info by the page', () => {
     await activeOnPage();
   });
 
+  test('changing the Show size on page 2 keeps the focus on the select and the topic unchanged', async ({ page }) => {
+    const wiki = draft('wiki');
+    await page.goto('/game/?mode=fixture&info=draft');
+    await cornerChip(page).getByRole('button', { name: 'Game Info', exact: true }).click();
+    const panel = page.getByRole('dialog', { name: 'Game Info' });
+    await expect(pagesBar(panel).locator('b').first()).toHaveText('Page 2 of 3');
+    const show = panel.getByRole('combobox', { name: 'Rows per page' });
+    await show.focus();
+    await page.keyboard.press('ArrowDown');
+    await expect(show).toHaveValue('10');
+    await expect(show).toBeFocused();
+    await expect(panel.getByRole('article', { name: wiki.entries[5].title })).toBeVisible();
+  });
+
   test('the Wiki bar sits directly under the topic box and above the article', async ({ page }) => {
     await page.goto('/game/?mode=fixture&info=draft');
     await cornerChip(page).getByRole('button', { name: 'Game Info', exact: true }).click();

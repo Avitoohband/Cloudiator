@@ -93,7 +93,8 @@ export function GameInfoPanel({ id, onClose, update, fixture, editorAccount, onD
     if (lastWikiPage.current === wikiPaged.page) return;
     lastWikiPage.current = wikiPaged.page;
     const here = document.activeElement;
-    if (here && (topics.current?.contains(here) || here.closest('[data-pager]'))) topics.current?.focus({ preventScroll: true });
+    // (Not from the Show choice: changing the size is no page turn, and the focus stays on the select.)
+    if (here && here.tagName !== 'SELECT' && (topics.current?.contains(here) || here.closest('[data-pager]'))) topics.current?.focus({ preventScroll: true });
     if (activeTopicId) document.getElementById(optionId(activeTopicId))?.scrollIntoView?.({ block: 'nearest' });
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [wikiPaged.page]);

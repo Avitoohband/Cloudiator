@@ -356,6 +356,28 @@ test.describe('patch numbers in live mode', () => {
     await expect(disclosure(panel, '1.8')).toBeVisible();
   });
 
+  test('a failed search for an older patch says so, and Try again goes on to the patch', async ({ page, context }) => {
+    const live = await player(page);
+    live.setPatches(Array.from({ length: 25 }, (_, i) => ({ number: `1.${i}`, sortKey: 1_000_000 + i * 1_000, title: `Patch title ${i}`,
+      releasedAtMs: at(9, 1 + i), messageId: i === 2 ? 2 : null, features: [`Feature of 1.${i}.`] })).reverse());
+    let failed = false;
+    await context.route(/\/rest\/v1\/patches\?/, route => {
+      if (!failed && decodeURIComponent(route.request().url()).includes('sort_key=lt.')) { failed = true; return route.fulfill({ status: 500, body: '{}', headers: { 'access-control-allow-origin': '*' } }); }
+      return route.fallback();
+    });
+    await openLive(page);
+    await messagesButton(page).click();
+    const panel = panelOf(page);
+    await panel.getByRole('combobox', { name: 'Rows per page' }).selectOption('10');
+    await panel.locator('[data-patch-number="1.2"]').first().click();
+    await expect(history(panel)).toBeVisible();
+    await expect(panel.getByRole('alert').filter({ hasText: 'Older patches could not be loaded.' })).toBeVisible();
+    await panel.getByRole('button', { name: 'Try again', exact: true }).click();
+    await expect(panel.getByRole('alert')).toHaveCount(0);
+    await expect(disclosure(panel, '1.2')).toHaveAttribute('aria-expanded', 'true');
+    await expect(disclosure(panel, '1.2')).toBeVisible();
+  });
+
   test('a failed read of older patches is announced, keeps the page, and Next tries again', async ({ page, context }) => {
     const live = await player(page);
     live.setPatches(Array.from({ length: 25 }, (_, i) => ({ number: `1.${i}`, sortKey: 1_000_000 + i * 1_000, title: `Patch title ${i}`,

@@ -1040,6 +1040,32 @@ test.describe('live league standings', () => {
     await expect(table.locator('tbody tr')).toHaveCount(ARENA_STANDINGS.bronze.length - 50);
   });
 
+  test('a Next pressed while a refresh is in flight extends the refreshed list: older rows never replace it', async ({ page, context }) => {
+    const world = emptyWorld();
+    const live = await routeLiveReads(context, { world, standings: [standingsPage(ARENA_STANDINGS.bronze)] });
+    await page.clock.install();
+    await page.goto('/game/');
+    const menu = await openMenu(page, 'Arena');
+    const table = page.getByRole('table', { name: 'Bronze league standings' });
+    const bar = menu.getByRole('navigation', { name: 'Pages' });
+    const label = bar.locator('b').first();
+    await expect(table.locator('tbody tr')).toHaveCount(10);
+    await bar.getByRole('button', { name: 'Go to page 5', exact: true }).click();
+    await expect(label).toHaveText('Page 5');
+    // The server credited results: every rating is 1000 higher. The refresh reads slowly, and Next is pressed before it settles.
+    live.setStandings([standingsPage(ARENA_STANDINGS.bronze.map(row => ({ ...row, rating: row.rating + 1000 })))]);
+    live.delay('arena_standing_reads', 1200);
+    live.setWorld({ ...world, revision: 'empty-2' });
+    await page.clock.fastForward(30_000);
+    await bar.getByRole('button', { name: 'Next page', exact: true }).click();
+    await expect(label).toHaveText('Page 6 of 6', { timeout: 20_000 });
+    live.delay('arena_standing_reads', 0);
+    await bar.getByRole('button', { name: 'Go to page 1', exact: true }).click();
+    const first = ARENA_STANDINGS.bronze[0];
+    await expect(table.locator('tbody tr').first()).toContainText(String(first.rating + 1000));
+    await expect(table.locator('tbody tr').first()).not.toContainText(new RegExp(`\\b${first.rating}\\b`));
+  });
+
   test('keeps the rows and the page loaded with Next when a new revision re-reads them', async ({ page, context }) => {
     const world = emptyWorld();
     const live = await routeLiveReads(context, { world, standings: [standingsPage(ARENA_STANDINGS.bronze)] });

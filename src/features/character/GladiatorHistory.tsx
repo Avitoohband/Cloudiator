@@ -15,7 +15,7 @@ import { useClockMode } from '../../lib/clock-setting';
 import type { SceneView } from '../shell/scene-url';
 import { BotTag } from './BotTag';
 import { useHistory, type HistoryStore } from './history-store';
-import { landingStep, rememberHistoryRow, takeHistoryRow, type Landing } from './history-return';
+import { clearHistoryRow, landingStep, rememberHistoryRow, takeHistoryRow, type Landing } from './history-return';
 import { useCompactLayout } from './useCompactLayout';
 import { usePagedList } from '../paging/usePagedList';
 import { Pager } from '../paging/Pager';
@@ -123,6 +123,15 @@ export function GladiatorHistory({ store, kind, onKind, name, own, nowMs, onBack
   // Back from a replay this card opened: the page and row it was opened from (kept in `history-return`, taken once). Rows not read yet are
   // read first, a page at a time, and a row on the partly read last page waits for the rest of it.
   const landing = useRef<Landing | null>(null);
+  /** Names this History as the maker of a marker, so it forgets only its own (a profile card's marker is not its to clear). */
+  const token = useRef({});
+  // A History that stays mounted under the replay (My gladiator's section) restores itself when the scene closes: the marker is only for one
+  // that remounts (the profile card), so it is forgotten as soon as the address is back from the scene (Codex review, finding 7).
+  useEffect(() => {
+    const back = () => { if (!new URL(window.location.href).searchParams.has('view')) clearHistoryRow(token.current); };
+    window.addEventListener('popstate', back);
+    return () => window.removeEventListener('popstate', back);
+  }, []);
   // The read for the landing failed: the page stays where it is and says so, as the pager does for a Next that fails (it knows nothing of this read).
   const [landingFailed, setLandingFailed] = useState(false);
   useEffect(() => {
@@ -171,7 +180,7 @@ export function GladiatorHistory({ store, kind, onKind, name, own, nowMs, onBack
               <section key={group.label} className={styles.group} aria-labelledby={`${ids}-day-${n}`}>
                 <p id={`${ids}-day-${n}`} className={styles.day} data-history-day="">{group.label}</p>
                 <ul className={styles.rows}>
-                  {group.entries.map(entry => <Row key={entry.entryId} entry={entry} onWatch={() => { if (gladiatorId) rememberHistoryRow(gladiatorId, kind, entry.entryId); onWatch(historyScene(entry)); }}
+                  {group.entries.map(entry => <Row key={entry.entryId} entry={entry} onWatch={() => { if (gladiatorId) rememberHistoryRow(gladiatorId, kind, entry.entryId, token.current); onWatch(historyScene(entry)); }}
                     text={historyRow(entry, { nowMs, clock, timeZone, rewards: own ? rewards.get(entry.activityId) ?? null : null, runLast: last.has(entry.entryId) })} />)}
                 </ul>
               </section>

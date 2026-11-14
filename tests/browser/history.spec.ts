@@ -1,7 +1,7 @@
 import { mkdirSync } from 'node:fs';
 import { expect, test, type BrowserContext, type Locator, type Page, type TestInfo } from './fixtures';
 import { contrastIssues, expectNamedControls, noHorizontalScroll } from './a11y-helpers';
-import { expectOwnerShown, menuDialog, openMenu, quietArrivals, touchLayout, pageTo } from './shell-helpers';
+import { closeMenu, expectOwnerShown, menuDialog, openMenu, quietArrivals, touchLayout, pageTo } from './shell-helpers';
 import { openMenuSection, openSection, shownSection } from './section-helpers';
 import { routeLiveReads, seedSession } from './live-routes';
 import type { RevealedTimeline } from '../../supabase/functions/_shared/contracts/events';
@@ -568,6 +568,24 @@ test.describe('A gladiator’s history from the live views', () => {
     await expect(pagesBar(again).locator('b').first()).toHaveText(/^Page 2( of \d+)?$/);
     await expect(historyRows(again).filter({ hasText: `vs Rival ${n}` })).toBeVisible();
     await expect(sectionBar(again)).toHaveCount(0);
+  });
+
+  test('a replay watched in My gladiator’s History leaves no marker: closing the menu and opening it again shows page 1', async ({ page, context }) => {
+    const menu = await ownHistory(page, context);
+    const per = await perPage(page), n = per + 2;
+    await pagesBar(menu).getByRole('button', { name: 'Next page', exact: true }).click();
+    await expect(pagesBar(menu).locator('b').first()).toHaveText(/^Page 2( of \d+)?$/);
+    await historyRows(menu).filter({ hasText: `vs Rival ${n}` }).getByRole('button', { name: new RegExp(`^Watch: vs Rival ${n},`) }).click();
+    const replay = page.getByRole('dialog', { name: 'Replay', exact: true });
+    await expect(replay).toBeVisible();
+    await replay.getByRole('button', { name: 'Back to My history', exact: true }).click();
+    await expect(replay).toHaveCount(0);
+    await expect(pagesBar(menuDialog(page, 'My gladiator')).locator('b').first()).toHaveText(/^Page 2( of \d+)?$/);
+    // The menu is closed and opened again: a new History, on page 1 (no marker was left for it to read).
+    await closeMenu(page);
+    const again = await openMenuSection(page, 'My gladiator', 'History');
+    await expect(pagesBar(again).locator('b').first()).toHaveText(/^Page 1( of \d+)?$/);
+    await expect(historyRows(again).first()).toContainText('vs Rival 1');
   });
 
   test('desktop: Show 25 makes a page taller than the card, and the bar stays the card’s bottom edge', async ({ page, context }) => {

@@ -34,10 +34,12 @@ export function recordSeen(store: SeenStore, gladiatorId: string, ids: readonly 
 let remembered: SeenStore | null = null;
 
 function load(): SeenStore {
+  // The page's memory wins when a write failed (a full storage still reads, but holds the older record).
+  if (remembered) return remembered;
   try {
     return parseSeen(localStorage.getItem(SEEN_KEY));
   } catch {
-    return remembered ?? {};
+    return {};
   }
 }
 
@@ -59,8 +61,9 @@ export function readNewTitles(gladiatorId: string, earned: readonly string[]): S
 
 /** Records `ids` as seen by this gladiator. */
 export function markTitlesSeen(gladiatorId: string, ids: readonly string[]): void {
-  if (ids.length === 0) return;
-  save(recordSeen(load(), gladiatorId, ids));
+  const store = load();
+  if (ids.every(id => store[gladiatorId]?.includes(id))) return;
+  save(recordSeen(store, gladiatorId, ids));
 }
 
 /** Tests only: forget the page's own memory. */

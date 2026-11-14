@@ -349,6 +349,26 @@ test.describe('the Title button and "Choose your title" in live mode', () => {
     await expect(newMarks(dialog)).toHaveCount(0);
   });
 
+  test('a new title on page 1 stays New when the picker opened on the worn title page, until page 1 is viewed', async ({ page }) => {
+    // Moneyed is worn, so the picker opens on page 3; Wanderer (page 1) is new and has not been on screen.
+    await seed(page, { [ownerFixture.gladiatorId]: ASTER_TITLES.map(t => t.id).filter(id => id !== 'wanderer') });
+    await player(page, { worn: 'moneyed' });
+    await openLive(page);
+    const { button, dialog } = await openPicker(page);
+    const bar = dialog.getByRole('navigation', { name: 'Pages' });
+    await expect(bar.locator('b').first()).toHaveText('Page 3 of 3');
+    await dialog.getByRole('button', { name: 'Close', exact: true }).click();
+    await button.click();
+    await bar.getByRole('button', { name: 'Go to page 1', exact: true }).click();
+    await expect(dialog.getByRole('radio', { name: /^Wanderer, new$/i })).toBeVisible();
+    // Now page 1 has been viewed: the mark is gone the next time.
+    await dialog.getByRole('button', { name: 'Close', exact: true }).click();
+    await button.click();
+    await bar.getByRole('button', { name: 'Go to page 1', exact: true }).click();
+    await expect(dialog.getByRole('radio', { name: 'Wanderer', exact: true })).toBeVisible();
+    await expect(newMarks(dialog)).toHaveCount(0);
+  });
+
   test('with no record on the device, nothing is marked', async ({ page }) => {
     await player(page);
     await openLive(page);

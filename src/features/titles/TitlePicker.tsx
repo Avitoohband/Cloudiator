@@ -108,15 +108,20 @@ export function TitlePicker({ owner, gateway, refresh, onWorn, onClose, preview 
   // page the player views are recorded as seen, so the marks are gone the next time. Nothing is read where there is no window (a server render).
   const earnedIds = useMemo(() => owner.titles.map(title => title.id), [owner.titles]);
   const [fresh] = useState<ReadonlySet<string>>(() => (typeof window === 'undefined' ? new Set<string>() : readNewTitles(owner.gladiatorId, earnedIds)));
+  // Only once the picker has landed: the first commit shows page 1 at the Fit size, before the jump to the worn title's page and the saved Show size
+  // apply, and those rows were never on screen (fix round 1).
+  const [ready, setReady] = useState(false);
   useEffect(() => {
+    if (!ready) return;
     markTitlesSeen(owner.gladiatorId, paged.rows.flatMap(entry => (entry.row && entry.row.earned && fresh.has(entry.row.id) ? [entry.row.id] : [])));
-  }, [paged.rows, fresh, owner.gladiatorId]);
+  }, [ready, paged.rows, fresh, owner.gladiatorId]);
   const landed = useRef(false);
   useEffect(() => {
     if (landed.current) return;
     landed.current = true;
     const at = sequence.findIndex(entry => (entry.row?.id ?? null) === worn);
     if (at > 0) paged.goToIndex(at);
+    setReady(true);
   });
   const onPage = paged.rows.reduce<{ family: string; rows: (PickerRow | null)[] }[]>((out, entry) => {
     const last = out[out.length - 1];

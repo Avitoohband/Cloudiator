@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest';
-import { SEEN_KEY, newTitleIds, parseSeen, readNewTitles, recordSeen, resetSeenMemory } from '../../src/features/titles/titles-seen';
+import { SEEN_KEY, markTitlesSeen, newTitleIds, parseSeen, readNewTitles, recordSeen, resetSeenMemory } from '../../src/features/titles/titles-seen';
 
 // Patch 1.9 Task 36 (Avi, 2026-11-14: "a tiny new mark near new titles in the titles menu"): which earned titles the player has not yet seen in the picker.
 
@@ -34,6 +34,25 @@ describe('the titles seen on this device', () => {
   it('keeps working with no storage: the first read marks nothing, the page remembers what was seen', () => {
     // (No localStorage in this runner.)
     expect(readNewTitles('g1', ['founder', 'tiro'])).toEqual(new Set());
+    expect(readNewTitles('g1', ['founder', 'tiro', 'wanderer'])).toEqual(new Set(['wanderer']));
+  });
+
+  it('writes nothing when every shown title is already recorded', () => {
+    const data: Record<string, string> = { [SEEN_KEY]: JSON.stringify({ g1: ['founder', 'tiro'] }) };
+    let writes = 0;
+    (globalThis as { localStorage?: unknown }).localStorage = { getItem: (k: string) => data[k] ?? null, setItem: (k: string, v: string) => { writes += 1; data[k] = v; } };
+    markTitlesSeen('g1', ['tiro']);
+    markTitlesSeen('g1', []);
+    expect(writes).toBe(0);
+    markTitlesSeen('g1', ['wanderer']);
+    expect(writes).toBe(1);
+  });
+
+  it('uses the page memory when the storage reads but a write fails (quota)', () => {
+    const data: Record<string, string> = { [SEEN_KEY]: JSON.stringify({ g1: ['founder'] }) };
+    (globalThis as { localStorage?: unknown }).localStorage = { getItem: (k: string) => data[k] ?? null, setItem: () => { throw new Error('quota'); } };
+    markTitlesSeen('g1', ['tiro']);
+    // The stored record still says only Founder was seen; the page's memory knows Tiro was too.
     expect(readNewTitles('g1', ['founder', 'tiro', 'wanderer'])).toEqual(new Set(['wanderer']));
   });
 

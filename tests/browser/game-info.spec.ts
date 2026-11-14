@@ -417,6 +417,62 @@ test.describe('Game Info by the page', () => {
     await activeOnPage();
   });
 
+  // Final review M6: after a page turn the active topic is the new page's first, not chosen; Enter or Space chooses it.
+  test('Enter and Space choose the active topic', async ({ page }) => {
+    const wiki = draft('wiki');
+    await page.goto('/game/?mode=fixture&info=draft');
+    await cornerChip(page).getByRole('button', { name: 'Game Info', exact: true }).click();
+    const panel = page.getByRole('dialog', { name: 'Game Info' });
+    const list = panel.getByRole('listbox', { name: 'Wiki topics' });
+    const bar = pagesBar(panel), label = bar.locator('b').first();
+    await expect(label).toHaveText('Page 2 of 3');
+    await bar.getByRole('button', { name: 'Next page', exact: true }).click();
+    await expect(label).toHaveText('Page 3 of 3');
+    await expect(list).toBeFocused();
+    const first = list.getByRole('option').first();
+    await expect(first).toHaveAttribute('aria-selected', 'false');
+    await page.keyboard.press('Enter');
+    await expect(panel.getByRole('article', { name: wiki.entries[10].title })).toBeVisible();
+    await expect(first).toHaveAttribute('aria-selected', 'true');
+    await expect(list).toBeFocused();
+    // Space does the same on page 1, whose first topic is active after the turn.
+    await bar.getByRole('button', { name: 'Go to page 1', exact: true }).click();
+    await expect(label).toHaveText('Page 1 of 3');
+    await expect(list).toBeFocused();
+    await page.keyboard.press('Space');
+    await expect(panel.getByRole('article', { name: wiki.entries[0].title })).toBeVisible();
+    await expect(list.getByRole('option').first()).toHaveAttribute('aria-selected', 'true');
+    await expect(label).toHaveText('Page 1 of 3');
+  });
+
+  // Final review M7 (ruled): reading text keeps its scroll. With the focus in the Wiki's text (its tab panel, the article), PageDown scrolls it;
+  // the page keys turn the topics only from the topic list or its bar.
+  test('PageDown scrolls the Wiki article from its text, and turns the topics from the list and its bar', async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 520 });
+    await page.goto('/game/?mode=fixture&info=draft');
+    await cornerChip(page).getByRole('button', { name: 'Game Info', exact: true }).click();
+    const panel = page.getByRole('dialog', { name: 'Game Info' });
+    const text = panel.getByRole('tabpanel', { name: 'Wiki' });
+    const bar = pagesBar(panel), label = bar.locator('b').first();
+    await expect(label).toHaveText('Page 2 of 3');
+    const scroll = () => text.evaluate(element => ({ top: element.scrollTop, room: element.scrollHeight - element.clientHeight }));
+    expect((await scroll()).room, 'the article is taller than its panel').toBeGreaterThan(40);
+    await text.focus();
+    await page.keyboard.press('PageDown');
+    await expect.poll(async () => (await scroll()).top).toBeGreaterThan(0);
+    await expect(label).toHaveText('Page 2 of 3');
+    await page.keyboard.press('PageUp');
+    await expect.poll(async () => (await scroll()).top).toBe(0);
+    await expect(label).toHaveText('Page 2 of 3');
+    // The topic list and its bar turn the topics.
+    await panel.getByRole('listbox', { name: 'Wiki topics' }).focus();
+    await page.keyboard.press('PageDown');
+    await expect(label).toHaveText('Page 3 of 3');
+    await bar.getByRole('button', { name: 'Previous page', exact: true }).focus();
+    await page.keyboard.press('PageUp');
+    await expect(label).toHaveText('Page 2 of 3');
+  });
+
   test('changing the Show size on page 2 keeps the focus on the select and the topic unchanged', async ({ page }) => {
     const wiki = draft('wiki');
     await page.goto('/game/?mode=fixture&info=draft');

@@ -12,7 +12,11 @@ import { routeLiveReads } from './live-routes';
 import { worldFixture } from '../fixtures/domain';
 
 const production = process.env.PLAYWRIGHT_STATIC === 'true';
-const SHOTS = '.superpowers/sdd/2026-11-12-1.9-additions';
+/** Task 30's review shots, written only when TASK_SHOTS names a folder (final review M10, as Task 37 does): the gate never sets it, so a run
+ * leaves the working tree alone. */
+async function shot(page: Page, name: string) {
+  if (process.env.TASK_SHOTS) await page.screenshot({ path: `${process.env.TASK_SHOTS}/${name}` });
+}
 
 async function openCamp(page: Page) {
   // The arrival banner (Task 30 fix round 3) shortens the phone's tall sheet while it shows: these cases measure the sheet without it.
@@ -101,7 +105,7 @@ test.describe('menus with Back and Next: the Gladiators list', () => {
     const tip = bar.getByRole('tooltip');
     await expect(tip).toHaveText('Page 3 of 8');
     await expect(tip).toBeVisible();
-    await page.screenshot({ path: `${SHOTS}/task-30-dots-hint-desktop.png` });
+    await shot(page, 'task-30-dots-hint-desktop.png');
     await page.mouse.move(600, 400);
     await expect(tip).toHaveCount(0);
     // A click's focus shows no bubble of its own (only hover and keyboard focus do).
@@ -208,7 +212,7 @@ test.describe('menus with Back and Next: the Gladiators list', () => {
     await body.evaluate(el => { el.scrollTop = el.scrollHeight; });
     const [bar, panel] = [(await pager(menu).boundingBox())!, (await menu.boundingBox())!];
     expect(Math.abs(bar.y + bar.height - (panel.y + panel.height))).toBeLessThanOrEqual(2);
-    if (!(await touchLayout(page))) await page.screenshot({ path: `${SHOTS}/task-30-show-25-desktop.png` });
+    if (!(await touchLayout(page))) await shot(page, 'task-30-show-25-desktop.png');
     expect(await page.evaluate(key => localStorage.getItem(key), PAGE_SIZE_KEY)).toBe('{"gladiators":25}');
 
     await page.reload();
@@ -237,8 +241,8 @@ test.describe('menus with Back and Next: the Gladiators list', () => {
       for (const name of ['Previous page', 'Next page']) {
         expect((await pager(menu).getByRole('button', { name, exact: true }).boundingBox())!.height).toBeGreaterThanOrEqual(35.5);
       }
-      if (place === 'left') await page.screenshot({ path: `${SHOTS}/task-30-gladiators-desktop.png` });
-      if (place === 'bottom') await page.screenshot({ path: `${SHOTS}/task-30-pinned-bottom-desktop.png` });
+      if (place === 'left') await shot(page, 'task-30-gladiators-desktop.png');
+      if (place === 'bottom') await shot(page, 'task-30-pinned-bottom-desktop.png');
     });
   }
 
@@ -261,7 +265,7 @@ test.describe('menus with Back and Next: the Gladiators list', () => {
     expect(dotsBox.height).toBeGreaterThanOrEqual(43.5);
     expect(dotsBox.y + dotsBox.height).toBeLessThanOrEqual(buttonsTop + 1);
     expect(await noHorizontalScroll(page)).toBe(true);
-    await page.screenshot({ path: `${SHOTS}/task-30-gladiators-phone.png` });
+    await shot(page, 'task-30-gladiators-phone.png');
 
     await page.setViewportSize({ width: 320, height: 700 });
     await expect(pager(menu).locator('[data-dot]')).toHaveCount(6);

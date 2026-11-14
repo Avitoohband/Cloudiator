@@ -121,6 +121,14 @@ export function GameInfoPanel({ id, onClose, update, fixture, editorAccount, onD
   function moveTopic(event: KeyboardEvent<HTMLDivElement>) {
     // Alt, Ctrl or Meta with a key is the browser's or the system's (Alt+Up, Ctrl+End...), never a move in the list (Task 21).
     if (event.altKey || event.ctrlKey || event.metaKey) return;
+    // Enter and Space choose the active topic (final review M6): after a page turn it is the new page's first, not yet chosen.
+    if (event.key === 'Enter' || event.key === ' ') {
+      if (!activeTopicId) return;
+      event.preventDefault();
+      setTopic(activeTopicId);
+      setActiveId(activeTopicId);
+      return;
+    }
     const at = Math.max(0, wiki.findIndex(item => item.id === activeTopicId));
     const next = event.key === 'ArrowDown' ? Math.min(at + 1, wiki.length - 1) : event.key === 'ArrowUp' ? Math.max(at - 1, 0)
       : event.key === 'Home' ? 0 : event.key === 'End' ? wiki.length - 1 : null;
@@ -237,9 +245,12 @@ export function GameInfoPanel({ id, onClose, update, fixture, editorAccount, onD
       })}
     </div>
     <PagingScope className={styles.paged} bodyClassName={styles.pagedBody}>
-    <section id={panelId('wiki')} role="tabpanel" aria-labelledby={tabId('wiki')} className={styles.body} hidden={active !== 0 || editing !== null} tabIndex={0}>
+    {/* Reading text keeps its scroll (final review M7): in the Wiki's and Future Updates' tab panels PageDown and PageUp scroll the text (`data-reading`);
+        they turn the topics from the topic list (`data-page-keys`) and from a bar. */}
+    <section id={panelId('wiki')} role="tabpanel" aria-labelledby={tabId('wiki')} className={styles.body} hidden={active !== 0 || editing !== null} tabIndex={0}
+      data-reading="">
       {!settled ? active === 0 && <p role="status" className={styles.loading}>Loading Game Info…</p> : active === 0 && editing === null && <>
-        <div ref={topics} role="listbox" aria-label="Wiki topics" tabIndex={0} className={styles.topics}
+        <div ref={topics} role="listbox" aria-label="Wiki topics" tabIndex={0} className={styles.topics} data-page-keys=""
           aria-activedescendant={activeTopicId ? optionId(activeTopicId) : undefined} onKeyDown={moveTopic}>
           <div role="presentation">
             {wikiPaged.rows.map(item => {
@@ -261,7 +272,8 @@ export function GameInfoPanel({ id, onClose, update, fixture, editorAccount, onD
         </article>}
       </>}
     </section>
-    <section id={panelId('future')} role="tabpanel" aria-labelledby={tabId('future')} className={styles.body} hidden={active !== 1 || editing !== null} tabIndex={0}>
+    <section id={panelId('future')} role="tabpanel" aria-labelledby={tabId('future')} className={styles.body} hidden={active !== 1 || editing !== null} tabIndex={0}
+      data-reading="">
       {!settled ? active === 1 && <p role="status" className={styles.loading}>Loading Game Info…</p> : active === 1 && editing === null && <div className={styles.readText} onCopy={stopCopy}>
         <p className={styles.intro}>Plans for upcoming patches. Patch numbers appear when confirmed.</p>
         <ul className={styles.roadmap} ref={futurePaged.listRef as RefObject<HTMLUListElement | null>}>{futurePaged.rows.map(item => <li className={styles.entry} key={item.id} data-page-row="" tabIndex={-1}>

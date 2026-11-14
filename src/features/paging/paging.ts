@@ -5,7 +5,9 @@
 export const PAGE_SIZES = { gladiators: 7, standings: 10, tournaments: 6, results: 8, bouts: 8, market: 3, notifications: 6, messages: 3,
   patches: 8, future: 8, wikiTopics: 5, history: 6, titles: 4, feedback: 6, buyBack: 5,
   /** Task 31 fix round 1: the Tournaments panel's bouts and placements keep a Show choice of their own (the entrants use `tournaments`). */
-  tournamentBouts: 6, placements: 6 } as const;
+  tournamentBouts: 6, placements: 6,
+  /** Final review M4 (add-only): Your rewards (Results) and the editor's Feedback list keep a Show choice of their own (not Everyone's, nor the player's own feedback's). */
+  rewards: 8, feedbackReview: 6 } as const;
 export type ListId = keyof typeof PAGE_SIZES;
 /** A grid's page: whole rows of tiles, 6x4 on desktop and 5x3 on a phone. */
 export const GRID_PAGE = { desktop: 24, phone: 15 } as const;

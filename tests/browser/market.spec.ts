@@ -1162,6 +1162,28 @@ test.describe('the Marketplace in pages', () => {
     await expect(cards.first()).toContainText(`${rows[0].price + 100} gold`);
   });
 
+  // Final review M1: a hundred offers read, Next from the last loaded page, and a Refresh that lands meanwhile leaves fifty. The Next reads on from
+  // the refreshed fifty until there are more offers than when it was pressed (here the cursor's end, 120), so it completes on page 34.
+  test('a Next from the last loaded page after a second read, overtaken by Refresh, reads on until there are new offers', async ({ page, context }) => {
+    const rows = many(120);
+    const { live, market, cards, bar, label, next } = await openPaged(page, context, 120, rows);
+    await bar.getByRole('button', { name: 'Go to page 16', exact: true }).click();
+    await next.click();
+    await expect(label).toHaveText('Page 17', { timeout: 15_000 });
+    // A hundred offers read are 33 full pages: Next from page 33 reads the next fifty; Refresh, pressed meanwhile, reads the first fifty again.
+    await bar.getByRole('button', { name: 'Go to page 33', exact: true }).click();
+    await expect(label).toHaveText('Page 33');
+    live.delay('market_offer_reads', 1200);
+    await next.click();
+    live.setMarket(rows.map(row => ({ ...row, price: row.price + 100 })));
+    await market.getByRole('button', { name: 'Refresh', exact: true }).click();
+    await expect(label).toHaveText('Page 34 of 40', { timeout: 20_000 });
+    await expect(cards.first()).toBeFocused();
+    live.delay('market_offer_reads', 0);
+    await bar.getByRole('button', { name: 'Go to page 1', exact: true }).click();
+    await expect(cards.first()).toContainText(`${rows[0].price + 100} gold`);
+  });
+
   test('under a price sort, reading more starts again at page 1 of the new order, and no offer shows twice going forward', async ({ page, context }) => {
     // Offers listed later are dearer, so the oldest (read last) are the cheapest: a sort by price puts them first once they are read.
     const rows = Array.from({ length: 120 }, (_, i): MarketListing => ({ ...MARKET_ROWS[i % MARKET_ROWS.length], listingId: randomUUID(),

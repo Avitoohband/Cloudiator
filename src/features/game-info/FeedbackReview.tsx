@@ -58,8 +58,8 @@ export function FeedbackReview({ onCount }: {
   const ticket = useRef(0);
   const box = useRef<HTMLTextAreaElement>(null);
   const filters = useRef<HTMLDivElement>(null);
-  // Patch 1.9 Task 31: 6 items a page; New, Answered and All go back to page 1.
-  const paged = usePagedList(items ?? NO_ITEMS, { list: 'feedback', resetKey: filter });
+  // Patch 1.9 Task 31: 6 items a page; New, Answered and All go back to page 1. Its own Show choice, not My feedback's (final review M4).
+  const paged = usePagedList(items ?? NO_ITEMS, { list: 'feedbackReview', resetKey: filter });
 
   // Only the latest read lands, and nothing after the tab is gone. It answers the items it showed (null when it did not land).
   const load = useCallback(async (which: FeedbackFilter): Promise<OwnerFeedbackItem[] | null> => {

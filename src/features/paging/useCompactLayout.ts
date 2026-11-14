@@ -9,10 +9,11 @@ function subscribe(onChange: () => void) {
   return () => query?.removeEventListener?.('change', onChange);
 }
 
-const read = () => window.matchMedia?.(COMPACT_QUERY).matches ?? false;
+/** Whether the shell uses its touch layout now, read once (outside a render: a tap's handler). */
+export const isCompactLayout = () => window.matchMedia?.(COMPACT_QUERY).matches ?? false;
 const serverSnapshot = () => false;
 
 /** Whether the shell uses its touch layout. Hydration starts with the server's desktop layout. */
 export function useCompactLayout(): boolean {
-  return useSyncExternalStore(subscribe, read, serverSnapshot);
+  return useSyncExternalStore(subscribe, isCompactLayout, serverSnapshot);
 }

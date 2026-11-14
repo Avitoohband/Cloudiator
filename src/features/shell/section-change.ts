@@ -6,12 +6,7 @@
 // if it was left in the section now hidden or lost with a bar that went away, goes to the menu panel itself (as the shell's focus rescue
 // does), while the strip's status says the section.
 import { useLayoutEffect, useRef, type RefObject } from 'react';
-
-/** The nearest ancestor of `element` that scrolls (the menu's body). */
-function scroller(element: HTMLElement): HTMLElement | null {
-  for (let node = element.parentElement; node; node = node.parentElement) if (/(auto|scroll)/.test(getComputedStyle(node).overflowY)) return node;
-  return null;
-}
+import { scroller } from '../paging/scroller';
 
 /** `holder` holds the sections, each an element with `data-section` (the shown one without `hidden`). */
 export function useSectionChange(index: number, holder: RefObject<HTMLElement | null>, request: unknown = null) {

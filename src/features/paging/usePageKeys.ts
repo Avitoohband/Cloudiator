@@ -5,20 +5,39 @@
 import { useEffect, useRef, type RefObject } from 'react';
 import { usePanelScope } from './PanelFooter';
 
-/** Controls that keep PageDown and PageUp: text fields, selects, sliders and spin buttons. */
-const OWNS_PAGE_KEYS = 'input, textarea, select, [contenteditable=""], [contenteditable="true"], [role="slider"], [role="spinbutton"]';
+/** Form fields and widgets that take keys: inputs, text areas, selects, editable text, sliders and spin buttons. */
+const FIELDS = 'input, textarea, select, [contenteditable=""], [contenteditable="true"], [role="slider"], [role="spinbutton"]';
 /**
- * Controls that keep ← and → (fix round 1, I5): the page-key owners, and anything that moves with the arrows itself (a grid, a list
- * box, tabs, a radio group, a menu, a toolbar, or an element marked `data-arrow-keys`). Never left to `defaultPrevented` alone: a grid
- * at its edge does not prevent the default.
+ * Inputs that take no text (final review M3): a radio, a checkbox or a button leaves PageDown and PageUp to the pages. Only text-like inputs,
+ * text areas, selects, sliders, spin buttons and editable text keep them.
  */
-const OWNS_ARROWS = `${OWNS_PAGE_KEYS}, [role="grid"], [role="listbox"], [role="tablist"], [role="radiogroup"], [role="menu"], [role="toolbar"], [data-arrow-keys]`;
+const NOT_TEXT = new Set(['radio', 'checkbox', 'button', 'submit', 'reset', 'image', 'file', 'color']);
+/**
+ * Controls that keep ← and → (fix round 1, I5): every field (a radio moves its choice with them), and anything that moves with the arrows
+ * itself (a grid, a list box, tabs, a radio group, a menu, a toolbar, or an element marked `data-arrow-keys`). Never left to
+ * `defaultPrevented` alone: a grid at its edge does not prevent the default.
+ */
+const OWNS_ARROWS = `${FIELDS}, [role="grid"], [role="listbox"], [role="tablist"], [role="radiogroup"], [role="menu"], [role="toolbar"], [data-arrow-keys]`;
 
-/** Whether `key` on `target` belongs to the control itself, not to the pages. */
+/** A text-like field (or a select, a slider, a spin button, editable text) around `element` keeps PageDown and PageUp. */
+const keepsPageKeys = (element: Element) => {
+  const field = element.closest(FIELDS);
+  return field !== null && !(field.tagName === 'INPUT' && NOT_TEXT.has((field as HTMLInputElement).type));
+};
+
+/**
+ * Reading text keeps its scroll (final review M7, ruled): inside a panel of reading text (`data-reading`: the Wiki's tab panel with its article,
+ * Future Updates' entries) PageDown and PageUp scroll the text. They turn pages there only from the paged list (`data-page-keys`, the Wiki's
+ * topics) or a bar (`data-pager`).
+ */
+const inReadingText = (element: Element) => element.closest('[data-reading], [data-page-keys], [data-pager]')?.matches('[data-reading]') ?? false;
+
+/** Whether `key` on `target` belongs to the control itself (or, for the page keys, to the text it reads), not to the pages. */
 export const ownsKeys = (target: EventTarget | null, key: string): boolean => {
   const element = target as Element | null;
   if (!element || typeof element.closest !== 'function') return false;
-  return element.closest(key.startsWith('Arrow') ? OWNS_ARROWS : OWNS_PAGE_KEYS) !== null;
+  if (key.startsWith('Arrow')) return element.closest(OWNS_ARROWS) !== null;
+  return keepsPageKeys(element) || inReadingText(element);
 };
 
 /**

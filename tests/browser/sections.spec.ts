@@ -1,6 +1,6 @@
 import { expect, test, type Locator, type Page } from './fixtures';
 import { noHorizontalScroll } from './a11y-helpers';
-import { closeMenu, openMenu, quietArrivals } from './shell-helpers';
+import { closeMenu, cornerChip, openMenu, quietArrivals } from './shell-helpers';
 import { openSection, sectionBar, sectionStrip, shownSection } from './section-helpers';
 
 // Patch 1.9 Task 33 (menus with Back and Next, the approved paged-menus mockup): My gladiator opens as five named sections and Inventory and
@@ -241,6 +241,42 @@ test.describe('named sections and paged grids (fixture preview)', () => {
     await page.keyboard.press('ArrowRight');
     await expect(shownSection(menu)).toHaveText('Worn equipment');
     await expect(dialog).toBeVisible();
+  });
+
+  // Final review I1: Notifications' "Choose a title" moves My gladiator to the Overview while a Worn equipment picker is still open in the hidden
+  // Worn section. Only the Worn section's own picker locks the section navigation, so the strip, ← → and the bottom bar move the section again,
+  // and the picker is still open when the player comes back to Worn equipment.
+  test('a Worn equipment picker left open under "Choose a title" from Notifications does not lock the sections elsewhere', async ({ page }, info) => {
+    const phone = info.project.name === 'mobile';
+    if (phone) await page.setViewportSize({ width: 360, height: 780 });
+    await openCamp(page);
+    const menu = await openSection(await openMenu(page, 'My gladiator'), 'Worn equipment');
+    await menu.getByRole('button', { name: /^Feet:/ }).click();
+    const feet = menu.getByRole('dialog', { name: 'Change Feet', exact: true });
+    await expect(feet).toBeVisible();
+    // Notifications → "Choose a title": the shell shows the Overview and opens the title picker over it.
+    await cornerChip(page).getByRole('button', { name: /^Messages(, \d+ new)?$/ }).click();
+    const messages = page.getByRole('region', { name: 'Messages', exact: true });
+    await messages.getByRole('tab', { name: /^Notifications/ }).click();
+    await messages.getByRole('button', { name: 'Choose a title', exact: true }).click();
+    const titles = page.getByRole('dialog', { name: 'Choose your title', exact: true });
+    await expect(titles).toBeVisible();
+    await expect(shownSection(menu)).toHaveText('Overview');
+    await titles.getByRole('button', { name: 'Cancel', exact: true }).click();
+    await expect(titles).toBeHidden();
+    // ← and → move the section from the Title button, the strip's circles move it, and so does the bottom bar.
+    await expect(menu.locator('[data-title-button]')).toBeFocused();
+    await page.keyboard.press('ArrowRight');
+    await expect(shownSection(menu)).toHaveText('Level and stamina');
+    await circles(menu).nth(2).click();
+    await expect(shownSection(menu)).toHaveText('Attributes and stats');
+    await sectionBar(menu).getByRole('button', { name: 'Previous section: Level and stamina', exact: true }).click();
+    await expect(shownSection(menu)).toHaveText('Level and stamina');
+    // Back on Worn equipment the picker is still open, and the section navigation waits for it again.
+    await circles(menu).nth(3).click();
+    await expect(shownSection(menu)).toHaveText('Worn equipment');
+    await expect(feet).toBeVisible();
+    await expect(sectionStrip(menu).locator('xpath=..')).toHaveAttribute('inert', '');
   });
 
   test('the Shops section: the shop grid pages whole rows, a currency goes back to page 1, and the arrow keys stay in the grid', async ({ page }, info) => {

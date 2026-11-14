@@ -151,4 +151,31 @@ test.describe('Results in pages', () => {
     await expect(rewards.locator('> li')).toHaveCount(8);
     await expect(label(menu)).toHaveText('Page 1 of 3');
   });
+
+  // Final review M4: the Show choice is remembered per list. Your rewards and Everyone each keep their own.
+  test('Your rewards keeps a Show choice of its own: Show 10 there leaves Everyone at eight a page, and back', async ({ page, context }) => {
+    const data = dungeonLiveData('full-victory', { owner: ownerFixture });
+    const note = data.notifications![0];
+    const notifications = Array.from({ length: 20 }, (_, i) => ({ ...note, summary: { ...note.summary, activityId: randomUUID(), settledAtMs: note.summary.settledAtMs - i * MIN } }));
+    await quietArrivals(context);
+    await seedSession(context);
+    await routeLiveReads(context, { ...data, owner: ownerFixture, notifications, recent: results(data.world.serverNowMs, 30), world: { ...data.world, actors: [] } });
+    await page.goto('/game/');
+    await expectOwnerShown(page, 'Aster');
+    const menu = await openMenu(page, 'Results');
+    const show = menu.getByRole('combobox', { name: 'Rows per page' });
+    await tab(menu, 'Your rewards').click();
+    const rewards = list(menu, 'Dungeon rewards');
+    await expect(rewards.locator('> li')).toHaveCount(8, { timeout: 45_000 });
+    await show.selectOption('10');
+    await expect(rewards.locator('> li')).toHaveCount(10);
+    await expect(label(menu)).toHaveText('Page 1 of 2');
+    await everyone(menu);
+    await expect(show).toHaveValue('8');
+    await show.selectOption('25');
+    await expect(list(menu, 'Recent results').getByRole('listitem')).toHaveCount(25);
+    await tab(menu, 'Your rewards').click();
+    await expect(rewards.locator('> li')).toHaveCount(10);
+    await expect(show).toHaveValue('10');
+  });
 });

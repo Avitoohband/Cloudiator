@@ -35,13 +35,15 @@ export function PatchHistory({ load, build, latest, open, notes, onReadNote }: {
   const ids = useId();
   const heading = useRef<HTMLHeadingElement>(null);
   const [pages, setPages] = useState<Pages | null>(null);
-  const [failed, setFailed] = useState(false);
+  // What the last read that failed was: the first page or the note search ('list', said by the panel's own alert with Try again), or a Next
+  // ('next', said by the pager's line alone: final review M9). Any failure holds the note search until a read lands.
+  const [failed, setFailed] = useState<'list' | 'next' | null>(null);
   // Which patch is open: `undefined` until the player chooses (then the one named, else the newest), null when they closed it.
   const [chosen, setChosen] = useState<string | null | undefined>(open ?? undefined);
   // Only the latest read lands, and nothing after the view is gone.
   const ticket = useRef(0);
-  /** Reads a page; the promise settles once the rows are in (or rejects when the read fails), for the pager's Next. */
-  const read = (before?: number) => new Promise<void>((resolve, reject) => {
+  /** Reads a page; the promise settles once the rows are in (or rejects when the read fails), for the pager's Next (`next`). */
+  const read = (before?: number, next = false) => new Promise<void>((resolve, reject) => {
     const mine = ++ticket.current;
     load(before).then(page => {
       if (mine !== ticket.current) { resolve(); return; }
@@ -50,11 +52,11 @@ export function PatchHistory({ load, build, latest, open, notes, onReadNote }: {
         const known = new Set(previous.items.map(p => p.number));
         return { items: [...previous.items, ...page.items.filter(p => !known.has(p.number))], more: page.more };
       });
-      setFailed(false);
+      setFailed(null);
       resolve();
     }, () => {
       if (mine !== ticket.current) { resolve(); return; }
-      setFailed(true);
+      setFailed(next ? 'next' : 'list');
       reject(new Error('patches'));
     });
   });
@@ -70,7 +72,7 @@ export function PatchHistory({ load, build, latest, open, notes, onReadNote }: {
   const lead = `You are playing Patch ${build}`;
   const paged = usePagedList(items ?? NO_PATCHES, { list: 'patches', more: { hasMore: !!pages?.more, load: () => {
     const last = items?.at(-1);
-    return last ? read(last.sortKey) : Promise.resolve();
+    return last ? read(last.sortKey, true) : Promise.resolve();
   } } });
   // The patch a note named opens on the page that holds it. It may be older than the 20 first read: the older-page loader runs until the patch is found
   // or the history is exhausted. A failed read keeps the request open (nothing is retried on its own; the pager's Next reads again, and the search goes on
@@ -122,7 +124,7 @@ export function PatchHistory({ load, build, latest, open, notes, onReadNote }: {
             </li>;
           })}
         </ul>
-        {failed && <div className={styles.state}>
+        {failed === 'list' && <div className={styles.state}>
           <p role="alert">Older patches could not be loaded.</p>
           <button type="button" className={styles.retry} onClick={() => { const last = items[items.length - 1]; if (last) void read(last.sortKey).catch(() => undefined); }}>Try again</button>
         </div>}

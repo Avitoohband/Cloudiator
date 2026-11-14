@@ -13,7 +13,11 @@ import styles from './paging.module.css';
 
 const FAILED = 'Could not load more. Try Next again.';
 
-export function Pager<T>({ list, show = false }: { list: PagedList<T>; show?: boolean }) {
+/**
+ * `label` names the bar's navigation landmark (final review M5): "Pages" by default; a panel with several bars names each for its list (Tournaments:
+ * "Entrant pages", "Bout pages", "Placement pages").
+ */
+export function Pager<T>({ list, show = false, label = 'Pages' }: { list: PagedList<T>; show?: boolean; label?: string }) {
   const nav = useRef<HTMLElement>(null);
   const visible = list.total > list.fit || list.pages === null;
   const [status, setStatus] = useState('');
@@ -33,7 +37,7 @@ export function Pager<T>({ list, show = false }: { list: PagedList<T>; show?: bo
   // More than 8 circles (24 px each) do not fit between the buttons on a desktop panel: they take their own row.
   const wideDots = Math.min(list.knownPages, MAX_DOTS.desktop) + (list.pages === null ? 1 : 0) > 8;
   return (
-    <nav ref={nav} className={styles.pager} aria-label="Pages" data-pager="" data-dots={wideDots ? 'wide' : undefined}>
+    <nav ref={nav} className={styles.pager} aria-label={label} data-pager="" data-dots={wideDots ? 'wide' : undefined}>
       <button type="button" className={styles.back} aria-label="Previous page" aria-disabled={!list.canBack} onClick={back}>‹ Back</button>
       <div className={styles.where}>
         <span className={styles.label}>

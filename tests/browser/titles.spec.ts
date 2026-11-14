@@ -307,6 +307,21 @@ test.describe('the Title button and "Choose your title" in live mode', () => {
     expect(wears(commands)).toEqual([]);
   });
 
+  // Final review M3: a title's radio is no text field, so PageDown and PageUp turn the choices' pages with it focused.
+  test('PageDown and PageUp turn the pages with a title\'s radio focused', async ({ page }) => {
+    await player(page);
+    await openLive(page);
+    const { dialog } = await openPicker(page);
+    const label = dialog.getByRole('navigation', { name: 'Pages' }).locator('b').first();
+    await expect(label).toHaveText('Page 1 of 3');
+    await dialog.getByRole('radio', { name: 'No title', exact: true }).focus();
+    await page.keyboard.press('PageDown');
+    await expect(label).toHaveText('Page 2 of 3');
+    await dialog.getByRole('radio').first().focus();
+    await page.keyboard.press('PageUp');
+    await expect(label).toHaveText('Page 1 of 3');
+  });
+
   test('the line about titles that arrive later follows the rows of the last page, never a page of its own', async ({ page }) => {
     await player(page);
     await openLive(page);

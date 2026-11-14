@@ -735,6 +735,27 @@ test.describe('My bouts in pages', () => {
     await expect(label).toHaveText('Page 3');
   });
 
+  // Final review M2: Results reads the bouts again each time it opens, showing the twenty read before meanwhile. A Next past them pressed before
+  // that read lands waits for it, then reads the next twenty.
+  test('a Next pressed while Results reads the bouts again waits for that read, then reads the next twenty', async ({ page, context }) => {
+    const { live } = await openPaged(page, context);
+    await closeMenu(page);
+    live.delay('activities', 2500);
+    const before = reads(live);
+    const results = await openMenu(page, 'Results');
+    const bar = results.getByRole('navigation', { name: 'Pages' });
+    const label = bar.locator('b').first(), next = bar.getByRole('button', { name: 'Next page', exact: true });
+    await expect(rows(results)).toHaveCount(8);
+    await next.click();
+    await expect(label).toHaveText('Page 2');
+    await next.click();
+    await expect(label).toHaveText('Page 3', { timeout: 15_000 });
+    await expect(rows(results).first()).toBeFocused();
+    // The opening's read, then the next twenty.
+    expect(reads(live) - before).toBe(2);
+    live.delay('activities', 0);
+  });
+
   test('Back from a replay lands on the page and the row it was opened from', async ({ page, context }) => {
     const { results, bar } = await openPaged(page, context);
     const label = bar.locator('b').first();

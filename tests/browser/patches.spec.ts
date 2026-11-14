@@ -396,6 +396,9 @@ test.describe('patch numbers in live mode', () => {
     await bar.getByRole('button', { name: 'Next page', exact: true }).click();
     await expect(bar.getByRole('status')).toHaveText(/Could not load more\. Try Next again\./);
     await expect(bar.locator('b').first()).toHaveText('Page 2');
+    // Final review M9: the pager's line is the one failure line for a failed Next (the panel's own alert is the note search's).
+    await expect(panel.getByText('Older patches could not be loaded.', { exact: true })).toHaveCount(0);
+    await expect(panel.getByRole('button', { name: 'Try again', exact: true })).toHaveCount(0);
     await bar.getByRole('button', { name: 'Previous page', exact: true }).click();
     await expect(bar.locator('b').first()).toHaveText('Page 1');
     await bar.getByRole('button', { name: 'Go to page 2', exact: true }).click();

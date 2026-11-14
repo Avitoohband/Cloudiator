@@ -20,6 +20,7 @@ import { useCompactLayout } from './useCompactLayout';
 import { usePagedList } from '../paging/usePagedList';
 import { Pager } from '../paging/Pager';
 import { PanelFooter } from '../paging/PanelFooter';
+import { readMore } from '../paging/read-more';
 import {
   EVERYTHING, HISTORY_KINDS, HISTORY_SUBTITLE, chipCount, chipText, emptyHistory, footerText, historyDays, historyRow, historyScene, historyTitle, retentionText, runLastRows,
   type HistoryRowText,
@@ -113,10 +114,7 @@ export function GladiatorHistory({ store, kind, onKind, name, own, nowMs, onBack
   const compact = useCompactLayout();
   const paged = usePagedList(list.rows, {
     list: 'history', resetKey: kind, size: compact ? 4 : undefined,
-    more: list.nextCursor ? { hasMore: true, load: async () => {
-      const done = await store.more(kind);
-      if (!done && store.list(kind).moreFailed) throw new Error('More could not be loaded.');
-    } } : undefined,
+    more: list.nextCursor ? { hasMore: true, load: () => readMore(store, kind) } : undefined,
   });
   // Try again goes away as it reads, so the focus moves to the chip shown first.
   const retry = () => { chipRefs.current.get(kind)?.focus({ preventScroll: true }); store.load(kind); };

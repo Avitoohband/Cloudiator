@@ -160,7 +160,7 @@
 .emptyCard { padding: 12px; border: 1px solid #5f5750; border-radius: 10px; background: linear-gradient(145deg, #242733, #171b24 75%); color: #acb7cc; font-size: .85rem; }
 .emptyCard p { margin: 0; }
 
-/* Patch 1.9 Task 33: the shop's grid and Buy back show one page each (whole rows; Buy back 5 a page), so neither box scrolls now; both
+/* Patch 1.9 Task 33: the shop's grid and Buy back show one page each (whole rows; Buy back pages as a grid too), so neither box scrolls now; both
    keep the inventory grid's floor (254 px, 194 px on touch). */
 
 /* The outcome of a buy back, above the card: green when it is done, the inventory's red line when it was refused. A held copy (`data-role`)

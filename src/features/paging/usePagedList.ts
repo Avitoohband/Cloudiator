@@ -8,6 +8,7 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState, useSyncExter
 import { createPageController } from './page-controller';
 import { PAGE_SIZES, pageRows, type ListId } from './paging';
 import { readPageSize, writePageSize } from './page-size-prefs';
+import { scroller } from './scroller';
 
 export type PagedList<T> = {
   rows: readonly T[]; page: number; pages: number | null; knownPages: number; size: number; fit: number;
@@ -23,15 +24,6 @@ export type PagedList<T> = {
 export function pageRowsOf(box: HTMLElement): HTMLElement[] {
   const marked = [...box.querySelectorAll<HTMLElement>('[data-page-row]')];
   return marked.length > 0 ? marked : [...box.children].filter((child): child is HTMLElement => child instanceof HTMLElement);
-}
-
-/** The nearest ancestor that scrolls (the menu's body), or null. */
-function scroller(element: HTMLElement): HTMLElement | null {
-  for (let at = element.parentElement; at; at = at.parentElement) {
-    const { overflowY } = getComputedStyle(at);
-    if ((overflowY === 'auto' || overflowY === 'scroll') && at.scrollHeight > at.clientHeight) return at;
-  }
-  return null;
 }
 
 /** Focuses a row without the browser's own jump, then brings it just into view. */
@@ -97,7 +89,8 @@ export function usePagedList<T>(all: readonly T[], options: PagedListOptions): P
     const box = listRef.current;
     if (box) {
       const rows = pageRowsOf(box);
-      const scroll = scroller(box);
+      // The part that really scrolls (one that overflows now), as before the shared helper.
+      const scroll = scroller(box, true);
       const top = scroll ? scroll.getBoundingClientRect().top : -Infinity;
       const at = rows.findIndex(row => row.getBoundingClientRect().bottom > top + 2);
       if (at > 0) first += at;

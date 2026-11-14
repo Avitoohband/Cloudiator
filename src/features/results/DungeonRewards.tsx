@@ -15,8 +15,8 @@ export function DungeonRewardsView({ notes, serverNowMs, onWatch }: {
   notes: readonly GameNotification[]; serverNowMs: number | null; onWatch(activityId: string): void;
 }) {
   const clock = useClockMode();
-  // Patch 1.9 Task 32: the notifications' dungeon rewards (all loaded) eight a page.
-  const paged = usePagedList(notes, { list: 'results' });
+  // Patch 1.9 Task 32: the notifications' dungeon rewards (all loaded) eight a page, with a Show choice of their own (final review M4).
+  const paged = usePagedList(notes, { list: 'rewards' });
   return <section className={styles.results} aria-label="Recent dungeon rewards">
     <p className="eyebrow">RECENT DUNGEON REWARDS</p>
     <p className="muted">Dungeon rewards from your 20 most recent activity notifications.</p>

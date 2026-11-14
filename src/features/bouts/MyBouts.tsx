@@ -16,6 +16,7 @@ import { useWatched } from './watched';
 import { usePagedList } from '../paging/usePagedList';
 import { Pager } from '../paging/Pager';
 import { PanelFooter } from '../paging/PanelFooter';
+import { readMore } from '../paging/read-more';
 import styles from './bouts.module.css';
 
 const CHIPS: readonly { filter: BoutFilter; label: string }[] = [{ filter: 'all', label: 'All' }, { filter: 'won', label: 'Won' }, { filter: 'lost', label: 'Lost' }];
@@ -53,10 +54,7 @@ export function MyBouts({ store, filter, onFilter, nowMs, onOpen, timeZone }: {
   // Eight a page; a chip goes back to page 1. Next past the loaded bouts reads the next server page (rejects when that read failed).
   const paged = usePagedList(rows, {
     list: 'bouts', resetKey: filter,
-    more: list.nextCursor ? { hasMore: true, load: async () => {
-      const done = await store.more(filter);
-      if (!done && store.list(filter).moreFailed) throw new Error('More bouts could not be loaded.');
-    } } : undefined,
+    more: list.nextCursor ? { hasMore: true, load: () => readMore(store, filter) } : undefined,
   });
 
   return (

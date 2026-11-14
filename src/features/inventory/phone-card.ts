@@ -6,30 +6,19 @@
 // menu does not scroll. The focus goes into the card and back to the tile when it closes (×, Escape); a press outside closes it too and
 // leaves the focus where that press puts it. What lies under it is inert meanwhile (the panel's `covered`). A pointer window keeps the card
 // beside the grid, always shown.
-import { useCallback, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type KeyboardEvent, type RefObject } from 'react';
-import { COMPACT_QUERY } from '../shell/rail-reveal';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent, type RefObject } from 'react';
+import { isCompactLayout, useCompactLayout } from '../paging/useCompactLayout';
+import { scroller } from '../paging/scroller';
 
-const subscribe = (change: () => void) => {
-  const media = window.matchMedia?.(COMPACT_QUERY);
-  media?.addEventListener?.('change', change);
-  return () => media?.removeEventListener?.('change', change);
-};
-const compact = () => !!window.matchMedia?.(COMPACT_QUERY).matches;
 /** The page keys (`Pager`) and the section keys (`SectionStrip`), kept in an open card. */
 const CARD_KEYS = new Set(['PageDown', 'PageUp', 'ArrowLeft', 'ArrowRight']);
-
-/** The nearest ancestor of `element` that scrolls (the menu's body). */
-function scroller(element: HTMLElement): HTMLElement | null {
-  for (let node = element.parentElement; node; node = node.parentElement) if (/(auto|scroll)/.test(getComputedStyle(node).overflowY)) return node;
-  return null;
-}
 
 /**
  * `available`: the grid has a tile to choose. With none (a search or a filter that matches nothing), the card closes and shows below the
  * grid as before, so the grid's "Clear search" is in reach.
  */
 export function usePhoneCard(available = true) {
-  const phone = useSyncExternalStore(subscribe, compact, () => false);
+  const phone = useCompactLayout();
   const [shown, setShown] = useState(false);
   /** The positioned box that holds the grid and the card, the grid's box the card lies over, and the card. */
   const hostRef = useRef<HTMLDivElement>(null), anchorRef = useRef<HTMLDivElement>(null), sheetRef = useRef<HTMLElement>(null);
@@ -42,7 +31,7 @@ export function usePhoneCard(available = true) {
   useEffect(() => { if (!available) { setShown(false); opener.current = null; } }, [available]);
 
   const show = useCallback((tile: HTMLElement) => {
-    if (!compact()) return;
+    if (!isCompactLayout()) return;
     opener.current = tile;
     setShown(true);
   }, []);

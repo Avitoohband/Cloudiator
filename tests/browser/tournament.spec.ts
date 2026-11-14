@@ -161,7 +161,7 @@ test.describe('tournament registration and brackets', () => {
   test('pages the settled bracket placements, page 2 holding the rest', async ({ page }) => {
     await tournamentFlow.openAtMinute(page, 'completed', 85);
     const table = card(page).getByRole('table', { name: 'Placements' });
-    const bar = table.locator('xpath=ancestor::*[@data-paging-scope][1]').getByRole('navigation', { name: 'Pages' });
+    const bar = table.locator('xpath=ancestor::*[@data-paging-scope][1]').getByRole('navigation', { name: 'Placement pages', exact: true });
     await expect(table.locator('tbody tr')).toHaveText([/1\s*Varro/, /2\s*Severus/, /3\s*Cassia/, /3\s*Decimus/, /5\s*Aster/, /5\s*Aurelia/]);
     await bar.getByRole('button', { name: 'Next page', exact: true }).click();
     await expect(table.locator('tbody tr')).toHaveText([/5\s*Bellator/, /5\s*Corvina/]);
@@ -1158,7 +1158,7 @@ test.describe('the live Tournaments panel', () => {
     const leagues = panel.getByRole('group', { name: 'League' });
     await leagues.getByRole('button', { name: 'Gold' }).click();
     const entrants = panel.getByRole('region', { name: 'Entrants' });
-    const bar = entrants.getByRole('navigation', { name: 'Pages' });
+    const bar = entrants.getByRole('navigation', { name: 'Entrant pages', exact: true });
     await expect(bar.locator('b').first()).toHaveText('Page 1 of 9');
     await bar.getByRole('button', { name: 'Go to page 4', exact: true }).click();
     await expect(bar.locator('b').first()).toHaveText('Page 4 of 9');
@@ -1177,7 +1177,9 @@ test.describe('the live Tournaments panel', () => {
     await page.goto('/game/');
     const panel = await tournamentsPanel(page);
     const entrants = panel.getByRole('region', { name: 'Entrants' });
-    const entrantBar = entrants.getByRole('navigation', { name: 'Pages' });
+    // Final review M5: each list's bar is a landmark named for its list ("Entrant pages", "Bout pages", "Placement pages"), never three "Pages".
+    const entrantBar = entrants.getByRole('navigation', { name: 'Entrant pages', exact: true });
+    await expect(panel.getByRole('navigation', { name: 'Pages', exact: true })).toHaveCount(0);
     await expect(entrants.getByRole('listitem')).toHaveCount(6);
     await expect(entrantBar.locator('b').first()).toHaveText('Page 1 of 9');
     await entrantBar.getByRole('button', { name: 'Next page', exact: true }).click();
@@ -1189,7 +1191,7 @@ test.describe('the live Tournaments panel', () => {
     await expect(entrantBar.locator('b').first()).toHaveText('Page 5 of 9');
     await entrantBar.getByRole('button', { name: 'Go to page 2', exact: true }).click();
     const bracket = panel.getByRole('region', { name: 'Bracket', exact: true });
-    const boutBar = bracket.getByRole('navigation', { name: 'Pages' });
+    const boutBar = bracket.getByRole('navigation', { name: 'Bout pages', exact: true });
     const bouts = bracket.getByRole('tabpanel').getByRole('listitem');
     await expect(bouts).toHaveCount(6);
     await boutBar.getByRole('button', { name: 'Next page', exact: true }).click();
@@ -1215,7 +1217,7 @@ test.describe('the live Tournaments panel', () => {
     const panel = await tournamentsPanel(page);
     const table = panel.getByRole('table', { name: 'Placements' });
     const rows = table.locator('tbody tr');
-    const bar = table.locator('xpath=ancestor::*[@data-paging-scope][1]').getByRole('navigation', { name: 'Pages' });
+    const bar = table.locator('xpath=ancestor::*[@data-paging-scope][1]').getByRole('navigation', { name: 'Placement pages', exact: true });
     const label = bar.locator('b').first();
     await expect(rows).toHaveCount(6);
     await expect(label).toHaveText('Page 1 of 9');

@@ -292,18 +292,28 @@ function OfferList({ reads, seller, version, onRefresh, ...view }: {
   const more = useCallback(async () => {
     if (loadingMore.current) return;
     loadingMore.current = true;
+    // The offers loaded when Next was pressed. A refresh reads the first page only, so one that lands meanwhile can leave fewer: the Next reads on
+    // from the refreshed list until it holds more offers than that, or none are left, so the pager sees new rows and turns (final review M1).
+    const pressed = latest.current?.rows.length ?? 0;
     try {
       // A page whose base list is no longer the shown one (a refresh landed meanwhile) is dropped, so older offers never replace a refreshed list;
-      // it is then read once more from the new base, so the Next completes (at most three tries, each after a newer read landed).
-      for (let tries = 0; tries < 3; tries += 1) {
+      // it is then read once more from the new base, so the Next completes (at most three overtaken reads, each after a newer read landed).
+      for (let overtaken = 0; overtaken < 3;) {
         while (refreshing.current) await refreshing.current;
         const base = latest.current;
         if (!base?.nextCursor) return;
         const mine = generation.current;
         const next = await readOffers(reads, seller, base);
-        if (mine === generation.current && latest.current === base) { latest.current = next; setList(next); return; }
+        if (mine === generation.current && latest.current === base) {
+          latest.current = next;
+          setList(next);
+          // Each page read adds offers or ends the list, so this reads on at most until the offers pressed on are passed.
+          if (next.rows.length > pressed || !next.nextCursor) return;
+          continue;
+        }
         // Overtaken with no newer read to wait for (the list moved on without one): nothing to extend.
         if (!refreshing.current && latest.current === base) return;
+        overtaken += 1;
       }
     } finally {
       loadingMore.current = false;

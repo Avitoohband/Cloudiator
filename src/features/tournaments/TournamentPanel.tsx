@@ -266,7 +266,7 @@ export function TournamentBracketView({ model, onRound, onWatch }: {
                 <span className={styles.role}>{roleText(e, state)}</span>
               </li>
             ))}</ul>
-            <PanelFooter><Pager list={entrantsPaged} show /></PanelFooter>
+            <PanelFooter><Pager list={entrantsPaged} show label="Entrant pages" /></PanelFooter>
           </PagingScope>
         </section>
       )}
@@ -285,7 +285,7 @@ export function TournamentBracketView({ model, onRound, onWatch }: {
             {!kept && <p className="muted">{REPLAYS_GONE}</p>}
             <PagingScope>
               <ul className={styles.bouts} ref={boutsPaged.listRef as RefObject<HTMLUListElement | null>}>{boutsPaged.rows.map(b => <BoutCard key={b.id} bout={b} kept={kept} onWatch={onWatch} titles={model.titles} />)}</ul>
-              <PanelFooter><Pager list={boutsPaged} show /></PanelFooter>
+              <PanelFooter><Pager list={boutsPaged} show label="Bout pages" /></PanelFooter>
             </PagingScope>
           </div>
         </section>
@@ -302,7 +302,7 @@ export function TournamentBracketView({ model, onRound, onWatch }: {
             ))}</tbody>
           </table>
         </div>
-        <PanelFooter><Pager list={placementsPaged} show /></PanelFooter>
+        <PanelFooter><Pager list={placementsPaged} show label="Placement pages" /></PanelFooter>
         </PagingScope>
       )}
     </article>

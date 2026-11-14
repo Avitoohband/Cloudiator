@@ -12,9 +12,9 @@ export const shownSection = (menu: Locator) => sectionStrip(menu).locator('b').f
 
 /** Shows `menu`'s section named `name` with its circle in the strip (nothing happens when it shows already), and returns the menu. */
 export async function openSection(menu: Locator, name: string): Promise<Locator> {
-  // The strip comes with the owner (My gladiator says "Loading your gladiator…" before). A menu without sections (before Task 33) shows
-  // everything at once.
-  if (!(await sectionStrip(menu).waitFor({ timeout: 15_000 }).then(() => true, () => false))) return menu;
+  // The strip comes with the owner (My gladiator says "Loading your gladiator…" before). Every menu with sections has it, so a strip that does
+  // not come fails here, never a silent pass on the section already shown (final review M8).
+  await expect(sectionStrip(menu)).toBeVisible({ timeout: 45_000 });
   const circle = sectionStrip(menu).getByRole('button', { name: `Go to section: ${name}`, exact: true });
   if ((await circle.getAttribute('aria-current')) !== 'step') {
     await circle.click();

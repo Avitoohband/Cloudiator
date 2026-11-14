@@ -19,6 +19,8 @@ describe('the paging arithmetic', () => {
     expect([PAGE_SIZES.notifications, PAGE_SIZES.messages]).toEqual([6, 3]);
     expect(PAGE_SIZES.titles).toBe(4);
     expect([PAGE_SIZES.tournaments, PAGE_SIZES.tournamentBouts, PAGE_SIZES.placements]).toEqual([6, 6, 6]);
+    // Final review M4: Your rewards and the editor's Feedback list each keep a Show choice of their own (not Everyone's, not the player's own feedback's).
+    expect([PAGE_SIZES.rewards, PAGE_SIZES.feedbackReview]).toEqual([8, 6]);
     expect(GRID_PAGE).toEqual({ desktop: 24, phone: 15 });
     expect(SHOW_CHOICES).toEqual([10, 25, 50]);
     expect(MAX_DOTS).toEqual({ desktop: 12, phone: 9, narrow: 7 });
@@ -386,6 +388,23 @@ describe('the paging scope and the keys', () => {
     expect(ownsKeys(at(['input']), 'PageDown')).toBe(true);
     expect(ownsKeys(at([]), 'ArrowLeft')).toBe(false);
     expect(ownsKeys(null, 'PageUp')).toBe(false);
+  });
+
+  it('leaves PageDown and PageUp to text-like inputs only: a radio or a checkbox turns the pages (final review M3)', () => {
+    // An input as the browser gives it: its tag name, its type (a missing type reads "text"), and `closest`, which matches the input itself
+    // for a selector list that names `input` (no DOM library is installed for the unit tests, so the element is built by hand).
+    const input = (type: string) => {
+      const element = { tagName: 'INPUT', type, closest: (query: string) => (query.split(/,\s*/).includes('input') ? element : null) };
+      return element as unknown as Element;
+    };
+    for (const type of ['radio', 'checkbox', 'button', 'submit', 'reset']) {
+      expect(ownsKeys(input(type), 'PageDown'), type).toBe(false);
+      expect(ownsKeys(input(type), 'PageUp'), type).toBe(false);
+    }
+    for (const type of ['text', 'search', 'email', 'number', 'password', 'url', 'tel', 'range']) expect(ownsKeys(input(type), 'PageDown'), type).toBe(true);
+    // A radio still keeps its arrows (they move the choice in its group).
+    expect(ownsKeys(input('radio'), 'ArrowRight')).toBe(true);
+    expect(ownsKeys(input('checkbox'), 'ArrowLeft')).toBe(true);
   });
 });
 

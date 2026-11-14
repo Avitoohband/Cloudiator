@@ -178,8 +178,13 @@ function OwnerSections({ owner, slotIndex, clock, fixture, stale, resting, onRet
   const index = GLADIATOR_SECTIONS.findIndex(entry => entry.id === at);
   const holder = useRef<HTMLDivElement>(null);
   useSectionChange(index, holder);
-  /** The section navigation's move: nothing while a Worn equipment picker is open. */
-  const go = (next: number) => { if (!picking) onSection(next); };
+  /**
+   * The section navigation waits only while the Worn equipment section shows its open picker. A picker left open there while the shell moved
+   * to another section (Notifications' "Choose a title" shows the Overview) stays open, hidden, until the player comes back (final review I1).
+   */
+  const locked = picking && at === 'worn';
+  /** The section navigation's move: nothing while the Worn equipment section shows a picker. */
+  const go = (next: number) => { if (!locked) onSection(next); };
   // The History section: the owner's own history (its chip kept while the menu is open), read only once it is first shown.
   const [kind, setKind] = useState<HistoryKind>('arena');
   const [seenHistory, setSeenHistory] = useState(index === HISTORY);
@@ -194,12 +199,12 @@ function OwnerSections({ owner, slotIndex, clock, fixture, stale, resting, onRet
   // its slot ends (Patch A item 6). A Rest that has not started, or is over, shows none; nor does resting at home, which has no activity.
   const gain = activity?.kind === 'rest' && status.status === 'in-progress' ? restingGainText(restingGain(owner)) : null;
   return <>
-    {/* While a Worn equipment picker is open (a phone's sheet covers the strip and the bar), the section navigation waits: inert, and its
-        keys (← →, the shell's listener) do nothing (fix round 1, review Important 3). */}
-    <div inert={picking}><SectionStrip sections={GLADIATOR_SECTIONS} index={index} onGo={go} /></div>
+    {/* While the Worn equipment section shows its open picker (a phone's sheet covers the strip and the bar), the section navigation waits:
+        inert, and its keys (← →, the shell's listener) do nothing (fix round 1, review Important 3; only in that section, final review I1). */}
+    <div inert={locked}><SectionStrip sections={GLADIATOR_SECTIONS} index={index} onGo={go} /></div>
     {/* The stale notice sits over every section; a phone's picker sheet covers it too (fix round 1, review Minor 1). */}
     {stale && (
-      <div className={styles.stale} role="status" data-covered={picking || undefined} inert={picking}>
+      <div className={styles.stale} role="status" data-covered={locked || undefined} inert={locked}>
         <p>Your gladiator could not be refreshed. Showing the last loaded details.</p>
         <button type="button" onClick={onRetry}>Retry</button>
       </div>
@@ -257,7 +262,7 @@ function OwnerSections({ owner, slotIndex, clock, fixture, stale, resting, onRet
       </SectionBox>
     </div>
     {/* The bottom bar of a section with no paged list of its own; History's list pages with its own bar (the list rule), its only bottom bar. */}
-    {index !== HISTORY && <PanelFooter><div inert={picking}><SectionPager sections={GLADIATOR_SECTIONS} index={index} onGo={go} /></div></PanelFooter>}
+    {index !== HISTORY && <PanelFooter><div inert={locked}><SectionPager sections={GLADIATOR_SECTIONS} index={index} onGo={go} /></div></PanelFooter>}
   </>;
 }
 

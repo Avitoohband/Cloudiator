@@ -15,6 +15,8 @@ const subscribe = (change: () => void) => {
   return () => media?.removeEventListener?.('change', change);
 };
 const compact = () => !!window.matchMedia?.(COMPACT_QUERY).matches;
+/** The page keys (`Pager`) and the section keys (`SectionStrip`), kept in an open card. */
+const CARD_KEYS = new Set(['PageDown', 'PageUp', 'ArrowLeft', 'ArrowRight']);
 
 /** The nearest ancestor of `element` that scrolls (the menu's body). */
 function scroller(element: HTMLElement): HTMLElement | null {
@@ -110,9 +112,17 @@ export function usePhoneCard(available = true) {
     return () => menu.removeEventListener('keydown', onKey);
   }, [open, close]);
 
-  /** Escape closes the card, not the menu. */
+  /**
+   * The card's own keys. Escape closes the card, not the menu. The page and section keys pressed in the card are the card's (Codex review 6):
+   * they go no further than the card, so the grid under it never turns a page and the section stays; PageDown and PageUp still scroll the
+   * card itself (the browser's own scrolling), and a control in the card still gets them first. The page keys (`usePageKeys`) listen on the
+   * document, where React's own listener is too (the app is hydrated on the document) and was added first: stopping the other listeners
+   * there as well keeps the key from them.
+   */
   const onKeyDown = (event: KeyboardEvent<HTMLElement>) => {
-    if (!open || event.key !== 'Escape' || event.defaultPrevented) return;
+    if (!open) return;
+    if (CARD_KEYS.has(event.key)) { event.stopPropagation(); event.nativeEvent.stopImmediatePropagation(); return; }
+    if (event.key !== 'Escape' || event.defaultPrevented) return;
     event.preventDefault();
     close();
   };

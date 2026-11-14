@@ -14,7 +14,7 @@ import { TOURNAMENT_KEYS, TOURNAMENTS, type TournamentKey } from '../fixtures/to
 import { largeTournament } from '../fixtures/tournament-build';
 import { SLOT_MS, SUPABASE_URL, emptyWorld, routeLiveReads, seedSession } from './live-routes';
 import { reviewShot, reviewShot360 } from './review-shots';
-import { creationDialog, expectOwnerShown, openMenu, spendSuggestedPoints } from './shell-helpers';
+import { campReady, creationDialog, expectOwnerShown, openMenu, spendSuggestedPoints } from './shell-helpers';
 
 // Task 23.4: read volume and render cost. The camp stops drawing under an opaque scene; "being prepared" re-reads back off;
 // a multi-league camp lays its rings out the same whatever order the views arrive in, and asks a failed ring log again
@@ -25,7 +25,6 @@ const production = process.env.PLAYWRIGHT_STATIC === 'true';
 const MIN = 60_000;
 const readJson = <T>(path: string): T => JSON.parse(readFileSync(path, 'utf8')) as T;
 const VIEWS = Object.fromEntries(TOURNAMENT_KEYS.map(key => [key, readJson<TournamentView>(`tests/fixtures/tournaments/${key}.json`)])) as Record<TournamentKey, TournamentView>;
-const campReady = (page: Page) => page.waitForFunction(() => window.__cloudiatorCamp?.state()?.ready === true, null, { timeout: 45_000 });
 const scene = (page: Page, name: 'Replay' | 'Expedition') => page.getByRole('dialog', { name, exact: true });
 const backToCamp = (page: Page) => page.getByRole('button', { name: 'Back to Camp' });
 const campState = (page: Page) => page.evaluate(() => window.__cloudiatorCamp!.state()!);

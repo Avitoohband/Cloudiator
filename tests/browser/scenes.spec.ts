@@ -10,7 +10,7 @@ import { REPLAY_FIXTURES } from '../fixtures/replay-ids';
 import { noHorizontalScroll } from './a11y-helpers';
 import { SLOT_MS, emptyWorld, routeLiveReads, seedSession } from './live-routes';
 import { reviewShot, reviewShot360 } from './review-shots';
-import { everyoneResults, menuDialog, openMenu, quietArrivals } from './shell-helpers';
+import { campReady, everyoneResults, menuDialog, openMenu, quietArrivals } from './shell-helpers';
 
 // Task 13.8 (spec "Scenes", plan Decision 4): a replay or an expedition opens as a full-screen scene over the running
 // camp, with "Back to camp", as a history entry on the camp's own route (`?view=replay|expedition&activity=…`); the
@@ -31,7 +31,6 @@ const backToCamp = (page: Page) => page.getByRole('button', { name: 'Back to cam
 /** A scene's Back button names where it goes: "← Results", "← Arena", "← Gladiators" or "← Camp" (Arena replays Task 3). */
 const backTo = (page: Page, label: 'Camp' | 'Results' | 'Arena' | 'Gladiators' | 'My bouts' | 'Notifications' | 'Tournaments') =>
   page.getByRole('button', { name: `Back to ${label}`, exact: true });
-const campReady = (page: Page) => page.waitForFunction(() => window.__cloudiatorCamp?.state()?.ready === true, null, { timeout: 45_000 });
 async function openCamp(page: Page, url: string) {
   await page.goto(url);
   await campReady(page);

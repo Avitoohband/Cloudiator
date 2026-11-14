@@ -7,7 +7,7 @@ import { worldFixture } from '../fixtures/domain';
 import { REPLAY_FIXTURES } from '../fixtures/replay-ids';
 import { TOURNAMENTS, tournamentAsOf } from '../fixtures/tournament-ids';
 import { SLOT_MS, emptyWorld, routeLiveReads } from './live-routes';
-import { closeMenu, everyoneResults, expectOwnerShown, openMenu } from './shell-helpers';
+import { campReady, closeMenu, everyoneResults, expectOwnerShown, openMenu } from './shell-helpers';
 import { storeClock } from './slot-time';
 import { showChoice } from './show-choice';
 
@@ -35,7 +35,6 @@ const resultTime = (ms: number) => new Intl.DateTimeFormat('en-GB', { weekday: '
 /** The fixture Arena bout of the slot `slotsAgo` before the current one settled at that slot's end. */
 const settledSlotsAgo = (slotsAgo: number) => SLOT_START - (slotsAgo - 1) * SLOT_MS;
 
-const campReady = (page: Page) => page.waitForFunction(() => window.__cloudiatorCamp?.state()?.ready === true, null, { timeout: 45_000 });
 async function openCamp(page: Page, url: string) {
   await page.goto(url);
   await campReady(page);

@@ -7,7 +7,7 @@ import { ownerFixture, worldFixture } from '../fixtures/domain';
 import { REPLAY_FIXTURES } from '../fixtures/replay-ids';
 import { noHorizontalScroll } from './a11y-helpers';
 import { SLOT_MS, emptyWorld, routeLiveReads, seedSession, testUser, type LiveTransport } from './live-routes';
-import { closeMenu, expectOwnerShown, menuDialog, openMenu, quietArrivals, touchLayout } from './shell-helpers';
+import { campReady, closeMenu, expectOwnerShown, menuDialog, openMenu, quietArrivals, touchLayout } from './shell-helpers';
 
 // Arena replays Task 4 (spec 1, the approved mockup; plan Review Focus 1 and 5): a player's 📜 Results opens on My bouts, the owner's
 // own Arena and tournament bouts, newest first, by day, with the result, the opponent, the renown and the rating, a gold dot until
@@ -167,7 +167,6 @@ const GROUPS: { day: string; rows: Row[] }[] = [
   { day: 'WED 23 SEP', rows: [{ name: 'Tournament bout', letter: 'W', sub: '9:40\xA0PM · replay no longer kept', gone: true }] },
 ];
 
-const campReady = (page: Page) => page.waitForFunction(() => window.__cloudiatorCamp?.state()?.ready === true, null, { timeout: 45_000 });
 async function openCamp(page: Page, url = '/game/?mode=fixture') {
   await page.goto(url);
   await campReady(page);

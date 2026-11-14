@@ -5,14 +5,17 @@
 // pieces (`slotTiles`), a tile of its own for a worn (✓), queued (→), listed or locked piece, and Remove when the slot is filled. Choosing a
 // tile compares it with what is worn next in that slot (`compareChoice`); Wear, Undo and Remove send the Inventory's own gear commands
 // (`wearCommand`, `undoCommand`, `removeCommand`, `cancelGearCommand`), close the picker and give the focus back to the slot. A queued
-// change shows a NEXT tag on its slot and a row in "At the next slot", with Undo and Cancel changes. The card and its Wear always follow
-// the CHOSEN tile (the AGENTS.md detail-card rule): hover and keyboard focus move nothing but the focus ring.
+// change shows a NEXT tag on its slot and a row in "At the next slot", with Undo and Cancel changes. Patch 1.9 Task 33 (fix 1, the 1.9
+// changelog's "hover, focus or tap worn gear and replacements"): hovering a tile, or reaching it with the keyboard, shows its card, as Plan a
+// build does; Wear (Undo, Remove) always acts on the CHOSEN tile and shows only beside that tile's own card, so the card shown and the piece
+// sent always agree (the AGENTS.md detail-card rule). The pointer never takes a keyboard action away: while Wear has the focus, hovering
+// changes nothing; leaving a tile brings back the chosen tile's card.
 // Desktop: a popover laid over the panel under the slot row (nothing below it moves), with a caret at the slot, the grid on the left and
 // the card with Wear on the right (two columns from 560 px); what follows it ("At the next slot", the outcome, Retry and the panel's build
 // planner) is inert while it is open, so Tab from Wear never lands under it. Touch (the shell's compact query): a sheet over the panel body
 // with Back and a Wear bar at its foot; what it covers is hidden. A keyboard command whose control leaves (Retry, Cancel changes) gives the focus to its
 // outcome line (`useOutcomeFocus`, as the Inventory does); Wear, Undo and Remove give it back to the slot.
-import { useEffect, useId, useLayoutEffect, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
+import { useEffect, useId, useLayoutEffect, useRef, useState, type FocusEvent, type KeyboardEvent, type PointerEvent, type ReactNode } from 'react';
 import type { EquipmentSlot } from '@contracts/commands';
 import type { ItemInstance, OwnerState } from '@contracts/reads';
 import { RULES_V1 } from '@domain/rules-v1';
@@ -80,6 +83,9 @@ export function WornEquipment({ owner, gateway, refresh, clock, preview = false,
   const [chosen, setChosen] = useState<string | null>(null);
   /** The tile that holds the grid's one tab stop: the last one focused, else the chosen one, else the first. */
   const [stop, setStop] = useState<string | null>(null);
+  /** The tile under the pointer or the keyboard's focus (Task 33 fix 1): its card shows; null shows the chosen tile's. */
+  const [peek, setPeek] = useState<string | null>(null);
+  const actRef = useRef<HTMLDivElement>(null);
   /** A slot to give the focus to once the page shows it (after the picker, or the phone's sheet over it, has closed). */
   const [focusTo, setFocusTo] = useState<EquipmentSlot | null>(null);
   const [busy, setBusy] = useState(false), [outcome, setOutcome] = useState<Outcome | null>(null), [retry, setRetry] = useState(false);
@@ -177,11 +183,11 @@ export function WornEquipment({ owner, gateway, refresh, clock, preview = false,
    * approved overlay), and removed when the picker closes. A command still on its way keeps its answer, which shows when it comes.
    */
   function openPicker(slot: EquipmentSlot) {
-    setOpen(slot); setChosen(null); setStop(null);
+    setOpen(slot); setChosen(null); setStop(null); setPeek(null);
     if (!sending.current && (outcome || retry)) setStale(true);
   }
   function closePicker(slot: EquipmentSlot) {
-    setOpen(null); setChosen(null); setStop(null); setFocusTo(slot);
+    setOpen(null); setChosen(null); setStop(null); setPeek(null); setFocusTo(slot);
   }
   function wear(tile: StackTile) {
     if (sending.current || !open) return;
@@ -209,7 +215,7 @@ export function WornEquipment({ owner, gateway, refresh, clock, preview = false,
   function cancel() {
     if (sending.current) return;
     // The box leaves with the queue: by keyboard, the outcome takes the focus (`useOutcomeFocus`). An open picker closes so it is seen.
-    if (open) { setOpen(null); setChosen(null); setStop(null); }
+    if (open) { setOpen(null); setChosen(null); setStop(null); setPeek(null); }
     void send(cancelGearCommand(owner), keepsOtherChanges(owner) ? 'Gear changes canceled. Your other queued build changes are kept.' : 'Gear changes canceled.');
   }
   /** Arrow keys move the focus over the grid (rows by the tiles' positions); Home and End go to its ends. Enter or Space chooses. */
@@ -224,19 +230,51 @@ export function WornEquipment({ owner, gateway, refresh, clock, preview = false,
   }
   // Command buttons stay focusable while a command is sent (aria-disabled, guarded in their handlers), as in the Inventory.
   const busyProps = busy ? { 'aria-disabled': true as const } : {};
+  /**
+   * A tile's preview (Task 33 fix 1): the pointer over it (not a finger: a tap chooses) and the keyboard's focus on it show its card. While the
+   * keyboard is on the picker's action, the pointer previews nothing; leaving a tile goes back to the focused tile's card, else the chosen one's.
+   */
+  const previewProps = (key: string) => ({
+    onPointerEnter: (event: PointerEvent<HTMLButtonElement>) => {
+      if (event.pointerType === 'touch' || actRef.current?.contains(document.activeElement)) return;
+      setPeek(key);
+    },
+    onPointerLeave: (event: PointerEvent<HTMLButtonElement>) => {
+      if (event.pointerType === 'touch') return;
+      const focused = document.activeElement instanceof HTMLElement && document.activeElement.matches(':focus-visible') ? document.activeElement.dataset.tile ?? null : null;
+      setPeek(current => (current === key ? focused : current));
+    },
+    onFocus: (event: FocusEvent<HTMLButtonElement>) => {
+      setStop(key);
+      // The keyboard's focus (not the focus a click or a tap gives): a click chooses the tile anyway.
+      if (event.currentTarget.matches(':focus-visible')) setPeek(key);
+    },
+    onBlur: () => setPeek(current => (current === key ? null : current)),
+  });
 
   function renderPicker(slot: EquipmentSlot) {
     const tiles = slotTiles(owner, slot), now = pieceOf(next[slot]), name = SLOT_NAMES[slot];
     const blockedHands = slot === 'offHand' && isTwoHanded(pieceOf(next.weapon));
     const removable = next[slot] !== null;
     const keys = [...tiles.map(tile => tile.key), ...(removable ? [REMOVE] : [])];
-    const tile = chosen === null ? null : tiles.find(entry => entry.items.some(item => item.id === chosen)) ?? null;
+    const tileOf = (key: string | null) => (key === null ? null : tiles.find(entry => entry.items.some(item => item.id === key)) ?? null);
+    // The chosen tile (what the action sends) and the shown one (its card): the preview's while there is one (fix 1), else the chosen one.
+    const tile = tileOf(chosen);
     const removing = chosen === REMOVE && removable;
+    const chosenKey = tile?.key ?? (removing ? REMOVE : null);
+    const shownKey = peek !== null && keys.includes(peek) ? peek : chosenKey;
+    const shownTile = shownKey === REMOVE ? null : tileOf(shownKey), showingRemove = shownKey === REMOVE;
+    /** Another tile's card shows: the chosen tile's action waits, out of sight and out of reach, until its own card shows again. */
+    const waiting = chosenKey !== null && shownKey !== chosenKey;
     const tabStop = stop !== null && keys.includes(stop) ? stop : tile?.key ?? (removing ? REMOVE : keys[0]);
-    const item = tile?.items[0], count = tile?.items.length ?? 0, state = item ? wearState(owner, item) : null;
-    const comparison = item || removing ? compareChoice(owner, slot, item ?? null) : null;
+    const chosenItem = tile?.items[0], chosenCount = tile?.items.length ?? 0, chosenState = chosenItem ? wearState(owner, chosenItem) : null;
+    const item = shownTile?.items[0], count = shownTile?.items.length ?? 0;
+    const comparison = item || showingRemove ? compareChoice(owner, slot, item ?? null) : null;
     const blocked = item ? lockText(owner, item) : null;
-    const describedBy = [blocked ? blockedId : '', preview ? previewId : ''].filter(Boolean).join(' ') || undefined;
+    const chosenBlocked = chosenItem ? lockText(owner, chosenItem) : null;
+    const chosenSummary = chosenItem ? `${itemName(chosenItem)}, Level ${chosenItem.tier} · ${chosenItem.rarity} · ${binding(chosenItem)}${chosenCount > 1 ? ` · ${chosenCount} owned` : ''}`
+      : removing ? `Remove ${now ? itemName(now) : 'the piece'}: ${name} left empty` : '';
+    const describedBy = [chosenBlocked ? blockedId : '', preview ? previewId : ''].filter(Boolean).join(' ') || undefined;
     const nowName = now ? itemName(now) : next[slot] ? 'Unavailable' : 'empty';
     const queuedHere = changed.includes(slot);
     const placeholder = blockedHands ? 'The next weapon is two-handed: it uses both hands, so nothing can go in the off hand. Undo the weapon to free it.'
@@ -244,17 +282,18 @@ export function WornEquipment({ owner, gateway, refresh, clock, preview = false,
     let action = null;
     if (removing) {
       action = <button type="button" className={styles.wear} disabled={preview} {...busyProps} aria-describedby={preview ? previewId : undefined} onClick={() => remove(slot)}>Remove {now ? itemName(now) : 'the piece'}</button>;
-    } else if (item && tile && state === 'queued') {
-      action = <button type="button" className={`${styles.wear} ${styles.undo}`} disabled={preview} {...busyProps} aria-label={`Undo wearing ${itemLabel(item)}`}
+    } else if (chosenItem && tile && chosenState === 'queued') {
+      action = <button type="button" className={`${styles.wear} ${styles.undo}`} disabled={preview} {...busyProps} aria-label={`Undo wearing ${itemLabel(chosenItem)}`}
         aria-describedby={preview ? previewId : undefined} onClick={() => undo(slot)}>Undo</button>;
-    } else if (item && state === 'wearing') {
-      action = <button type="button" className={styles.wear} disabled aria-label={`Wearing ${itemLabel(item)}`}>Wearing</button>;
-    } else if (item && tile) {
-      action = <button type="button" className={styles.wear} disabled={preview || blocked !== null} {...busyProps} aria-describedby={describedBy}
-        aria-label={`Wear ${itemLabel(item)}${count > 1 ? ` (one of ${count})` : ''}`} onClick={() => wear(tile)}>Wear {itemName(item)}</button>;
+    } else if (chosenItem && chosenState === 'wearing') {
+      action = <button type="button" className={styles.wear} disabled aria-label={`Wearing ${itemLabel(chosenItem)}`}>Wearing</button>;
+    } else if (chosenItem && tile) {
+      action = <button type="button" className={styles.wear} disabled={preview || chosenBlocked !== null} {...busyProps} aria-describedby={describedBy}
+        aria-label={`Wear ${itemLabel(chosenItem)}${chosenCount > 1 ? ` (one of ${chosenCount})` : ''}`} onClick={() => wear(tile)}>Wear {itemName(chosenItem)}</button>;
     }
     return <div className={styles.frame}>
-      <div ref={picker} id={pickerId} className={styles.picker} role="dialog" aria-label={`Change ${name}`} tabIndex={-1}>
+      {/* The arrow keys inside the picker are its own (its grid moves with them): they never move My gladiator's section (Task 33). */}
+      <div ref={picker} id={pickerId} className={styles.picker} role="dialog" aria-label={`Change ${name}`} tabIndex={-1} data-arrow-keys="">
         <div className={styles.head}>
           <button type="button" className={styles.back} data-back="" onClick={() => closePicker(slot)}><span className={styles.backMark} aria-hidden="true">‹</span>Back</button>
           <h4>{name}</h4>
@@ -271,7 +310,7 @@ export function WornEquipment({ owner, gateway, refresh, clock, preview = false,
                   : pieceState === 'queued' ? 'next' : '', lock].filter(Boolean).join(', ');
                 return <button key={entry.key} type="button" className={styles.pick} data-testid={`pick-${entry.key}`} data-tile={entry.key} data-rarity={piece.rarity}
                   data-stack={many > 1 ? many : undefined} data-locked={mark === 'lock' ? '' : undefined} aria-pressed={tile?.key === entry.key} aria-label={words}
-                  tabIndex={entry.key === tabStop ? 0 : -1} onFocus={() => setStop(entry.key)} onKeyDown={moveFocus} onClick={() => setChosen(entry.key)}>
+                  tabIndex={entry.key === tabStop ? 0 : -1} {...previewProps(entry.key)} onKeyDown={moveFocus} onClick={() => setChosen(entry.key)}>
                   <ItemIcon catalogId={piece.catalogId} />
                   <span className={styles.level} aria-hidden="true">L{piece.tier}</span>
                   {mark && <span className={styles.mark} data-mark={mark} aria-hidden="true">{mark === 'lock' ? <Lock /> : mark === 'worn' ? '✓' : '→'}</span>}
@@ -280,13 +319,15 @@ export function WornEquipment({ owner, gateway, refresh, clock, preview = false,
               })}
               {removable && <button type="button" className={`${styles.pick} ${styles.remove}`} data-tile={REMOVE} aria-pressed={removing}
                 aria-label={`Remove ${now ? itemName(now) : 'the piece'} and leave ${name} empty`} tabIndex={tabStop === REMOVE ? 0 : -1}
-                onFocus={() => setStop(REMOVE)} onKeyDown={moveFocus} onClick={() => setChosen(REMOVE)}>
+                {...previewProps(REMOVE)} onKeyDown={moveFocus} onClick={() => setChosen(REMOVE)}>
                 <span className={styles.removeMark} aria-hidden="true">✕</span>Remove
               </button>}
             </div>}
             {tiles.length > 0 && <p className={styles.legend}>{LEGEND}</p>}
           </div>
-          <div className={styles.card} aria-live="polite">
+          {/* Only a change of the chosen piece is announced (fix round 1, review Minor 2): the previewed card is no live region. */}
+          <p className={styles.hidden} data-chosen-status="" aria-live="polite">{chosenSummary}</p>
+          <div className={styles.card}>
             {comparison ? <>
               <div className={styles.cardHead}>
                 {item ? <ItemIcon catalogId={item.catalogId} size={40} /> : <span className={styles.removeIcon} aria-hidden="true">✕</span>}
@@ -310,12 +351,13 @@ export function WornEquipment({ owner, gateway, refresh, clock, preview = false,
                 : comparison.twoHanded ? <p className={styles.info}>Two-handed: it uses both hands; the off hand is already empty.</p> : null}
               {comparison.offHandBack && <p className={styles.note}>{itemName(comparison.offHandBack)} goes back on.</p>}
               {comparison.load?.over && <p className={styles.bad}>This would overload your gladiator (load {statText(comparison.load.value)} of {statText(comparison.load.capacity)}).</p>}
-              {blocked && <p id={blockedId} className={styles.bad}>{blocked}</p>}
+              {blocked && <p id={waiting ? undefined : blockedId} className={styles.bad}>{blocked}</p>}
               {preview && <p id={previewId} className={styles.info}>Gear changes are unavailable in this preview.</p>}
             </> : <p className={styles.placeholder}>{placeholder}</p>}
           </div>
         </div>
-        {action && <div className={styles.act}>{action}</div>}
+        {/* While another tile's card shows, the chosen tile's action keeps its place (nothing moves) out of sight and reach. */}
+        {action && <div ref={actRef} className={styles.act} data-waiting={waiting ? '' : undefined}>{action}</div>}
       </div>
     </div>;
   }

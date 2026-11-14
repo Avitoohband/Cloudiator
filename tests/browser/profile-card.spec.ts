@@ -2,6 +2,7 @@ import { expect, test, type Page, type TestInfo } from './fixtures';
 import { contrastIssues, expectNamedControls, noHorizontalScroll } from './a11y-helpers';
 import { reviewShot } from './review-shots';
 import { openMenu, quietArrivals, touchLayout, pageTo } from './shell-helpers';
+import { showChoice } from './show-choice';
 
 // Task 11c (Patch A spec, "A richer profile card"; Avi approved the mockup, 2026-10-29): the card a gladiator's name opens, filled in
 // sections: the look, the class chips, the attributes, the stats, the gear and the record. The fixture preview's profiles carry sample
@@ -29,6 +30,9 @@ async function openFromList(page: Page, name: string) {
 }
 const shot = (page: Page, testInfo: TestInfo, name: string) => reviewShot(page, testInfo, `card-${name}`);
 
+// These cases look for a row by its name, not for how the list pages: Show 50 puts the rows read on the page (Patch 1.9 Task 32).
+test.beforeEach(async ({ context }) => { await showChoice(context, { standings: 50 }); });
+
 test.describe('the richer profile card', () => {
   test.skip(production, 'These checks use the fixture preview.');
 
@@ -49,7 +53,11 @@ test.describe('the richer profile card', () => {
       expect(Math.round(box.width)).toBe(520);
       expect(Math.abs(box.x + box.width / 2 - 720)).toBeLessThanOrEqual(1);
     }
-    expect(await lucilla.getByTestId('profile-look').locator('[data-layer]').count()).toBeGreaterThanOrEqual(3);
+    // The look's layers are drawn once the atlas's frame table has loaded (a chunk of its own): wait for the third, then count (Task 33 fix 5:
+    // a count read at once saw none under load).
+    const layers = lucilla.getByTestId('profile-look').locator('[data-layer]');
+    await expect(layers.nth(2)).toBeAttached();
+    expect(await layers.count()).toBeGreaterThanOrEqual(3);
     await expect(lucilla.getByTestId('profile-look')).toHaveAttribute('aria-hidden', 'true');
     for (const label of ['Attributes', 'Stats', 'Gear', 'Record']) await expect(section(page, 'Lucilla', label)).toBeVisible();
     await expect(section(page, 'Lucilla', 'Stats').getByRole('term')).toHaveText(['Health', 'Damage', 'Attack speed', 'Armor', 'Critical', 'Critical damage']);

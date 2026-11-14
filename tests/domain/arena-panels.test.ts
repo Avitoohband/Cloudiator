@@ -219,17 +219,32 @@ describe('Arena standings', () => {
   const view = (model: Partial<StandingsModel> = {}) => renderToStaticMarkup(createElement(StandingsView, { model: { ...base, ...model }, onLeague: noop, onMore: noop, onRetry: noop,
     onSeason: noop, timeZone: 'Asia/Jerusalem' }));
 
-  it('shows a page of at most 50 rows with rating, human wins and losses, markers and a More button', () => {
+  it('shows ten rows a page of the 50 read, with rating, human wins and losses, markers, and Back and Next with more to see (Patch 1.9 Task 32)', () => {
     const html = view();
-    expect(html.match(/<tr/g)!.length - 1).toBe(50);
+    expect(html.match(/<tr/g)!.length - 1).toBe(10);
     expect(text(html)).toContain('Bronze league standings');
-    expect(html).toContain('>More</button>');
-    expect(html).toMatch(/Promoted/);
-    expect(html).toMatch(/Inactive/);
+    // Fifty rows are loaded and more can be read: the label is "Page 1" with "more to see", Next reads the next 50, and there is no More button.
+    expect(html).toMatch(/<nav[^>]*aria-label="Pages"/);
+    expect(text(html)).toContain('Page 1');
+    expect(text(html)).toContain('more to see');
+    expect(html).not.toContain('>More</button>');
+    // The page's rows are the first ten of the standings, each a page row; the markers show on the rows that carry them.
+    expect(html.match(/data-page-row/g)).toHaveLength(10);
+    const tens = view({ rows: page.rows.slice(0, 10) });
+    expect(tens).toContain(page.rows[0].name);
+    expect(tens).not.toContain(`>${page.rows[10].name}<`);
     const aster = page.rows.find(r => r.gladiatorId === ARENA_GLADIATORS.aster.id)!;
-    expect(html).toContain(`<tr aria-current="true"`);
-    expect(text(html)).toContain(`${aster.rank} Aster ${aster.rating} ${aster.humanWins}–${aster.humanLosses} You`);
-    expect(view({ nextCursor: null })).not.toContain('>More</button>');
+    const own = view({ rows: [aster], nextCursor: null });
+    expect(own).toContain(`<tr data-page-row="" tabindex="-1" aria-current="true"`);
+    expect(text(own)).toContain(`${aster.rank} Aster ${aster.rating} ${aster.humanWins}–${aster.humanLosses} You`);
+    expect(own).not.toMatch(/aria-label="Pages"/);
+    const marked = view({ rows: page.rows.filter(r => r.promoted || r.inactive).slice(0, 10), nextCursor: null });
+    expect(marked).toMatch(/Promoted/);
+    expect(marked).toMatch(/Inactive/);
+    // The end of the list is known once the last server page is read: "Page 1 of 5", and no "more to see".
+    const known = view({ rows: page.rows, nextCursor: null });
+    expect(text(known)).toContain('Page 1 of 5');
+    expect(text(known)).not.toContain('more to see');
   });
 
   it('reads the season progress as human bouts, not a bare number (Task 23.5, C17)', () => {
@@ -260,7 +275,7 @@ describe('Arena standings', () => {
     expect(failed).not.toContain('not available in this build');
     // A failed refresh keeps the rows already shown and says they may be out of date.
     const stale = view({ status: 'failed' });
-    expect(stale.match(/<tr/g)!.length - 1).toBe(50);
+    expect(stale.match(/<tr/g)!.length - 1).toBe(10);
     expect(text(stale)).toContain('The latest standings could not be loaded; these rows may be out of date.');
     expect(stale).toMatch(/<button[^>]*>Try again<\/button>/);
     expect(view({ rows: [], status: 'unavailable', nextCursor: null })).not.toContain('Try again');
@@ -275,7 +290,8 @@ describe('Arena standings', () => {
   // Task 21.4 (plan Decision 8): seasons inside the standings.
   const archive = arenaStandingsPage('bronze', '0');
   const archivedModel: Partial<StandingsModel> = { rows: archive.rows, nextCursor: archive.nextCursor, seasonId: '0', archived: true };
-  const options = (html: string) => [...html.matchAll(/<option[^>]*value="([^"]*)"[^>]*>([^<]*)<\/option>/g)].map(m => [m[1], m[2]]);
+  // The season picker's options (the pager's Show choices are not seasons).
+  const options = (html: string) => [...html.replace(/<nav[^>]*aria-label="Pages"[\s\S]*?<\/nav>/g, '').matchAll(/<option[^>]*value="([^"]*)"[^>]*>([^<]*)<\/option>/g)].map(m => [m[1], m[2]]);
 
   it('offers a season picker with the current season and each finished one, set to the shown season', () => {
     const html = view();
@@ -284,7 +300,7 @@ describe('Arena standings', () => {
     expect(html).toMatch(/<option[^>]*value="1"[^>]*selected=""/);
     expect(view(archivedModel)).toMatch(/<option[^>]*value="0"[^>]*selected=""/);
     // No season yet: no picker and no season card; the tag names no season.
-    const none = view({ seasons: [], seasonId: '', rows: [] });
+    const none = view({ seasons: [], seasonId: '', rows: [], nextCursor: null });
     expect(none).not.toContain('<select');
     expect(text(none)).not.toMatch(/ends in|final standings/);
   });
@@ -340,8 +356,10 @@ describe('Arena standings', () => {
   });
 
   it('marks eligible rows in the current season and explains the mark', () => {
-    const html = view();
     const severus = page.rows.find(r => r.name === 'Severus')!;
+    const aster = page.rows.find(r => r.gladiatorId === ARENA_GLADIATORS.aster.id)!;
+    // Both on one page (the paged view shows ten at a time).
+    const html = view({ rows: [aster, severus], nextCursor: null });
     expect(severus.rewardEligible).toBe(true);
     expect(text(html)).toContain(`${severus.rank} Severus ${severus.rating} ${severus.humanWins}–${severus.humanLosses} ✓ Eligible`);
     expect(text(html)).toContain(`${asterRow.rank} Aster ${asterRow.rating} 2–1 You`);

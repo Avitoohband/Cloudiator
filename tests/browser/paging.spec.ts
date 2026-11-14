@@ -15,6 +15,8 @@ const production = process.env.PLAYWRIGHT_STATIC === 'true';
 const SHOTS = '.superpowers/sdd/2026-11-12-1.9-additions';
 
 async function openCamp(page: Page) {
+  // The arrival banner (Task 30 fix round 3) shortens the phone's tall sheet while it shows: these cases measure the sheet without it.
+  await quietArrivals(page.context());
   await page.goto('/game/?mode=fixture');
   await page.waitForFunction(() => window.__cloudiatorCamp?.state()?.ready === true, null, { timeout: 45_000 });
 }

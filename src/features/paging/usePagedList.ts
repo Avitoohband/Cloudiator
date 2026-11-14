@@ -41,18 +41,23 @@ function focusRow(row: HTMLElement) {
   row.scrollIntoView?.({ block: 'nearest' });
 }
 
-export function usePagedList<T>(all: readonly T[], options: {
-  list: ListId; size?: number;
+/**
+ * Task 33 fix round 1 (review Minor 6), add-only: a grid gives its fixed `size` and needs no `list` (it has no Show choice to remember);
+ * a list gives its `list` (its Fit and its saved Show choice), as before.
+ */
+export type PagedListOptions = ({ list: ListId; size?: number } | { list?: never; size: number }) & {
   resetKey?: string | number;
   more?: { hasMore: boolean; load(): Promise<unknown> };
-}): PagedList<T> {
+};
+
+export function usePagedList<T>(all: readonly T[], options: PagedListOptions): PagedList<T> {
   const { list, size: fixed, resetKey, more } = options;
-  const fit = fixed ?? PAGE_SIZES[list];
+  const fit = fixed ?? PAGE_SIZES[list as ListId];
   // The first render uses Fit, as the prerendered page does; the Show choice saved on this device applies before the first paint
   // (fix round 1, M2), so a panel mounted from the first render (Arena) hydrates without a mismatch.
   const [chosen, setChosen] = useState(fit);
   useLayoutEffect(() => {
-    if (fixed === undefined) setChosen(readPageSize(list, fit));
+    if (fixed === undefined && list) setChosen(readPageSize(list, fit));
   }, [list, fit, fixed]);
   const size = fixed ?? chosen;
   const [controller] = useState(createPageController);
@@ -86,7 +91,7 @@ export function usePagedList<T>(all: readonly T[], options: {
   });
 
   const setSize = useCallback((next: number) => {
-    if (fixed !== undefined) return;
+    if (fixed !== undefined || !list) return;
     // The first row on screen now: the first one whose bottom is below the top of the part that scrolls.
     let first = (controller.view().page - 1) * size;
     const box = listRef.current;

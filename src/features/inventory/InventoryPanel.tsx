@@ -1,6 +1,9 @@
 'use client';
 
-import { useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
+// The Inventory and shops menu: the bag (search, sort and the chips over an icon grid, the chosen piece's card, what is worn now) and the
+// Shops (`ShopPanel`). Patch 1.9 Task 33 (menus with Back and Next, the approved paged-menus mockup): two named sections, Inventory and
+// Shops, under the strip; a merchant's stall and "Open Buy back" open the Shops. The grid shows one page of whole rows (`useGridPage`).
+import { useEffect, useId, useLayoutEffect, useRef, useState, type RefObject } from 'react';
 import type { EquipmentSlot, GameCommand } from '@contracts/commands';
 import type { BuyBackEntry, ItemInstance, OwnerState } from '@contracts/reads';
 import { CATALOG_V1 } from '@domain/catalog-v1';
@@ -15,9 +18,16 @@ import { useMinuteNow } from '../schedule/use-minute-now';
 import { ShopPanel } from '../shops/ShopPanel';
 import { afterSaleLine, buyBackSales, plainSaleLine } from '../shops/buy-back';
 import { useOutcomeFocus } from '../shell/focus-lost';
+import { useSectionChange } from '../shell/section-change';
+import { Pager } from '../paging/Pager';
+import { PanelFooter } from '../paging/PanelFooter';
+import { SectionStrip, type Section } from '../paging/SectionPager';
+import { pageOfIndex } from '../paging/paging';
+import { usePagedList } from '../paging/usePagedList';
+import { gridColumns, rowFill, useGridPage } from './grid-page';
+import { usePhoneCard } from './phone-card';
 import { ItemIcon, ItemStats } from './ItemPresentation';
 import { ItemSearch, MatchCount, NoMatch } from './ItemSearch';
-import { revealCard } from './reveal-card';
 import { groupStacks, isStackable, joinsStack, stackSaleItems, type StackTile } from './stacks';
 import { INVENTORY_SORTS, queryItems, type Queryable, type SortKey } from './item-query';
 import {
@@ -76,6 +86,12 @@ function matchesFilter(item: ItemInstance, filter: Filter) {
     || (filter === 'Armor' && slot !== undefined && slot !== 'weapon') || (filter === 'Materials' && item.catalogId === 'salvage');
 }
 
+/** Patch 1.9 Task 33: the menu's two named sections (the approved paged-menus mockup). */
+export const INVENTORY_SECTIONS: readonly Section[] = [{ id: 'inventory', name: 'Inventory' }, { id: 'shops', name: 'Shops' }];
+const SHOPS = 1;
+/** An outcome line held in its place while the next command is on its way (Task 33 fix round 1): nothing moves until the new line comes. */
+type HeldOutcome = { place: string; message: string; error: string; retry: boolean; sold: boolean };
+
 export function InventoryPanel({ owner, gateway, refresh, clock, preview = false, initialMerchant, merchantRequest = 0, rules = RULES_V1 }: {
   owner: OwnerState; gateway: GameGateway; refresh(): Promise<void>; clock: DisplayClock; preview?: boolean;
   /** The active rules (Patch 1.6): what an NPC merchant pays for salvage (10 gold a unit under v1, 4 under v2); gear values stay. */
@@ -92,13 +108,13 @@ export function InventoryPanel({ owner, gateway, refresh, clock, preview = false
   const [quantities, setQuantities] = useState<Record<string, number>>({});
   const [filter, setFilter] = useState<Filter>('All');
   const [query, setQuery] = useState(''), [sort, setSort] = useState<SortKey>('newest');
-  const scroller = useRef<HTMLDivElement>(null), detailsBox = useRef<HTMLElement>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  /** Counts tile taps: each one brings the chosen card into view on a phone (`revealCard`, Task 21). */
-  const [reveal, setReveal] = useState(0);
   const [retry, setRetry] = useState(false);
   /** A sale of several pieces in progress: one `sell-item` per piece, in a row (`sellTile`). */
   const [selling, setSelling] = useState<{ key: string; name: string; done: number; total: number } | null>(null);
+  const [held, setHeld] = useState<HeldOutcome | null>(null);
+  /** Where the outcome shows now (`place` below), for the held line. */
+  const shownPlace = useRef('trade');
   const sellLock = useRef(false), ownerNow = useRef(owner);
   ownerNow.current = owner;
   /**
@@ -123,17 +139,36 @@ export function InventoryPanel({ owner, gateway, refresh, clock, preview = false
   // Remember the displayed fallback so a refresh cannot replace a still-visible selection. With nothing shown (a search or a chip
   // with no match) the choice is kept, so clearing the search brings it back, as the Shops do (Task 21).
   if (selected && selectedId !== selected.key) setSelectedId(selected.key);
-  // After a filter, search or sort change the chosen piece is brought into view inside the grid only (never the page or the menu).
-  const latest = useRef(selected?.key);
-  latest.current = selected?.key;
+  // Patch 1.9 Task 33: the menu's sections (Inventory, Shops); a merchant's click opens on Shops, and so does "Open Buy back".
+  const [section, setSection] = useState(initialMerchant ? SHOPS : 0);
+  const shownMerchant = useRef(merchantRequest);
+  if (shownMerchant.current !== merchantRequest) { shownMerchant.current = merchantRequest; if (initialMerchant && section !== SHOPS) setSection(SHOPS); }
+  const sectionsRef = useRef<HTMLDivElement>(null);
+  useSectionChange(section, sectionsRef, merchantRequest);
+  // The grid shows one page of whole rows (24 or 15 tiles, `useGridPage`). Fix round 1 (the coordinator's ruling): the tiles page, and only the
+  // last page is padded with free slots to whole rows, so no page holds free slots only (the "N / 60 slots" line says the bag). Search, sort
+  // and the chips go back to page 1; the chosen piece stays chosen across pages, and when a change keeps it on another page, that page shows
+  // (as the chosen piece was brought into view in the grid before the pages, never moving the focus).
+  const panelRef = useRef<HTMLDivElement>(null);
+  const gridPage = useGridPage(panelRef);
+  const paged = usePagedList(visibleTiles, { size: gridPage, resetKey: `${filter}|${query}|${sort}` });
+  // The free slots that finish the page's last row: no more than the bag's free slots in All, as before the pages.
+  const fill = rowFill(paged.rows.length, gridColumns(gridPage));
+  const freeCells = filter === 'All' && !query.trim() ? Math.min(fill, Math.max(0, owner.inventoryCapacity - visibleCount)) : fill;
+  // Fix round 1 (review Important 1): on a phone the chosen item's card opens over the grid (`usePhoneCard`).
+  const phoneCard = usePhoneCard(visibleTiles.length > 0);
+  const covered = phoneCard.open;
+  // Another section hides the card's (it opens again from a tile).
+  useEffect(() => { if (section !== 0) phoneCard.close(false); }, [section, phoneCard.close]);
+  const latest = useRef(selected?.key), visibleTilesRef = useRef(visibleTiles), gridPageRef = useRef(gridPage);
+  latest.current = selected?.key; visibleTilesRef.current = visibleTiles; gridPageRef.current = gridPage;
+  const changedView = useRef(false);
   useEffect(() => {
-    const box = scroller.current, tile = box?.querySelector<HTMLElement>(`[data-testid="tile-${latest.current}"]`);
-    if (!box || !tile) return;
-    const top = tile.getBoundingClientRect().top - box.getBoundingClientRect().top, bottom = top + tile.offsetHeight - box.clientHeight;
-    if (top < 0) box.scrollTop += top;
-    else if (bottom > 0) box.scrollTop += bottom;
+    if (!changedView.current) { changedView.current = true; return; }
+    const at = visibleTilesRef.current.findIndex(tile => tile.key === latest.current);
+    if (at >= 0 && pageOfIndex(at, gridPageRef.current) > 1) paged.goToIndex(at);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [filter, query, sort]);
-  useLayoutEffect(() => { if (reveal) revealCard(detailsBox.current); }, [reveal]);
   const discardRequest = confirmation === 'stale' ? null : confirmation;
   const confirmingItem = discardRequest && owner.inventory.find(item => item.id === discardRequest.itemId);
   const canConfirmDiscard = !!(discardRequest && confirmingItem && !isReserved(owner, confirmingItem) && discardRequest.quantity <= confirmingItem.quantity);
@@ -165,6 +200,8 @@ export function InventoryPanel({ owner, gateway, refresh, clock, preview = false
     if (done !== undefined) success.current = done; else if (!again) success.current = '';
     const gear = command.kind === 'queue-build' || command.kind === 'cancel-build';
     if (!quiet) begin();
+    // Fix round 1 (review Important 4): the last outcome keeps its room, unseen, until the new one comes, so nothing moves while this is on its way.
+    if (!quiet && (message || error || retry)) setHeld({ place: shownPlace.current, message, error, retry, sold });
     attempt.current = command; sending.current = true; setBusy(true); if (!quiet) { setError(''); setMessage(''); setRetry(false); setSold(false); }
     if (place) setWhere(place); else if (!gear) setWhere('trade');
     try {
@@ -207,7 +244,7 @@ export function InventoryPanel({ owner, gateway, refresh, clock, preview = false
       // A sale in a run whose answer was lost may or may not have happened: read the bag again before the run reports.
       if (quiet) try { await refresh(); } catch { /* the report says the result is unknown */ }
       return { ok: false, code: 'unavailable' };
-    } finally { sending.current = false; if (!quiet) end(); if (mounted.current) setBusy(false); }
+    } finally { sending.current = false; if (!quiet) end(); if (mounted.current) { setBusy(false); if (!quiet) setHeld(null); } }
   }
   // The gear view: what is worn now, what the queued build changes, and the commands that queue, undo and cancel a swap.
   const worn = wornNow(owner), next = nextEquipment(owner), changed = changedSlots(owner);
@@ -233,8 +270,9 @@ export function InventoryPanel({ owner, gateway, refresh, clock, preview = false
   const busyProps = locked ? { 'aria-disabled': true as const } : {};
   /** Keep a gear outcome reachable if the item is no longer shown in the detail card. */
   const place = where === 'trade' || where === 'sale' || where === 'buyback' || selected?.items.some(item => item.id === where) ? where : 'gear';
-  /** "Open Buy back" after a sale: the Shops below open on Buy back, with the focus on its chip. */
-  const openBuyBack = () => { setBuyBackRequest(n => n + 1); };
+  shownPlace.current = place;
+  /** "Open Buy back" after a sale: the Shops section opens on Buy back, with the focus on its chip. */
+  const openBuyBack = () => { setSection(SHOPS); setBuyBackRequest(n => n + 1); };
   /** Final fix wave: an owner read without the Buy back list (an older server) offers no buy back, so a sale offers no "Open Buy back". */
   const offersBuyBack = buyBackSales(owner) !== undefined;
   const outcomes = <>
@@ -245,6 +283,13 @@ export function InventoryPanel({ owner, gateway, refresh, clock, preview = false
     {error && <p ref={outcome} role="alert" tabIndex={-1} {...target}>{error}</p>}
     {retry && <button disabled={busy} onClick={() => { if (attempt.current) void send(attempt.current, undefined, where); }}>Retry request</button>}
   </>;
+  /** The held outcome at `at`: the same lines, unseen and out of reach, keeping their room until the new outcome comes. */
+  const heldAt = (at: string) => held && held.place === at && <div className={styles.held} aria-hidden="true" inert>
+    {held.message && (held.sold && offersBuyBack ? <div className={styles.soldNote}><p>{held.message}</p><button type="button" className={styles.linkButton}>Open Buy back</button></div>
+      : <p>{held.message}</p>)}
+    {held.error && <p>{held.error}</p>}
+    {held.retry && <button type="button">Retry request</button>}
+  </div>;
   /**
    * Buy back (patch 1.9): one `buy-back` for the chosen sale, through `send` (its operation id, busy state, refresh and Retry); its outcome
    * shows above the sale's card ("Bought back. Sword is in your bag again."). The preview takes no command and says so there.
@@ -363,27 +408,38 @@ export function InventoryPanel({ owner, gateway, refresh, clock, preview = false
         </div>}
       </div>}
       {place !== 'sale' && tile.items.some(piece => piece.id === place) && outcomes}
+      {held && held.place !== 'sale' && tile.items.some(piece => piece.id === held.place) && heldAt(held.place)}
     </article>;
   }
-  const emptyCells = filter === 'All' && !query.trim() ? owner.inventoryCapacity - visibleCount : 6 - visibleTiles.length;
-  return <div className={`inventory-panel ${styles.panel}`}>
-    <div className="section-title"><h2>Inventory</h2><span>{owner.inventory.length} / {owner.inventoryCapacity} slots</span></div>
-    <div className={styles.columns}>
+  // The strip sits outside the panel's own box, so the panel's large button style (`.inventory-panel button`) leaves its circles alone.
+  return <><SectionStrip sections={INVENTORY_SECTIONS} index={section} onGo={setSection} />
+  <div ref={panelRef} className={`inventory-panel ${styles.panel}`}>
+    <div ref={sectionsRef} className={styles.sections}>
+    <div className={styles.section} data-section="inventory" hidden={section !== 0}>
+    {/* The strip names the section; the heading stays for the outline and screen readers. */}
+    <div className="section-title"><h2 className={styles.visuallyHidden}>Inventory</h2><span>{owner.inventory.length} / {owner.inventoryCapacity} slots</span></div>
+    {/* On a phone the chosen tile's card lies over the grid once a tile is chosen; with no tile to choose, the card's line shows below. */}
+    <div ref={phoneCard.hostRef} className={styles.columns} data-card={phoneCard.phone && visibleTiles.length > 0 ? (phoneCard.open ? 'open' : 'closed') : undefined}>
       <div>
         <ItemSearch query={query} setQuery={setQuery} sorts={INVENTORY_SORTS} sort={sort} setSort={setSort} label="Search your items" sortLabel="Sort your items" />
         <div className={styles.filters} role="group" aria-label="Inventory filters">
           {filters.map(option => <button key={option} type="button" aria-pressed={option === filter} onClick={() => setFilter(option)}>{option}</button>)}
         </div>
-        <div ref={scroller} className={styles.gridScroll}>
-          {visibleTiles.length === 0 && query.trim() ? <NoMatch query={query} clear={() => setQuery('')} filter={hiddenBy} /> : <div className={styles.grid} data-testid="inventory-grid">
-            {visibleTiles.map(tile => {
+        <div inert={covered}>
+        <div ref={phoneCard.anchorRef} className={`${styles.gridScroll} ${styles.paged}`}>
+          {visibleTiles.length === 0 && query.trim() ? <NoMatch query={query} clear={() => setQuery('')} filter={hiddenBy} />
+            /* The page's container (`listRef`): a turn gives the focus to its first tile. `data-arrow-keys` (review Minor 7): the grid has no arrow
+               keys of its own (it never had), and ← → on a tile must not move the section from under the player either, as in the shop grid. */
+            : <div ref={paged.listRef as RefObject<HTMLDivElement | null>} data-page-list=""><div className={`${styles.grid} ${styles.paged}`} data-testid="inventory-grid" role="group" aria-label="Your items" data-arrow-keys="">
+            {paged.rows.map(tile => {
               const item = tile.items[0], count = isMaterial(item) ? item.quantity : tile.items.length;
               const badge = wearBadge(owner, item), listed = item.reservation?.kind === 'listing';
               const status = badge ? wearBadgeText(badge, effective) : listed ? 'Listed for sale' : '';
               const word = badge ? (badge === 'wears-from' ? 'Next' : 'Worn') : listed ? 'Listed' : '';
               return <button key={tile.key} type="button" className={styles.tile} data-testid={`tile-${tile.key}`} data-rarity={item.rarity} data-stack={tile.items.length > 1 ? tile.items.length : undefined}
+                data-page-row="" tabIndex={0}
                 aria-label={[itemLabel(item), itemBinding(item), count > 1 && `${count} owned`, status].filter(Boolean).join(', ')}
-                aria-description={`Weight ${item.stats.weight}`} aria-controls={detailsId} aria-pressed={tile.key === selected?.key} onClick={() => { setSelectedId(tile.key); setReveal(n => n + 1); }}>
+                aria-description={`Weight ${item.stats.weight}`} aria-controls={detailsId} aria-pressed={tile.key === selected?.key} onClick={() => { setSelectedId(tile.key); phoneCard.show(); }}>
                 <ItemIcon catalogId={item.catalogId} />
                 <span className={styles.level} aria-hidden="true">L{item.tier}</span>
                 {word && <span className={styles.mark} data-mark={word.toLowerCase()} aria-hidden="true">{word}</span>}
@@ -391,17 +447,25 @@ export function InventoryPanel({ owner, gateway, refresh, clock, preview = false
                 {count > 1 && <span className={styles.count} aria-hidden="true">×{count}</span>}
               </button>;
             })}
-            {Array.from({ length: Math.max(0, emptyCells) }, (_, index) => <span key={index} className={styles.emptyCell} aria-hidden="true" />)}
-          </div>}
+            {Array.from({ length: freeCells }, (_, index) => <span key={`free-${index}`} className={styles.emptyCell} aria-hidden="true" />)}
+          </div></div>}
         </div>
         <MatchCount count={visibleCount} query={query} filter={hiddenBy} idle={visibleTiles.length > 0 ? `${visibleTiles.length} tile${visibleTiles.length === 1 ? '' : 's'} · ${visibleCount} item${visibleCount === 1 ? '' : 's'} · each item still uses a slot` : ''} />
+        </div>
       </div>
-      <section ref={detailsBox} id={detailsId} aria-label="Item details" className={styles.details}>
+      <section ref={phoneCard.sheetRef} id={detailsId} aria-label="Item details" className={styles.details}
+        onKeyDown={phoneCard.onKeyDown}>
+        {phoneCard.phone && visibleTiles.length > 0 && <button type="button" className={styles.closeCard} aria-label="Close item card" onClick={() => phoneCard.close()}>×</button>}
         {confirmation === 'stale' && <p ref={staleDiscardNotice} role="alert" tabIndex={-1}>Your inventory changed. Review the updated inventory before discarding.</p>}
+        {/* A discard's or a material sale's line shows in the card while it lies over the grid (a phone), else at the section's end. */}
+        {place === 'trade' && phoneCard.open && outcomes}
+        {held?.place === 'trade' && phoneCard.open && heldAt('trade')}
         {place === 'sale' && outcomes}
+        {heldAt('sale')}
         {selected ? itemCard(selected) : <p className="muted">{query.trim() ? 'Nothing to show. Clear the search to see every item.' : owner.inventory.length ? `No ${filter.toLowerCase()} in your inventory.` : 'Your inventory is empty.'}</p>}
       </section>
     </div>
+    <div inert={covered}>
     <p>Available gold: {owner.wallets.money - owner.reservedFees.money}</p><p>Available renown: {owner.wallets.renown - owner.reservedFees.renown}</p>
     <p className="muted">Equipped and reserved items count toward capacity. Discarding gives no currency and never lowers historical gear strength.</p>
     <section className="gear-now" aria-labelledby={gearHeading}>
@@ -421,10 +485,21 @@ export function InventoryPanel({ owner, gateway, refresh, clock, preview = false
         <button type="button" disabled={preview} {...busyProps} aria-describedby={preview ? previewNote : undefined} onClick={cancelGear}>Cancel changes</button>
       </div>}
       {place === 'gear' && outcomes}
+      {heldAt('gear')}
     </section>
-    {place === 'trade' && outcomes}
+    {place === 'trade' && section !== SHOPS && !phoneCard.open && outcomes}
+    {section !== SHOPS && !phoneCard.open && heldAt('trade')}
+    </div>
+    {section === 0 && !(visibleTiles.length === 0 && query.trim()) && <PanelFooter><Pager list={paged} /></PanelFooter>}
+    </div>
+    <div className={styles.section} data-section="shops" hidden={section !== SHOPS}>
+    {/* A trade's outcome shows where the player is: a purchase's above the shops, as before the sections. */}
+    {place === 'trade' && section === SHOPS && outcomes}
+    {section === SHOPS && heldAt('trade')}
     <ShopPanel key={merchantRequest} initialMerchant={initialMerchant} owner={owner} busy={busy || selling !== null} preview={preview} buy={(catalogId, quantity) => void send({ kind: 'buy-shop', catalogId, catalogVersion: CATALOG_V1.version, quantity })}
-      clock={clock} buyBack={buyBack} buyBackOutcome={place === 'buyback' ? outcomes : null} buyBackRequest={buyBackRequest} />
+      clock={clock} buyBack={buyBack} buyBackOutcome={place === 'buyback' ? outcomes : heldAt('buyback') || null} buyBackRequest={buyBackRequest} gridPage={gridPage} active={section === SHOPS} />
+    </div>
+    </div>
     <dialog ref={dialog} aria-labelledby="discard-heading" onCancel={() => setConfirmation(null)} onClose={() => {
       if (!dialog.current?.open) setConfirmation(current => current === 'stale' ? current : null);
     }}>
@@ -437,5 +512,5 @@ export function InventoryPanel({ owner, gateway, refresh, clock, preview = false
         void send({ kind: 'discard-item', itemId: discardRequest.itemId, quantity: discardRequest.quantity });
       }}>Confirm discard</button>
     </dialog>
-  </div>;
+  </div></>;
 }

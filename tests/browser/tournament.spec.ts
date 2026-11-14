@@ -157,6 +157,16 @@ test.describe('tournament registration and brackets', () => {
   test.skip(production, 'The tournament samples need the fixture preview, which production exports never include.');
   test.use({ timezoneId: 'UTC' });
 
+  // Task 31 fix round 1 (M-C): the 8-placement settled bracket of the unit test: page 1 holds six, page 2 the two 5th places.
+  test('pages the settled bracket placements, page 2 holding the rest', async ({ page }) => {
+    await tournamentFlow.openAtMinute(page, 'completed', 85);
+    const table = card(page).getByRole('table', { name: 'Placements' });
+    const bar = table.locator('xpath=ancestor::*[@data-paging-scope][1]').getByRole('navigation', { name: 'Pages' });
+    await expect(table.locator('tbody tr')).toHaveText([/1\s*Varro/, /2\s*Severus/, /3\s*Cassia/, /3\s*Decimus/, /5\s*Aster/, /5\s*Aurelia/]);
+    await bar.getByRole('button', { name: 'Next page', exact: true }).click();
+    await expect(table.locator('tbody tr')).toHaveText([/5\s*Bellator/, /5\s*Corvina/]);
+  });
+
   test('keeps every future result hidden before round 1 (plan Step 1)', { tag: '@render' }, async ({ page, baseURL }, testInfo) => {
     const remote = forbidRemote(page, baseURL);
     await tournamentFlow.openBeforeRound(page, 1);

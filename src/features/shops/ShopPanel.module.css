@@ -35,7 +35,7 @@
 
 .bar > div { margin-bottom: 0; }
 
-.panel .scroll { height: 360px; }
+.panel .scroll { min-height: 254px; }
 
 .coin {
   display: inline-block;
@@ -126,7 +126,7 @@
 .panel .buy:enabled { color: #101625; background: var(--gold); border: 1px solid #ffdf97; border-radius: 6px; font-weight: 700; }
 
 @media (hover: none), (max-width: 480px) {
-  .panel .scroll { height: 194px; }
+  .panel .scroll { min-height: 194px; }
 }
 
 /* ---- Buy back (patch 1.9, the approved mockup): a chip with a red count after All / Weapons / Armor, the same grid and card, the
@@ -160,11 +160,8 @@
 .emptyCard { padding: 12px; border: 1px solid #5f5750; border-radius: 10px; background: linear-gradient(145deg, #242733, #171b24 75%); color: #acb7cc; font-size: .85rem; }
 .emptyCard p { margin: 0; }
 
-/* Its grid is compact, as the mockup's (at most 10 sales: two rows and some room), not the shop's 360 px; on touch the shop's 194 px. */
-.panel .scroll.backScroll { height: 254px; }
-@media (hover: none), (max-width: 480px) {
-  .panel .scroll.backScroll { height: 194px; }
-}
+/* Patch 1.9 Task 33: the shop's grid and Buy back show one page each (whole rows; Buy back 5 a page), so neither box scrolls now; both
+   keep the inventory grid's floor (254 px, 194 px on touch). */
 
 /* The outcome of a buy back, above the card: green when it is done, the inventory's red line when it was refused. */
 .outcome p[role='status'] { margin: 0 0 8px; padding: 8px 10px; border: 1px solid #2f6b4a; border-radius: 8px; background: #132a1f; color: #d8f2e2; font-size: .85rem; }

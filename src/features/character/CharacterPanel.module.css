@@ -696,14 +696,21 @@ p.partTitle {
  */
 @media (hover: none), (max-width: 480px) {
   .summary[data-covered],
-  .planner[data-covered] {
+  .planner[data-covered],
+  .stale[data-covered] {
     visibility: hidden;
   }
 }
 
 @media (hover: none), (max-width: 480px) {
+  /* Task 33 fix round 1: the Attributes and stats section (Practice fight included) fits the 360 x 780 sheet above its bar. */
   .facts {
     grid-template-columns: 1fr;
+    margin-top: 0.25rem;
+  }
+
+  .factRow {
+    min-height: 26px;
   }
 
   .hint {
@@ -788,4 +795,9 @@ p.partTitle {
 
 .roster [data-page-list] > p.partTitle:first-child {
   margin-top: 0;
+}
+
+/* Patch 1.9 Task 33: My gladiator's sections, one shown at a time; the others stay mounted (a draft build or an open picker is kept). */
+.section[hidden] {
+  display: none;
 }

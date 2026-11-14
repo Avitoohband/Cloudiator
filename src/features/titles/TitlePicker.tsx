@@ -97,20 +97,19 @@ export function TitlePicker({ owner, gateway, refresh, onWorn, onClose, preview 
   const counts = pickerCounts(owner);
   // Patch 1.9 Task 31: the choices are one paged sequence of 8 (No title first, then each family's rows); a page shows each family's name over
   // its rows on the page. Earned and All go back to page 1. The choice itself is kept while its row is on another page.
-  // In All the "4 more arrive later" line is the sequence's last entry, so a page of choices and that line never overflow together.
-  const sequence = useMemo<{ family: string; row: PickerRow | null | 'later' }[]>(() => [{ family: 'Wear nothing', row: null },
-    ...groups.flatMap(group => group.rows.map(row => ({ family: group.family, row }))),
-    ...(view === 'all' ? [{ family: '', row: 'later' as const }] : [])], [groups, view]);
+  // In All the "4 more arrive later" line follows the rows on the last page (it never takes a page of its own).
+  const sequence = useMemo<{ family: string; row: PickerRow | null }[]>(() => [{ family: 'Wear nothing', row: null },
+    ...groups.flatMap(group => group.rows.map(row => ({ family: group.family, row })))], [groups]);
   const paged = usePagedList(sequence, { list: 'titles', resetKey: view });
   // The picker opens on the page that holds the worn title (fix round 1), once.
   const landed = useRef(false);
   useEffect(() => {
     if (landed.current) return;
     landed.current = true;
-    const at = sequence.findIndex(entry => entry.row !== 'later' && (entry.row?.id ?? null) === worn);
+    const at = sequence.findIndex(entry => (entry.row?.id ?? null) === worn);
     if (at > 0) paged.goToIndex(at);
   });
-  const onPage = paged.rows.reduce<{ family: string; rows: (PickerRow | null | 'later')[] }[]>((out, entry) => {
+  const onPage = paged.rows.reduce<{ family: string; rows: (PickerRow | null)[] }[]>((out, entry) => {
     const last = out[out.length - 1];
     if (last && last.family === entry.family) last.rows.push(entry.row); else out.push({ family: entry.family, rows: [entry.row] });
     return out;
@@ -216,14 +215,15 @@ export function TitlePicker({ owner, gateway, refresh, onWorn, onClose, preview 
       </div>
       <PagingScope className={styles.paged} bodyClassName={styles.body}>
         <div data-testid="title-picker-body" ref={paged.listRef as RefObject<HTMLDivElement | null>}>
-          {onPage.map(family => family.family === '' ? <div key="later" data-page-row="" tabIndex={-1}><p className={styles.later}>{LATER_TITLES}</p></div> : <fieldset key={family.family} className={styles.family}>
+          {onPage.map(family => <fieldset key={family.family} className={styles.family}>
             <legend className={styles.familyName}>{family.family}</legend>
- {family.rows.map(row => (row === 'later' ? null : row === null
+            {family.rows.map(row => (row === null
               ? <div key="none" data-page-row="" tabIndex={-1}><Choice group={group} id={null} label={NO_TITLE} line={NO_TITLE_LINE} earned={false} checked={choice === null} onChoose={choose} /></div>
               : <div key={row.id} data-page-row="" tabIndex={-1}>{row.earned
                 ? <Choice group={group} id={row.id} label={row.name} line={row.rule} earned checked={choice === row.id} onChoose={choose} />
                 : <Locked row={row} />}</div>))}
           </fieldset>)}
+          {view === 'all' && paged.page === (paged.pages ?? 1) && <p className={styles.later}>{LATER_TITLES}</p>}
         </div>
         <PanelFooter><Pager list={paged} show /></PanelFooter>
       </PagingScope>

@@ -10,6 +10,8 @@ import { cardFighter, comparisonRows, dummyFighter, presetSetup } from '../../sr
 import { noHorizontalScroll } from './a11y-helpers';
 import { SLOT_MS, SUPABASE_URL, emptyWorld, isPresence, routeLiveReads, seedSession } from './live-routes';
 import { creationDialog, expectOwnerShown, menuDialog, openMenu, quietArrivals, touchLayout, pageTo } from './shell-helpers';
+// Patch 1.9 Task 33: ⚔ Practice fight is in My gladiator's Attributes and stats section, under Stats.
+import { openSection } from './section-helpers';
 
 // Patch 1.9 Task 18 (additions spec section 3, the approved practice mockups): a gold ⚔ Practice fight button under Stats in My gladiator
 // opens the dummy dialog; ⚔ Fight runs a local fight under the Arena's rules and plays it in the replay viewer over the camp, one history
@@ -51,7 +53,7 @@ function watchGateway(page: Page) {
 /** The fixture camp with My gladiator open, once the owner has loaded (the practice button is there). */
 async function openGladiator(page: Page): Promise<Locator> {
   await page.goto('/game/?mode=fixture');
-  const menu = await openMenu(page, 'My gladiator');
+  const menu = await openSection(await openMenu(page, 'My gladiator'), 'Attributes and stats');
   await expect(practiceButton(page)).toBeVisible({ timeout: 45_000 });
   return menu;
 }
@@ -597,7 +599,7 @@ test.describe('the arrival banner under a practice fight (fixture)', () => {
     await page.goto('/game/?mode=fixture');
     const banner = page.locator('[data-arrival-slot]').getByRole('button', { name: /^Find / });
     await expect(banner).toBeVisible({ timeout: 45_000 });
-    await openMenu(page, 'My gladiator');
+    await openSection(await openMenu(page, 'My gladiator'), 'Attributes and stats');
     await expect(practiceButton(page)).toBeVisible({ timeout: 45_000 });
     const dialog = await openPractice(page);
     await fightButton(dialog).click();
@@ -659,7 +661,7 @@ test.describe('practice in the live camp', () => {
     await expectOwnerShown(page, 'Aster');
     // The watcher sees what the gateway posts: the page's own presence arrives on the same path.
     await expect.poll(() => presences.length, { timeout: 45_000 }).toBeGreaterThan(0);
-    await openMenu(page, 'My gladiator');
+    await openSection(await openMenu(page, 'My gladiator'), 'Attributes and stats');
     const dialog = await openPractice(page);
     await fightToEnd(page, dialog);
     const card = resultScene(page).locator('[data-end-card]');
@@ -704,7 +706,7 @@ test.describe('practice in the live camp', () => {
     await page.evaluate(ms => window.__cloudiatorShell!.clock.freeze(ms), at);
     const away = page.getByTestId('away-button');
     await expect(away).toBeVisible({ timeout: 45_000 });
-    await openMenu(page, 'My gladiator');
+    await openSection(await openMenu(page, 'My gladiator'), 'Attributes and stats');
     const dialog = await openPractice(page);
     await fightButton(dialog).click();
     await expect(resultScene(page)).toBeVisible();

@@ -122,6 +122,9 @@ test.describe('Compare stats with mine (fixture)', () => {
     expect(await markOf(statsTable(lucilla), 'Armor')).toMatchObject({ text: `▼ ${MINUS}9`, tone: 'worse' });
     expect(await markOf(statsTable(lucilla), 'Critical')).toMatchObject({ text: 'same', tone: 'same' });
     expect(await markOf(statsTable(lucilla), 'Critical damage')).toMatchObject({ text: 'same', tone: 'same' });
+    // Task 33 fix 4 (checked, not a fault): an equal row is read once. The shown "same" is hidden from a screen reader, which reads the
+    // sentence after the value: the row's accessible text is "+50% , same", the word once.
+    await expect(statsTable(lucilla).locator('tbody tr').filter({ hasText: 'Critical damage' })).toMatchAriaSnapshot('- row "Critical damage +50% , same +50%"');
     // Attack speed: lower is better, so her slower 1.14 s makes your 0.94 s the better one.
     expect(await markOf(statsTable(lucilla), 'Attack speed')).toMatchObject({ text: `▲ ${MINUS}0.20 s`, tone: 'better' });
     // Colour is never the only signal: the sentence is for a screen reader.

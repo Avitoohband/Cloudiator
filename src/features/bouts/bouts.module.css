@@ -23,7 +23,7 @@
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
-  margin: 0 0 6px;
+  margin: 0 0 4px;
 }
 
 .chip {
@@ -45,7 +45,7 @@
 }
 
 .keep {
-  margin: 0 0 4px;
+  margin: 0 0 2px;
   color: var(--ink-dim, var(--muted));
   font-size: 0.74rem;
 }
@@ -59,7 +59,7 @@
 }
 
 .day {
-  margin: 10px 0 2px;
+  margin: 4px 0 0;
 }
 
 .list {
@@ -73,7 +73,7 @@
   align-items: center;
   gap: 10px;
   min-width: 0;
-  padding: 7px 0;
+  padding: 2px 0;
   border-bottom: 1px solid rgba(255, 255, 255, 0.06);
 }
 
@@ -113,6 +113,7 @@
 .name {
   display: block;
   overflow: hidden;
+  line-height: 1.25;
   font-size: 0.86rem;
   font-weight: 650;
   text-overflow: ellipsis;
@@ -149,6 +150,7 @@
   display: block;
   color: var(--ink-dim, var(--muted));
   font-size: 0.74rem;
+  line-height: 1.25;
 }
 
 .part {
@@ -170,7 +172,7 @@
 .watch,
 .result {
   flex: none;
-  min-height: 34px;
+  min-height: 30px;
   padding: 4px 12px;
   border-radius: 8px;
   font-size: 0.78rem;
@@ -256,8 +258,7 @@
   font-size: 0.8rem;
 }
 
-.failed p,
-.moreFailed {
+.failed p {
   margin: 0;
   font-size: 0.8rem;
 }
@@ -286,6 +287,23 @@
   .result,
   .more {
     min-height: 44px;
+  }
+
+  /* Eight rows fit the tall sheet (Task 32 fix round 1, I3). */
+  .row {
+    padding: 0;
+  }
+
+  .chips {
+    margin-bottom: 0;
+  }
+
+  .keep {
+    margin: 0;
+  }
+
+  .day {
+    margin-top: 2px;
   }
 
   .chip {

@@ -9,6 +9,8 @@ import type { OwnerState } from '../../supabase/functions/_shared/contracts/read
 import { SLOT_MS, emptyWorld, isPresence, routeLiveReads } from './live-routes';
 import { reviewShot, reviewShot360 } from './review-shots';
 import { openMenu } from './shell-helpers';
+// Patch 1.9 Task 33: the build planner is in My gladiator's Worn equipment section, under the slots.
+import { openSection } from './section-helpers';
 import { expectTimeOnOneLine, slotTime, storeClock } from './slot-time';
 import { contrastIssues, expectPointsFit, focusDrops, focusedElement, noHorizontalScroll, watchFocus } from './a11y-helpers';
 
@@ -100,7 +102,7 @@ const clockNow = (page: Page) => page.evaluate(() => window.__cloudiatorShell!.c
 test('queues, confirms and cancels pending builds without optimistic current replacement', async ({ page, context }, testInfo) => {
   const flow = await planningFlow(context);
   await page.goto('/game/');
-  await openMenu(page, 'My gladiator');
+  await openSection(await openMenu(page, 'My gladiator'), 'Worn equipment');
   await expect(page.getByRole('heading', { name: 'Current build', exact: true })).toBeVisible();
   // Task 7b: the currency is said as gold, and the data's 300 `money` is that amount.
   await expect(page.getByText('Available gold: 300. Reserved fees remain in your wallet until activation.')).toBeVisible();
@@ -129,7 +131,7 @@ test('queues, confirms and cancels pending builds without optimistic current rep
 test('reuses immutable operation after unknown outcome and reloads a version conflict', async ({ page, context }) => {
   const flow = await planningFlow(context);
   await page.goto('/game/');
-  await openMenu(page, 'My gladiator');
+  await openSection(await openMenu(page, 'My gladiator'), 'Worn equipment');
   await page.getByLabel('Stance', { exact: true }).selectOption('offensive');
   flow.loseNext();
   await page.getByRole('button', { name: 'Queue build' }).click();
@@ -158,7 +160,7 @@ const spentNote = "Adding points is free. Points can't be taken back once this b
 test('shows the points left, caps a typed number and never goes below the saved build', async ({ page, context }, testInfo) => {
   const flow = await planningFlow(context, levelled);
   await page.goto('/game/');
-  const mine = await openMenu(page, 'My gladiator');
+  const mine = await openSection(await openMenu(page, 'My gladiator'), 'Worn equipment');
   const build = mine.locator('.planning-form');
   const strength = points(page, 'strength'), agility = points(page, 'agility');
   // The class is shown, not chosen, and the old fee lines are gone: every build change is free.
@@ -233,7 +235,7 @@ const press = (testInfo: { project: { name: string } }, field: ReturnType<typeof
 test('types over a build point after a tap or click, waits for Tab out of range, and steps by 1 and 5', async ({ page, context }, testInfo) => {
   const flow = await planningFlow(context, levelled);
   await page.goto('/game/');
-  const mine = await openMenu(page, 'My gladiator');
+  const mine = await openSection(await openMenu(page, 'My gladiator'), 'Worn equipment');
   const build = mine.locator('.planning-form');
   const strength = points(page, 'strength');
   const counter = build.getByRole('status').filter({ hasText: /of 12 left|All 12 spent/ });
@@ -321,7 +323,7 @@ test('types over a build point after a tap or click, waits for Tab out of range,
 test('skips the Queue build press that corrected a waiting number, so its line is read first', async ({ page, context }, testInfo) => {
   const flow = await planningFlow(context, levelled);
   await page.goto('/game/');
-  const mine = await openMenu(page, 'My gladiator');
+  const mine = await openSection(await openMenu(page, 'My gladiator'), 'Worn equipment');
   const build = mine.locator('.planning-form');
   const strength = points(page, 'strength');
   const queue = page.getByRole('button', { name: 'Queue build', exact: true });
@@ -344,7 +346,7 @@ test('skips the Queue build press that corrected a waiting number, so its line i
 test('skips the +1 press that corrected a waiting number; the next press acts', async ({ page, context }, testInfo) => {
   const flow = await planningFlow(context, levelled);
   await page.goto('/game/');
-  const mine = await openMenu(page, 'My gladiator');
+  const mine = await openSection(await openMenu(page, 'My gladiator'), 'Worn equipment');
   const build = mine.locator('.planning-form');
   const strength = points(page, 'strength');
   const add = build.getByRole('button', { name: 'Add a point to Strength', exact: true });
@@ -379,7 +381,7 @@ test('Enter with an applied number still queues the build', async ({ page, conte
   // The other half of the Enter rule: Enter takes only a waiting number; an applied one sends the form as before.
   const flow = await planningFlow(context, levelled);
   await page.goto('/game/');
-  await openMenu(page, 'My gladiator');
+  await openSection(await openMenu(page, 'My gladiator'), 'Worn equipment');
   const strength = points(page, 'strength');
   await press(testInfo, strength);
   await page.keyboard.type('5');
@@ -396,7 +398,7 @@ test('a press dragged out of a points field leaves no stale selection for the ne
   test.skip(testInfo.project.name !== 'desktop', 'A mouse drag.');
   await planningFlow(context, levelled);
   await page.goto('/game/');
-  const mine = await openMenu(page, 'My gladiator');
+  const mine = await openSection(await openMenu(page, 'My gladiator'), 'Worn equipment');
   const strength = points(page, 'strength');
   await strength.scrollIntoViewIfNeeded();
   const box = (await strength.boundingBox())!;
@@ -421,7 +423,7 @@ test('commits a waiting number against the floor of a pending build that took ef
       effectiveSlotIndex: Math.floor(Date.now() / SLOT_MS) + 1, reservedMoney: 0, reservedItemIds: [], operationId: randomUUID() };
   });
   await page.goto('/game/');
-  const mine = await openMenu(page, 'My gladiator');
+  const mine = await openSection(await openMenu(page, 'My gladiator'), 'Worn equipment');
   const build = mine.locator('.planning-form');
   const strength = points(page, 'strength');
   await expect(strength).toHaveValue('6');
@@ -439,7 +441,7 @@ test('commits a waiting number against the floor of a pending build that took ef
 test('fits the build points on a 360 x 740 phone: no sideways scroll, 44 px controls, five whole rows', async ({ page, context }, testInfo) => {
   await planningFlow(context, levelled);
   await page.goto('/game/');
-  const mine = await openMenu(page, 'My gladiator');
+  const mine = await openSection(await openMenu(page, 'My gladiator'), 'Worn equipment');
   const group = mine.locator('.planning-form').getByRole('group', { name: /^Attribute points/ });
   await group.scrollIntoViewIfNeeded();
   await reviewShot(page, testInfo, 'points-build-wide');
@@ -462,7 +464,7 @@ test('shows Respec as a paid option to come: gray, aria-disabled, described, and
   // a respec button in gray or something, like it's disabled, so people will know that it is a feature that should come in the future."
   const flow = await planningFlow(context, levelled);
   await page.goto('/game/');
-  const mine = await openMenu(page, 'My gladiator');
+  const mine = await openSection(await openMenu(page, 'My gladiator'), 'Worn equipment');
   const build = mine.locator('.planning-form');
   const group = build.getByRole('group', { name: /^Attribute points/ });
   const respec = group.getByRole('button', { name: 'Respec', exact: true });
@@ -498,7 +500,7 @@ test('counts the pending build against the points earned, and can still cancel i
       effectiveSlotIndex: Math.floor(Date.now() / SLOT_MS) + 1, reservedMoney: 0, reservedItemIds: [], operationId: randomUUID() };
   });
   await page.goto('/game/');
-  const mine = await openMenu(page, 'My gladiator');
+  const mine = await openSection(await openMenu(page, 'My gladiator'), 'Worn equipment');
   const build = mine.locator('.planning-form');
   // The form opens on the pending build (11 spent, 1 left), but its floor is the current build (strength 4).
   await expect(build.getByRole('heading', { name: 'Revise pending build', exact: true })).toBeVisible();
@@ -525,7 +527,7 @@ test('keeps the current class when a build queued before the release holds anoth
     state.reservedFees.money = 100;
   });
   await page.goto('/game/');
-  const mine = await openMenu(page, 'My gladiator');
+  const mine = await openSection(await openMenu(page, 'My gladiator'), 'Worn equipment');
   await expect(mine.getByTestId('pending-build')).toContainText('berserker');
   await expect(mine.locator('.planning-form').getByText('Class: Guardian', { exact: true })).toBeVisible();
   await expect(mine.getByLabel('Class', { exact: true })).toHaveCount(0);
@@ -538,7 +540,7 @@ test('keeps the current class when a build queued before the release holds anoth
 test('clears a points line when the build is reloaded after a conflict', async ({ page, context }) => {
   const flow = await planningFlow(context, levelled);
   await page.goto('/game/');
-  const mine = await openMenu(page, 'My gladiator');
+  const mine = await openSection(await openMenu(page, 'My gladiator'), 'Worn equipment');
   const build = mine.locator('.planning-form');
   await points(page, 'strength').fill('99');
   await page.keyboard.press('Tab');
@@ -572,7 +574,7 @@ test('raises an unsent lower edit to the new floor when a pending build takes ef
       effectiveSlotIndex: Math.floor(Date.now() / SLOT_MS) + 1, reservedMoney: 0, reservedItemIds: [], operationId: randomUUID() };
   });
   await page.goto('/game/');
-  const mine = await openMenu(page, 'My gladiator');
+  const mine = await openSection(await openMenu(page, 'My gladiator'), 'Worn equipment');
   const build = mine.locator('.planning-form');
   await expect(points(page, 'strength')).toHaveValue('6');
   // An unsent edit back down to the current 4 (allowed while the pending build is not the current one).
@@ -603,7 +605,7 @@ test('takes the new class when a pending class change from before the release ta
     state.reservedFees.money = 100;
   });
   await page.goto('/game/');
-  const mine = await openMenu(page, 'My gladiator');
+  const mine = await openSection(await openMenu(page, 'My gladiator'), 'Worn equipment');
   const build = mine.locator('.planning-form');
   // The form shows the current class (Guardian), never the pending one.
   await expect(build.getByText('Class: Guardian', { exact: true })).toBeVisible();
@@ -631,7 +633,7 @@ const splitSentence = '+1 Strength, +1 Vitality, +1 Endurance: the Guardian spli
 test('spends the points left the class way with Suggested, and Undo puts them back', async ({ page, context }, testInfo) => {
   const flow = await planningFlow(context, guardianWithThreeLeft);
   await page.goto('/game/');
-  const mine = await openMenu(page, 'My gladiator');
+  const mine = await openSection(await openMenu(page, 'My gladiator'), 'Worn equipment');
   const build = mine.locator('.planning-form');
   // The class's bonuses sit beside "Class: Guardian" in Plan a build.
   const classLine = build.getByText('Class: Guardian', { exact: true });
@@ -702,7 +704,8 @@ test('spends the points left the class way with Suggested, and Undo puts them ba
   expect(await fieldValues(page)).toEqual(['3', '0', '6', '3', '1']);
   // My gladiator: the class card (bars on a desktop) and, at 390 × 844, the one-line split and no bars.
   await page.setViewportSize({ width: 390, height: 844 });
-  const phone = await openMenu(page, 'My gladiator');
+  // Task 33: the class card is on the Overview (the menu reopens on the last section seen, Worn equipment).
+  const phone = await openSection(await openMenu(page, 'My gladiator'), 'Overview');
   const phoneCard = phone.getByTestId('class-card');
   await phoneCard.scrollIntoViewIfNeeded();
   await expect(phoneCard.getByText('GUARDIAN BONUSES', { exact: true })).toBeVisible();
@@ -750,7 +753,9 @@ test('shows the class card between the class line and the activity, with bars on
     await card.scrollIntoViewIfNeeded();
     await reviewShot(page, testInfo, 'class-card-summary');
   }
-  // The stamina bar keeps its own look (square ends, 9 px, no fill of its own): the card's bars must not style it.
+  // The stamina bar keeps its own look (square ends, 9 px, no fill of its own): the card's bars must not style it. (Task 33: it is in the
+  // Level and stamina section.)
+  await openSection(mine, 'Level and stamina');
   const stamina = mine.locator('progress');
   await stamina.scrollIntoViewIfNeeded();
   expect(await stamina.evaluate(bar => { const style = getComputedStyle(bar); return { radius: style.borderTopLeftRadius, height: style.height, top: style.marginTop, bottom: style.marginBottom, background: style.backgroundColor }; }))
@@ -758,7 +763,7 @@ test('shows the class card between the class line and the activity, with bars on
   // A phone: the chips and the one line (zeros left out), no bars, no meaning line. 390 × 844, then 360 × 740 with nothing spilling sideways.
   for (const size of [{ width: 390, height: 844 }, { width: 360, height: 740 }]) {
     await page.setViewportSize(size);
-    const sheet = await openMenu(page, 'My gladiator');
+    const sheet = await openSection(await openMenu(page, 'My gladiator'), 'Overview');
     const phoneCard = sheet.getByTestId('class-card');
     await phoneCard.scrollIntoViewIfNeeded();
     await expect(phoneCard.getByText('Vitality 5 · Strength 2 · Endurance 2 · Precision 1', { exact: true })).toBeVisible();
@@ -775,7 +780,7 @@ test('shows the class card between the class line and the activity, with bars on
 test('keeps the keyboard focus on the split controls: Suggested hands it to Undo, and Undo hands it back', async ({ page, context }) => {
   await planningFlow(context, guardianWithThreeLeft);
   await page.goto('/game/');
-  const mine = await openMenu(page, 'My gladiator');
+  const mine = await openSection(await openMenu(page, 'My gladiator'), 'Worn equipment');
   const build = mine.locator('.planning-form');
   await points(page, 'strength').focus();
   await page.keyboard.press('Shift+Tab');
@@ -792,7 +797,7 @@ test('keeps the keyboard focus on the split controls: Suggested hands it to Undo
 test('drops the split line and Undo when the build is reloaded in the background', async ({ page, context }) => {
   const flow = await planningFlow(context, guardianWithThreeLeft);
   await page.goto('/game/');
-  const mine = await openMenu(page, 'My gladiator');
+  const mine = await openSection(await openMenu(page, 'My gladiator'), 'Worn equipment');
   const build = mine.locator('.planning-form');
   await suggestButton(build).click();
   await expect(build.getByText(splitSentence, { exact: true })).toBeVisible();
@@ -818,7 +823,7 @@ test('drops the split line and Undo when a pending build takes effect under the 
       effectiveSlotIndex: Math.floor(Date.now() / SLOT_MS) + 1, reservedMoney: 0, reservedItemIds: [], operationId: randomUUID() };
   });
   await page.goto('/game/');
-  const mine = await openMenu(page, 'My gladiator');
+  const mine = await openSection(await openMenu(page, 'My gladiator'), 'Worn equipment');
   const build = mine.locator('.planning-form');
   await expect(build.getByText('2 of 13 left', { exact: true })).toBeVisible();
   await suggestButton(build).click();
@@ -844,7 +849,7 @@ for (const { classId, name, chips, builds, sentence } of [
     await planningFlow(context, state => { guardianWithThreeLeft(state); state.currentBuild = { ...state.currentBuild, classId, allocations: { ...builds } }; });
     await page.setViewportSize({ width: 360, height: 740 });
     await page.goto('/game/');
-    const mine = await openMenu(page, 'My gladiator');
+    const mine = await openSection(await openMenu(page, 'My gladiator'), 'Worn equipment');
     const build = mine.locator('.planning-form');
     await expect(build.getByText(`Class: ${name}`, { exact: true })).toBeVisible();
     for (const chip of chips) await expect(build.getByText(chip, { exact: true })).toBeVisible();

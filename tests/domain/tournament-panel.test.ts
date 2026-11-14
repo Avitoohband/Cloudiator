@@ -313,6 +313,7 @@ describe('tournament bracket', () => {
     // Task 31 fix round 1: the placements are paged, 6 a page: page 1 holds the first six; Bellator and Corvina (5th) are on page 2.
     expect(words).toMatch(/Place Gladiator 1 Varro 2 Severus 3 Cassia 3 Decimus 5 Aster 5 Aurelia ‹ Back Page 1 of 2/);
     expect(words).not.toContain('Bellator Corvina');
+    // Page 2 (Bellator and Corvina) is asserted in the browser: tournament.spec.ts "pages the settled bracket placements, page 2 holding the rest".
     expect(words).toContain('Your placement: 5th. Credited: +7 renown.');
     expect(count(words, 'renown')).toBe(1);
     expect(words).not.toMatch(/gold|money|\+80|\+52/);

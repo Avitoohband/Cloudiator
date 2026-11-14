@@ -10,8 +10,14 @@
 // Patch 1.9: Worn equipment's slots open the equip picker (`WornEquipment`); a phone's picker is a sheet over the panel body, and the
 // summary and the build planner it covers are hidden meanwhile.
 // Patch 1.9 Task 18: ⚔ Practice fight under Stats opens the shell's practice dialog (a fight against a training dummy; nothing is saved).
-import { useEffect, useId, useState, type ReactNode } from 'react';
-import type { OwnerState } from '@contracts/reads';
+// Patch 1.9 Task 33 (menus with Back and Next, the approved paged-menus mockup): a player's My gladiator is five named sections, one shown at
+// a time: Overview (name, Title, class, activity, gold and renown), Level and stamina, Attributes and stats (with ⚔ Practice fight), Worn
+// equipment (the slots and the build planner under them, as before) and History (the gladiator's own history, `GladiatorHistory`). The strip
+// under the menu's title moves between them, and the bottom bar too where a section has no paged list of its own. The shell keeps the
+// section (`section`, `onSection`), so the menu reopens on the last section seen in this visit. Every section stays mounted while another
+// shows, so a draft build or an open picker is kept; only History reads when it is first shown.
+import { useEffect, useId, useMemo, useRef, useState, type ReactNode } from 'react';
+import type { HistoryKind, OwnerState } from '@contracts/reads';
 import { RULES_V2 } from '@domain/rules-v2';
 import type { Rules } from '@domain/types';
 import type { GameGateway } from '../../lib/api/gateway';
@@ -24,8 +30,15 @@ import { RestGainText } from '../schedule/RestGainText';
 import { restingGain, restingGainText } from '../schedule/rest-stamina';
 import { slotTimeText } from '../schedule/slot-time';
 import { TitleButton } from '../titles/TitlePicker';
+import { PanelFooter } from '../paging/PanelFooter';
+import { SectionPager, SectionStrip, type Section } from '../paging/SectionPager';
+import { useSectionChange } from '../shell/section-change';
+import type { SceneView } from '../shell/scene-url';
+import { CurrencyIcon } from '../shops/ShopArt';
 import { activityStatus, settledActivity } from './activity-status';
 import { ClassCard } from './ClassCard';
+import { GladiatorHistory } from './GladiatorHistory';
+import { createHistoryStore, type HistoryReads } from './history-store';
 import { attributeHelp, attributeRows, cardStats, contextLines, ownBuild, pointsTotal, statHelp, statRows } from './profile-card';
 import { useStatHints } from './stat-hints';
 import { attributeNumbers, loadHelp, staminaHelp, statNumbers } from './stat-numbers';
@@ -36,6 +49,16 @@ import styles from './CharacterPanel.module.css';
 
 const TICK_MS = 1000;
 const title = (value: string) => value[0].toUpperCase() + value.slice(1);
+
+/** My gladiator's sections, in order (Patch 1.9 Task 33). */
+export const GLADIATOR_SECTIONS: readonly Section[] = [
+  { id: 'overview', name: 'Overview' }, { id: 'level', name: 'Level and stamina' }, { id: 'attributes', name: 'Attributes and stats' },
+  { id: 'worn', name: 'Worn equipment' }, { id: 'history', name: 'History' },
+];
+const HISTORY = GLADIATOR_SECTIONS.length - 1;
+
+/** The History section's reads and actions: the shell's history reads, its minute clock, and ▶ Watch (the scene and the chip it came from). */
+export type OwnHistory = { reads: HistoryReads; nowMs: number | null; onWatch(view: Exclude<SceneView, { kind: 'bout' }>, kind: HistoryKind): void };
 
 /** The display clock's time, every second while the tab is visible and whenever the clock is held or moved. */
 function useNow(clock: DisplayClock) {
@@ -122,7 +145,13 @@ function BuildFacts({ owner, hints, onPractice }: { owner: OwnerState; hints: Hi
   </>;
 }
 
-function OwnerSummary({ owner, slotIndex, clock, fixture, stale, resting, onRetry, titles, covered, rules, location, hints, onPractice }: {
+/** One section's box: shown when it is the current one, kept (hidden) otherwise. */
+function SectionBox({ id, at, children }: { id: string; at: string; children: ReactNode }) {
+  return <div className={styles.section} data-section={id} hidden={id !== at}>{children}</div>;
+}
+
+function OwnerSections({ owner, slotIndex, clock, fixture, stale, resting, onRetry, titles, picking, setPicking, rules, location, hints, onPractice, gateway,
+  refreshOwner, section, onSection, history }: {
   owner: OwnerState; slotIndex: number | null; clock: DisplayClock; fixture: boolean; stale: boolean; resting: boolean; onRetry(): void;
   titles?: TitleControls;
   rules: Rules;
@@ -130,15 +159,33 @@ function OwnerSummary({ owner, slotIndex, clock, fixture, stale, resting, onRetr
   location: string | null;
   /** The panel's one set of help tooltips (shared with the Worn equipment's Load). */
   hints: Hints;
-  /** A phone's equip sheet is open over the panel: this is hidden under it. */
-  covered: boolean;
+  /** A Worn equipment picker is open (on a phone a sheet over the panel body): what it covers is inert. */
+  picking: boolean;
+  setPicking(open: boolean): void;
   /** Opens the practice dialog (Patch 1.9 Task 18). */
   onPractice?: () => void;
+  gateway: GameGateway;
+  refreshOwner(): Promise<void>;
+  section: number;
+  onSection(index: number): void;
+  history?: OwnHistory;
 }) {
   const now = useNow(clock);
   const clockMode = useClockMode();
   const headingId = useId();
   const staminaId = useId();
+  const at = GLADIATOR_SECTIONS[Math.min(Math.max(0, section), HISTORY)].id;
+  const index = GLADIATOR_SECTIONS.findIndex(entry => entry.id === at);
+  const holder = useRef<HTMLDivElement>(null);
+  useSectionChange(index, holder);
+  /** The section navigation's move: nothing while a Worn equipment picker is open. */
+  const go = (next: number) => { if (!picking) onSection(next); };
+  // The History section: the owner's own history (its chip kept while the menu is open), read only once it is first shown.
+  const [kind, setKind] = useState<HistoryKind>('arena');
+  const [seenHistory, setSeenHistory] = useState(index === HISTORY);
+  if (index === HISTORY && !seenHistory) setSeenHistory(true);
+  const reads = history?.reads ?? null;
+  const store = useMemo(() => (reads?.history ? createHistoryStore(reads, owner.gladiatorId, true) : null), [reads, owner.gladiatorId]);
   const activity = owner.currentActivity;
   const status = activityStatus(owner, slotIndex ?? 0, now, { resting, clock: clockMode });
   // The end is shown as every slot time is (Task 24.0b); one that cannot be shown (`slotTimeText` gives '') is left out.
@@ -146,44 +193,76 @@ function OwnerSummary({ owner, slotIndex, clock, fixture, stale, resting, onRetr
   // While a Rest runs (also the one a skipped activity became, "Resting (not enough stamina)") the box says what it will give back when
   // its slot ends (Patch A item 6). A Rest that has not started, or is over, shows none; nor does resting at home, which has no activity.
   const gain = activity?.kind === 'rest' && status.status === 'in-progress' ? restingGainText(restingGain(owner)) : null;
-  return (
-    <section className={styles.summary} aria-labelledby={headingId} data-covered={covered || undefined}>
-      <p className="eyebrow">{fixture ? 'SAMPLE GLADIATOR' : 'YOUR GLADIATOR'}</p>
-      <div className={styles.nameRow}>
-        <h2 id={headingId} className={styles.name}>{owner.name}</h2>
-        {titles && <TitleButton wornTitle={titles.worn} onOpen={titles.onOpen} />}
+  return <>
+    {/* While a Worn equipment picker is open (a phone's sheet covers the strip and the bar), the section navigation waits: inert, and its
+        keys (← →, the shell's listener) do nothing (fix round 1, review Important 3). */}
+    <div inert={picking}><SectionStrip sections={GLADIATOR_SECTIONS} index={index} onGo={go} /></div>
+    {/* The stale notice sits over every section; a phone's picker sheet covers it too (fix round 1, review Minor 1). */}
+    {stale && (
+      <div className={styles.stale} role="status" data-covered={picking || undefined} inert={picking}>
+        <p>Your gladiator could not be refreshed. Showing the last loaded details.</p>
+        <button type="button" onClick={onRetry}>Retry</button>
       </div>
-      <p className={styles.class}>{title(owner.currentBuild.classId)} · Level {owner.progression.level} · {title(owner.progression.league)} league</p>
-      {/* The status after a wear: always there (empty and boxless until then), so the line is announced when it arrives. */}
-      {titles && <p className={styles.titleStatus} role="status" data-testid="title-status">{titles.status ?? ''}</p>}
-      {stale && (
-        <div className={styles.stale} role="status">
-          <p>Your gladiator could not be refreshed. Showing the last loaded details.</p>
-          <button type="button" onClick={onRetry}>Retry</button>
+    )}
+    <div ref={holder}>
+      <SectionBox id="overview" at={at}>
+        <section className={styles.summary} aria-labelledby={headingId}>
+          <p className="eyebrow">{fixture ? 'SAMPLE GLADIATOR' : 'YOUR GLADIATOR'}</p>
+          <div className={styles.nameRow}>
+            <h2 id={headingId} className={styles.name}>{owner.name}</h2>
+            {titles && <TitleButton wornTitle={titles.worn} onOpen={titles.onOpen} />}
+          </div>
+          <p className={styles.class}>{title(owner.currentBuild.classId)} · Level {owner.progression.level} · {title(owner.progression.league)} league</p>
+          {/* The status after a wear: always there (empty and boxless until then), so the line is announced when it arrives. */}
+          {titles && <p className={styles.titleStatus} role="status" data-testid="title-status">{titles.status ?? ''}</p>}
+          <ClassCard classId={owner.currentBuild.classId} />
+          <div className={styles.activity}>
+            <span className="eyebrow">{fixture ? 'SAMPLE ACTIVITY' : 'CURRENT ACTIVITY'}</span>
+            {/* Patch 1.9 Task 29 (A3): the next slot's activity is named once its slot is processed, never while the server prepares it. */}
+            {settledActivity(owner) && <p>{activity!.label}</p>}
+            <p className={styles.status} role="status">{status.label}{ends ? ` · ends ${ends}` : ''}</p>
+            {gain && <p className={styles.gain} data-testid="rest-gain"><RestGainText text={gain} /></p>}
+          </div>
+          {/* Renown wears the gold laurel, as in the shops, the cards and the corner chip (the 1.9 changelog). */}
+          <dl className={styles.wallets}><div><dt>Gold</dt><dd>{owner.wallets.money}</dd></div>
+            <div><dt><CurrencyIcon currency="renown" size={14} /> Renown</dt><dd>{owner.wallets.renown}</dd></div></dl>
+        </section>
+      </SectionBox>
+      <SectionBox id="level" at={at}>
+        <div className={`${styles.stamina} ${styles.hintRow}`} {...hints.hintRow('Stamina')}>
+          <span>{hints.hintLabel('Stamina', staminaHelp, statNumbers.Stamina)}</span>
+          <span id={staminaId}>{owner.stamina.current} / {owner.stamina.maximum}</span>
         </div>
-      )}
-      <ClassCard classId={owner.currentBuild.classId} />
-      <div className={styles.activity}>
-        <span className="eyebrow">{fixture ? 'SAMPLE ACTIVITY' : 'CURRENT ACTIVITY'}</span>
-        {/* Patch 1.9 Task 29 (A3): the next slot's activity is named once its slot is processed, never while the server prepares it. */}
-        {settledActivity(owner) && <p>{activity!.label}</p>}
-        <p className={styles.status} role="status">{status.label}{ends ? ` · ends ${ends}` : ''}</p>
-        {gain && <p className={styles.gain} data-testid="rest-gain"><RestGainText text={gain} /></p>}
-      </div>
-      <div className={`${styles.stamina} ${styles.hintRow}`} {...hints.hintRow('Stamina')}>
-        <span>{hints.hintLabel('Stamina', staminaHelp, statNumbers.Stamina)}</span>
-        <span id={staminaId}>{owner.stamina.current} / {owner.stamina.maximum}</span>
-      </div>
-      <progress className={styles.bar} aria-label="Stamina" aria-describedby={staminaId} value={owner.stamina.current} max={owner.stamina.maximum} />
-      <XpBar owner={owner} rules={rules} nowMs={now} location={location} />
-      <dl className={styles.wallets}><div><dt>Gold</dt><dd>{owner.wallets.money}</dd></div><div><dt>Renown</dt><dd>{owner.wallets.renown}</dd></div></dl>
-      <BuildFacts owner={owner} hints={hints} onPractice={onPractice} />
-    </section>
-  );
+        <progress className={styles.bar} aria-label="Stamina" aria-describedby={staminaId} value={owner.stamina.current} max={owner.stamina.maximum} />
+        <XpBar owner={owner} rules={rules} nowMs={now} location={location} />
+      </SectionBox>
+      <SectionBox id="attributes" at={at}>
+        <BuildFacts owner={owner} hints={hints} onPractice={onPractice} />
+      </SectionBox>
+      <SectionBox id="worn" at={at}>
+        <WornEquipment key={`worn-${owner.gladiatorId}`} owner={owner} gateway={gateway} refresh={refreshOwner} clock={clock} preview={fixture} onPicking={setPicking}
+          loadHelp={{ row: hints.hintRow('Load'), label: hints.hintLabel('Load', loadHelp, statNumbers.Load), className: styles.loadRow }} />
+        <div className={styles.planner} data-covered={picking || undefined} inert={picking}>
+          {fixture ? <p className="panel-notice">This preview cannot change the build.</p>
+            : <BuildPanel key={owner.gladiatorId} owner={owner} gateway={gateway} refresh={refreshOwner} clock={clock} />}
+        </div>
+      </SectionBox>
+      <SectionBox id="history" at={at}>
+        {/* The History holds the cards' own History (Task 27), paged (Task 32); ← there goes back to the Overview, this menu's card. Kept
+            mounted once seen (its page and chip stay), its bar shows only in this section (`active`), where it is the one bottom bar; with
+            `gladiatorId`, Back from a replay opened here lands on the page and row it was opened from (the 1.9 merge). */}
+        {store && seenHistory ? <GladiatorHistory store={store} kind={kind} onKind={setKind} name={owner.name} own nowMs={history?.nowMs ?? null}
+          onBack={() => onSection(0)} onWatch={view => history?.onWatch(view, kind)} gladiatorId={owner.gladiatorId} active={index === HISTORY} />
+          : <p className="muted" role="status">Loading the history…</p>}
+      </SectionBox>
+    </div>
+    {/* The bottom bar of a section with no paged list of its own; History's list pages with its own bar (the list rule), its only bottom bar. */}
+    {index !== HISTORY && <PanelFooter><div inert={picking}><SectionPager sections={GLADIATOR_SECTIONS} index={index} onGo={go} /></div></PanelFooter>}
+  </>;
 }
 
 export function CharacterPanel({ viewer, session, owner, ownerError, slotIndex, clock, gateway, fixture, previewAs, previewFailed, refreshOwner, onCreate,
-  resting = false, titles, rules = RULES_V2, location = null, onPractice }: {
+  resting = false, titles, rules = RULES_V2, location = null, onPractice, section, onSection, history }: {
   viewer: Viewer;
   session: SessionState;
   owner: OwnerState | null;
@@ -209,6 +288,11 @@ export function CharacterPanel({ viewer, session, owner, ownerError, slotIndex, 
   location?: string | null;
   /** ⚔ Practice fight under Stats opens the practice dialog (Patch 1.9 Task 18); without it there is no button. */
   onPractice?: () => void;
+  /** The section shown (0-based, `GLADIATOR_SECTIONS`) and its change: the shell's, so the menu reopens on it. Without them, the panel's own. */
+  section?: number;
+  onSection?(index: number): void;
+  /** The History section's reads (the shell's); without them the section says the history is loading. */
+  history?: OwnHistory;
 }) {
   const retry = () => { void refreshOwner().catch(() => undefined); };
   // Patch 1.9: a Worn equipment slot opens the equip picker. The build planner is inert while it is open (the desktop popover lies over its
@@ -216,17 +300,11 @@ export function CharacterPanel({ viewer, session, owner, ownerError, slotIndex, 
   const [picking, setPicking] = useState(false);
   // One set of help tooltips for the whole panel (the stamina, attribute and stat labels and the Worn equipment's Load): one is open at a time.
   const hints = useStatHints({ buttonClass: styles.hintButton, tipClass: styles.hint, aboveClass: styles.hintAbove, numbersClass: styles.hintNumbers });
+  const [ownSection, setOwnSection] = useState(0);
   if (owner) {
-    return <>
-      <OwnerSummary owner={owner} slotIndex={slotIndex} clock={clock} fixture={fixture} stale={ownerError !== null} resting={resting} onRetry={retry}
-        titles={titles} covered={picking} rules={rules} location={location} hints={hints} onPractice={onPractice} />
-      <WornEquipment key={`worn-${owner.gladiatorId}`} owner={owner} gateway={gateway} refresh={refreshOwner} clock={clock} preview={fixture} onPicking={setPicking}
-        loadHelp={{ row: hints.hintRow('Load'), label: hints.hintLabel('Load', loadHelp, statNumbers.Load), className: styles.loadRow }} />
-      <div className={styles.planner} data-covered={picking || undefined} inert={picking}>
-        {fixture ? <p className="panel-notice">This preview cannot change the build.</p>
-          : <BuildPanel key={owner.gladiatorId} owner={owner} gateway={gateway} refresh={refreshOwner} clock={clock} />}
-      </div>
-    </>;
+    return <OwnerSections owner={owner} slotIndex={slotIndex} clock={clock} fixture={fixture} stale={ownerError !== null} resting={resting} onRetry={retry}
+      titles={titles} picking={picking} setPicking={setPicking} rules={rules} location={location} hints={hints} onPractice={onPractice} gateway={gateway}
+      refreshOwner={refreshOwner} section={section ?? ownSection} onSection={onSection ?? setOwnSection} history={history} />;
   }
   let joining: ReactNode;
   if (fixture) {

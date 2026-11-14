@@ -157,6 +157,74 @@
   .grid { gap: 4px; }
 }
 
+/* Patch 1.9 Task 33: the Inventory's and the Shops' paged grids (`paged`; fix round 1, review Important 2: only theirs, so the Marketplace's
+   "Item to list" box keeps its fixed, scrolling box and its columns). A page is whole rows (24 tiles in six columns, 15 in five), so the box
+   fits its page and no longer scrolls; the floor keeps its shape on a short page, and a page taller than it (big tiles) grows it, never
+   clipped. */
+.gridScroll.paged {
+  height: auto;
+  min-height: 254px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+}
+
+@media (hover: none), (max-width: 480px) {
+  .gridScroll.paged { min-height: 194px; }
+  /* Five columns in the touch layout at any width, so a page of 15 is three whole rows (`grid-page.ts`). */
+  .grid.paged { grid-template-columns: repeat(5, minmax(0, 1fr)); }
+}
+
+/* An outcome line held in its place, unseen, while the next command is on its way (fix round 1, review Important 4). */
+.held { visibility: hidden; }
+
+/* Fix round 1 (review Important 1; Avi's approved notes): on a phone the chosen item's card is a sheet over the grid, from the grid's top to
+   the menu's visible bottom (`phone-card.ts` sets both), scrolling inside itself; it shows only once a tile is chosen. A pointer window keeps
+   the card beside the grid and has no close button. */
+.closeCard { display: none; }
+
+@media (hover: none), (max-width: 480px) {
+  .columns[data-card] { position: relative; }
+  .columns[data-card='closed'] > .details { display: none; }
+  .columns[data-card='open'] > .details {
+    position: absolute;
+    top: var(--card-top, 0px);
+    left: 0;
+    right: 0;
+    z-index: 4;
+    height: var(--card-height, auto);
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    padding: 0 8px 12px;
+    border: 1px solid #655847;
+    border-radius: 10px;
+    background: #15171f;
+    box-shadow: 0 -6px 22px #000a;
+  }
+  .columns[data-card='open'] > .details:focus { outline: none; }
+  /* A row of its own that stays at the sheet's top while the card scrolls under it. */
+  .columns[data-card] .closeCard {
+    position: sticky;
+    top: 0;
+    z-index: 1;
+    margin: 0 -8px 0 auto;
+    display: grid;
+    place-items: center;
+    width: 44px;
+    min-height: 44px;
+    padding: 0;
+    border: 0;
+    background: #15171f;
+    color: var(--ink);
+    font-size: 1.5rem;
+    line-height: 1;
+  }
+}
+
+/* Patch 1.9 Task 33: one section at a time; the others stay mounted (a draft or a shop's filter is kept) and hidden. */
+.section[hidden] { display: none; }
+/* The Shops are a section of their own now: no rule and gap above them, as there was under the inventory. */
+.section > :global(.shops-panel) { margin-top: 0; padding-top: 0; border-top: 0; }
+
 /* Search and sort above the grid (Patch 1.9, the approved search mockup): the field on its own row above the chips, Sort beside it. */
 .searchRow { display: flex; gap: 6px; align-items: stretch; margin-bottom: 8px; }
 .search { position: relative; display: flex; align-items: center; flex: 1 1 0; min-width: 0; }

@@ -29,10 +29,12 @@ function Sub({ text, which }: { text: string; which: 'wide' | 'narrow' }) {
   </span>;
 }
 
-export function BoutRow({ text, watched, onOpen }: { text: BoutRowText; watched: boolean; onOpen(): void }) {
+/** `paged`: a row of a paged list (Patch 1.9 Task 32): the page's focus lands on it after a turn. */
+export function BoutRow({ text, watched, onOpen, paged = false }: { text: BoutRowText; watched: boolean; onOpen(): void; paged?: boolean }) {
   const fresh = text.kept && !watched;
   return (
-    <li className={text.kept ? styles.row : `${styles.row} ${styles.gone}`} data-bout-row={text.name} data-gone={text.kept ? undefined : ''}>
+    <li className={text.kept ? styles.row : `${styles.row} ${styles.gone}`} data-bout-row={text.name} data-gone={text.kept ? undefined : ''}
+      data-page-row={paged ? '' : undefined} tabIndex={paged ? -1 : undefined}>
       {text.badge ? <span className={`${styles.badge} ${text.badge.letter === 'W' ? styles.won : styles.lost}`}>
         <span aria-hidden="true">{text.badge.letter}</span><span className={styles.sr}>{text.badge.name}</span>
       </span> : <span className={styles.badge} aria-hidden="true" />}

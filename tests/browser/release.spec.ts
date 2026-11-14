@@ -15,6 +15,8 @@ import { a11yShot, contrastIssues, expectNamedControls, focusDrops, focusedEleme
 import { SUPABASE_URL, emptyWorld, isPresence, routeLiveReads, seedSession, testUser } from './live-routes';
 import { reviewShot, reviewShot360 } from './review-shots';
 import { chipToggle, cornerChip, creationDialog, everyoneResults, expectOwnerShown, joinButton, menuDialog, openMenu, quietArrivals, railMenus, revealRail, touchLayout, pageTo } from './shell-helpers';
+import { openItemCard, openSection } from './section-helpers';
+import { showChoice } from './show-choice';
 
 // Task 23.5: the release browser spec. The game is usable by keyboard and screen reader (every control named, the focus
 // never left on <body>, validation messages linked to their fields), readable (WCAG contrast), calm with reduced motion,
@@ -64,6 +66,9 @@ function poorPlayer(): OwnerState {
   state.inventory.push(axe);
   return state;
 }
+
+// These cases look for a row by its name, not for how the list pages: Show 50 puts the rows read on the page (Patch 1.9 Task 32).
+test.beforeEach(async ({ context }) => { await showChoice(context, { standings: 50 }); });
 
 test.describe('release accessibility in the fixture preview', () => {
   test.skip(production, 'These checks use the fixture preview.');
@@ -321,7 +326,11 @@ test.describe('release accessibility in the fixture preview', () => {
     // Build: a typed number never passes the points left (none here) or goes below the saved build, so it can no longer make a
     // review message; the status line says what was done instead (Avi, 2026-10-28).
     const mine = await openMenu(page, 'My gladiator');
-    await expectNamedControls(mine, 'My gladiator (player)');
+    // Task 33: one section shows at a time: every section's controls, the build planner's last (Worn equipment).
+    for (const section of ['Overview', 'Level and stamina', 'Attributes and stats', 'History', 'Worn equipment']) {
+      await openSection(mine, section);
+      await expectNamedControls(mine, `My gladiator (player), ${section}`);
+    }
     // A typed number out of range waits until the field is left (Tab), then is clamped (points hotfix, 2026-10-29).
     const strength = mine.getByRole('spinbutton', { name: 'strength', exact: true });
     await strength.fill('9');
@@ -361,6 +370,12 @@ test.describe('release accessibility in the fixture preview', () => {
     // Shop: a quantity out of range, and offers too dear for the wallet.
     const shops = await openMenu(page, 'Inventory and shops');
     await expectNamedControls(shops, 'Inventory and shops (player)');
+    // Task 33: the shops are the menu's second section.
+    await openSection(shops, 'Shops');
+    await expectNamedControls(shops, 'Inventory and shops (player), Shops');
+    // (On a phone the chosen offer's card opens over the grid with a tap: Task 33 fix round 1.)
+    await openItemCard(shops);
+    await expectNamedControls(shops, 'Inventory and shops (player), Shops, the card');
     const quantity = shops.getByRole('spinbutton', { name: 'Purchase quantity' });
     await quantity.fill('0');
     await expect(quantity).toHaveAttribute('aria-invalid', 'true');
@@ -813,7 +828,7 @@ test.describe('release accessibility in the fixture preview', () => {
     expect(await contrastIssues(await settled(page.getByRole('dialog', { name: /^Profile: / }))), 'a profile card').toEqual([]);
     // The card closes first: on a phone the taller card (Task 11c) covers the open sheet's own close button, as a player sees it.
     await page.getByRole('dialog', { name: /^Profile: / }).getByRole('button', { name: 'Close profile' }).click();
-    const shops = await settled(await openMenu(page, 'Inventory and shops'));
+    const shops = await openSection(await settled(await openMenu(page, 'Inventory and shops')), 'Shops');
     // Reached by Tab, so the button shows its focus ring (:focus-visible). Patch 1.9: the shop's filters, then its first cell.
     const shopFilters = shops.getByRole('group', { name: 'Shop filters', exact: true });
     await shopFilters.getByRole('button', { name: 'All', exact: true }).focus();
@@ -847,7 +862,9 @@ test.describe('release accessibility in the fixture preview', () => {
     await expectOwnerShown(page, 'Aster');
     for (const label of ['My gladiator', 'Schedule', 'Inventory and shops']) {
       const panel = await settled(await openMenu(page, label));
-      const field = panel.locator('select, input').first();
+      // Task 33: My gladiator's form (the build planner) is in its Worn equipment section.
+      if (label === 'My gladiator') await openSection(panel, 'Worn equipment');
+      const field = panel.locator('select:visible, input:visible').first();
       await field.focus();
       expect(await contrastIssues(panel, { focusRing: true }), label).toEqual([]);
       await shot(page, testInfo, `form-${label.split(' ')[0].toLowerCase()}`);
@@ -1062,7 +1079,8 @@ test.describe('release accessibility in live mode', () => {
     const live = await routeLiveReads(context, { world: emptyWorld(), owner: ownerFixture });
     await page.goto('/game/');
     await expectOwnerShown(page, 'Aster');
-    const inventory = await openMenu(page, 'Inventory and shops');
+    const inventory = await openSection(await openMenu(page, 'Inventory and shops'), 'Shops');
+    await openItemCard(inventory);
     await inventory.getByRole('spinbutton', { name: 'Purchase quantity' }).focus();
     const other = testUser('brutus@example.invalid');
     await seedSession(context, other);

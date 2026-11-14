@@ -9,7 +9,8 @@
 // - `SectionPager` is the optional bottom bar ("‹ Level and stamina · 3 of 5 · Worn equipment ›", the `nav` named "Section bar"). Render
 //   it, in a `PanelFooter`, only in a section that has no paged list or grid of its own; in a section with one, the bottom bar is
 //   that list's `Pager`.
-// `index` is 0-based everywhere.
+// `index` is 0-based everywhere. Task 33 fix round 1: on a phone the strip is one line (‹, the name, quiet circles, ›); the neighbours'
+// names sit in their own spans so the phone hides them while each button keeps its accessible name.
 import { useEffect, useRef, useState } from 'react';
 import { PageDots } from './PageDots';
 import { usePageKeys } from './usePageKeys';
@@ -42,10 +43,10 @@ export function SectionStrip({ sections, index, onGo }: { sections: readonly Sec
       <b className={styles.stripName}>{sections[at]?.name}</b>
       {count > 1 && <>
         <button type="button" className={styles.stripMove} aria-label={prev ? `Previous section: ${prev.name}` : 'Previous section'} aria-disabled={!prev}
-          onClick={back}>‹{prev ? ` ${prev.name}` : ''}</button>
+          onClick={back}>‹{prev && <span className={styles.stripMoveName}>{` ${prev.name}`}</span>}</button>
         <PageDots count={count} current={at + 1} names={sections.map(section => section.name)} onGo={page => onGo(page - 1)} />
         <button type="button" className={styles.stripMove} aria-label={next ? `Next section: ${next.name}` : 'Next section'} aria-disabled={!next}
-          onClick={forward}>{next ? `${next.name} ` : ''}›</button>
+          onClick={forward}>{next && <span className={styles.stripMoveName}>{`${next.name} `}</span>}›</button>
       </>}
       <p className={styles.sr} role="status">{status}</p>
     </nav>

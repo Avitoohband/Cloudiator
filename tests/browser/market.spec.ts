@@ -12,6 +12,7 @@ import { SUPABASE_URL, isPresence, routeLiveReads, seedSession, type LiveTranspo
 import { expectOwnerShown, joinButton, openMenu } from './shell-helpers';
 import { a11yShot, focusDrops, watchFocus } from './a11y-helpers';
 import { forbidRemote } from './remote';
+import { showChoice } from './show-choice';
 
 // Task 18.3: the 💰 Marketplace menu. Anyone browses the open offers (the public `market_offer_reads` view over the `market_offers` projection, M37); a player
 // buys (after a confirmation), lists an eligible item and cancels a listing through the authenticated command endpoint.
@@ -193,7 +194,11 @@ async function buy(page: Page, market: Locator, listing: MarketListing) {
   await expect(confirm).toBeHidden();
 }
 
-test.beforeEach(() => { test.skip(process.env.PLAYWRIGHT_STATIC === 'true', 'Live mode uses development-only intercepted Supabase transport.'); });
+// The cases below read what a listing says and does, not how the list pages: Show 50 puts every offer on the page (Patch 1.9 Task 32).
+test.beforeEach(async ({ context }) => {
+  test.skip(process.env.PLAYWRIGHT_STATIC === 'true', 'Live mode uses development-only intercepted Supabase transport.');
+  await showChoice(context, { market: 50 });
+});
 
 test('lets a visitor browse listings with no command and no buy or sell controls', { tag: '@render' }, async ({ page, context }, info) => {
   const live = await routeLiveReads(context, { world: world(), market: MARKET_ROWS });
@@ -1059,4 +1064,119 @@ test('browses the fixture preview Marketplace, whose actions say they are unavai
   await expect(ownList(market).getByRole('listitem')).toHaveCount(1);
   expect(commands).toEqual([]);
   expect(remote).toEqual([]);
+});
+
+// Patch 1.9 Task 32 (menus with Back and Next): the Browse list shows three cards a page of the fifty a server page holds. Next past the fifty read
+// reads the next fifty ("Page 17" with "more to see" until the last is read), a chip, a search or a sort goes back to page 1, a failed read keeps the
+// page and says so, and a second Next during a read does nothing. The seller band, fees, limits and messages stay as the cases above read them.
+test.describe('the Marketplace in pages', () => {
+  const many = (count: number) => Array.from({ length: count }, (_, i): MarketListing => ({ ...MARKET_ROWS[i % MARKET_ROWS.length], listingId: randomUUID(),
+    listedAtMs: MARKET_ROWS[i % MARKET_ROWS.length].listedAtMs - i * 1000 }));
+  async function openPaged(page: Page, context: BrowserContext, count = 120) {
+    // This case is about paging: it takes the Fit size, whatever the cases above save.
+    await context.addInitScript(() => { try { localStorage.removeItem('cloudiator.page-size.v1'); } catch { /* none */ } });
+    const live = await routeLiveReads(context, { world: world(), market: many(count) });
+    await page.goto('/game/');
+    await expect(joinButton(page)).toBeVisible();
+    const market = await openMenu(page, 'Marketplace');
+    const cards = market.getByRole('list', { name: 'Open listings' }).getByRole('listitem');
+    await expect(cards).toHaveCount(3, { timeout: 45_000 });
+    const bar = market.getByRole('navigation', { name: 'Pages' });
+    return { live, market, cards, bar, label: bar.locator('b').first(), next: bar.getByRole('button', { name: 'Next page', exact: true }) };
+  }
+
+  test('three cards a page; Next past the fifty read reads the next fifty, once; a chip goes back to page 1', async ({ page, context }) => {
+    const { live, market, cards, bar, label, next } = await openPaged(page, context);
+    await expect(label).toHaveText('Page 1');
+    await expect(bar).toContainText('more to see');
+    await expect(market.getByRole('button', { name: 'More', exact: true })).toHaveCount(0);
+    // Every card keeps its seller band.
+    await expect(market.locator('[data-part="seller"]')).toHaveCount(3);
+    await next.click();
+    await expect(label).toHaveText('Page 2');
+    await expect(cards.first()).toBeFocused();
+    // Fifty offers are sixteen full pages; the next Next reads the next fifty (and a second Next while it reads does nothing).
+    await bar.getByRole('button', { name: 'Go to page 16', exact: true }).click();
+    await expect(label).toHaveText('Page 16');
+    const before = live.count('market_offer_reads');
+    live.delay('market_offer_reads', 800);
+    await next.click();
+    await next.dispatchEvent('click');
+    await expect(label).toHaveText('Page 17', { timeout: 15_000 });
+    expect(live.count('market_offer_reads') - before).toBe(1);
+    await expect(cards).toHaveCount(3);
+    live.delay('market_offer_reads', 0);
+    // A chip is another view of the loaded offers: back to page 1.
+    await market.getByRole('group', { name: 'Marketplace filters' }).getByRole('button', { name: 'Weapons', exact: true }).click();
+    await expect(label).toHaveText('Page 1');
+    // A sort and a search do the same.
+    await next.click();
+    await expect(label).toHaveText('Page 2');
+    await market.getByRole('combobox', { name: 'Sort the Marketplace' }).selectOption({ label: 'Price low-high' });
+    await expect(label).toHaveText('Page 1');
+  });
+
+  test('a search goes back to page 1, and a Refresh keeps the page', async ({ page, context }) => {
+    const { live, market, bar, label, next } = await openPaged(page, context);
+    await next.click();
+    await next.click();
+    await expect(label).toHaveText('Page 3');
+    // Refresh reads the first page again and keeps the page asked for (the offers are the same fifty).
+    const before = live.count('market_offer_reads');
+    await market.getByRole('button', { name: 'Refresh', exact: true }).click();
+    await expect.poll(() => live.count('market_offer_reads')).toBeGreaterThan(before);
+    await expect(label).toHaveText('Page 3');
+    // A search is another view of the loaded offers: back to page 1.
+    await market.getByRole('searchbox', { name: 'Search the Marketplace' }).fill('spear');
+    await expect(label).toHaveText('Page 1');
+    await expect(bar).toContainText('more to see');
+  });
+
+  test('under a price sort, reading more starts again at page 1 of the new order, and no offer shows twice going forward', async ({ page, context }) => {
+    // Offers listed later are dearer, so the oldest (read last) are the cheapest: a sort by price puts them first once they are read.
+    const rows = Array.from({ length: 120 }, (_, i): MarketListing => ({ ...MARKET_ROWS[i % MARKET_ROWS.length], listingId: randomUUID(),
+      listedAtMs: MARKET_ROWS[0].listedAtMs - i * 1000, price: 1000 - i * 5 }));
+    await context.addInitScript(() => { try { localStorage.removeItem('cloudiator.page-size.v1'); } catch { /* none */ } });
+    await routeLiveReads(context, { world: world(), market: rows });
+    await page.goto('/game/');
+    await expect(joinButton(page)).toBeVisible();
+    const market = await openMenu(page, 'Marketplace');
+    const cards = market.getByRole('list', { name: 'Open listings' }).getByRole('listitem');
+    await expect(cards).toHaveCount(3, { timeout: 45_000 });
+    const bar = market.getByRole('navigation', { name: 'Pages' });
+    const label = bar.locator('b').first(), next = bar.getByRole('button', { name: 'Next page', exact: true });
+    await market.getByRole('combobox', { name: 'Sort the Marketplace' }).selectOption({ label: 'Price low-high' });
+    await expect(label).toHaveText('Page 1');
+    // The cheapest of the first fifty is the 50th offer (price 755).
+    await expect(cards.first()).toContainText('755');
+    await bar.getByRole('button', { name: 'Go to page 16', exact: true }).click();
+    await next.click();
+    // The next fifty are read, and the view starts again at page 1 of the order of all hundred: its cheapest is the 100th offer (price 505).
+    await expect(label).toHaveText('Page 1', { timeout: 15_000 });
+    await expect(cards.first()).toContainText('505');
+    const seen: string[] = [];
+    for (let turn = 0; turn < 6; turn += 1) {
+      seen.push(...await cards.evaluateAll(items => items.map(item => item.getAttribute('data-testid') ?? '')));
+      await next.click();
+      await expect(label).toHaveText(`Page ${turn + 2}`);
+    }
+    expect(new Set(seen).size, 'no offer twice going forward').toBe(seen.length);
+  });
+
+  test('the last read ends the list and the label knows it; a failed read keeps the page and says so', async ({ page, context }) => {
+    const { live, market, cards, bar, label, next } = await openPaged(page, context, 52);
+    await bar.getByRole('button', { name: 'Go to page 16', exact: true }).click();
+    live.fail('market_offer_reads');
+    await next.click();
+    await expect(bar).toContainText('Could not load more. Try Next again.');
+    await expect(label).toHaveText('Page 16');
+    await expect(cards).toHaveCount(3);
+    live.fail('market_offer_reads', false);
+    await next.click();
+    // Fifty-two offers: seventeen pages, the last of one.
+    await expect(label).toHaveText('Page 17 of 18');
+    await bar.getByRole('button', { name: 'Go to page 18', exact: true }).click();
+    await expect(cards).toHaveCount(1);
+    await expect(next).toHaveAttribute('aria-disabled', 'true');
+  });
 });

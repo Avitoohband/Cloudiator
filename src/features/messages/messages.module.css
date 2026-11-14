@@ -638,7 +638,8 @@
 
 .numberLine {
   position: absolute;
-  top: 12px;
+  /* The row's top padding (7 px, Task 31 fix round 1: compacted from 12). */
+  top: 7px;
   left: 16px;
   display: flex;
   align-items: center;

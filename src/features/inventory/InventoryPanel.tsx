@@ -25,7 +25,7 @@ import { SectionStrip, type Section } from '../paging/SectionPager';
 import { pageOfIndex } from '../paging/paging';
 import { usePagedList } from '../paging/usePagedList';
 import { gridColumns, rowFill, useGridPage } from './grid-page';
-import { usePhoneCard } from './phone-card';
+import { useCloseOnTurn, usePhoneCard } from './phone-card';
 import { ItemIcon, ItemStats } from './ItemPresentation';
 import { ItemSearch, MatchCount, NoMatch } from './ItemSearch';
 import { groupStacks, isStackable, joinsStack, stackSaleItems, type StackTile } from './stacks';
@@ -158,8 +158,13 @@ export function InventoryPanel({ owner, gateway, refresh, clock, preview = false
   // Fix round 1 (review Important 1): on a phone the chosen item's card opens over the grid (`usePhoneCard`).
   const phoneCard = usePhoneCard(visibleTiles.length > 0);
   const covered = phoneCard.open;
-  // Another section hides the card's (it opens again from a tile).
+  // Another section hides the card's (it opens again from a tile). A page the grid turns under it closes it too, and the new page's first
+  // tile takes the focus (`useCloseOnTurn`).
   useEffect(() => { if (section !== 0) phoneCard.close(false); }, [section, phoneCard.close]);
+  useCloseOnTurn(phoneCard, paged.page, paged.listRef as RefObject<HTMLElement | null>);
+  // On a phone a closed card is not shown, so an outcome that belongs in it (a sale's, a piece's) shows at the section's end instead, never
+  // left in the hidden card when the player closes it while the command is on its way (Codex review Minor 4).
+  const inCard = !(phoneCard.phone && visibleTiles.length > 0) || phoneCard.open;
   const latest = useRef(selected?.key), visibleTilesRef = useRef(visibleTiles), gridPageRef = useRef(gridPage);
   latest.current = selected?.key; visibleTilesRef.current = visibleTiles; gridPageRef.current = gridPage;
   const changedView = useRef(false);
@@ -283,11 +288,14 @@ export function InventoryPanel({ owner, gateway, refresh, clock, preview = false
     {error && <p ref={outcome} role="alert" tabIndex={-1} {...target}>{error}</p>}
     {retry && <button disabled={busy} onClick={() => { if (attempt.current) void send(attempt.current, undefined, where); }}>Retry request</button>}
   </>;
-  /** The held outcome at `at`: the same lines, unseen and out of reach, keeping their room until the new outcome comes. */
+  /**
+   * The held outcome at `at`: the same lines, unseen and out of reach, keeping their room until the new outcome comes. Each copy has its
+   * line's own box: `data-role` takes the style a line's role gives it (the Buy back's boxed lines, fix round 2, re-review I4).
+   */
   const heldAt = (at: string) => held && held.place === at && <div className={styles.held} aria-hidden="true" inert>
-    {held.message && (held.sold && offersBuyBack ? <div className={styles.soldNote}><p>{held.message}</p><button type="button" className={styles.linkButton}>Open Buy back</button></div>
-      : <p>{held.message}</p>)}
-    {held.error && <p>{held.error}</p>}
+    {held.message && (held.sold && offersBuyBack ? <div className={styles.soldNote}><p data-role="status">{held.message}</p><button type="button" className={styles.linkButton}>Open Buy back</button></div>
+      : <p data-role="status">{held.message}</p>)}
+    {held.error && <p data-role="alert">{held.error}</p>}
     {held.retry && <button type="button">Retry request</button>}
   </div>;
   /**
@@ -407,8 +415,8 @@ export function InventoryPanel({ owner, gateway, refresh, clock, preview = false
           <div className={styles.track} role="progressbar" aria-label="Sales completed" aria-valuemin={0} aria-valuemax={here.total} aria-valuenow={here.done}><i style={{ width: `${Math.round(100 * here.done / here.total)}%` }} /></div>
         </div>}
       </div>}
-      {place !== 'sale' && tile.items.some(piece => piece.id === place) && outcomes}
-      {held && held.place !== 'sale' && tile.items.some(piece => piece.id === held.place) && heldAt(held.place)}
+      {inCard && place !== 'sale' && tile.items.some(piece => piece.id === place) && outcomes}
+      {inCard && held && held.place !== 'sale' && tile.items.some(piece => piece.id === held.place) && heldAt(held.place)}
     </article>;
   }
   // The strip sits outside the panel's own box, so the panel's large button style (`.inventory-panel button`) leaves its circles alone.
@@ -439,7 +447,7 @@ export function InventoryPanel({ owner, gateway, refresh, clock, preview = false
               return <button key={tile.key} type="button" className={styles.tile} data-testid={`tile-${tile.key}`} data-rarity={item.rarity} data-stack={tile.items.length > 1 ? tile.items.length : undefined}
                 data-page-row="" tabIndex={0}
                 aria-label={[itemLabel(item), itemBinding(item), count > 1 && `${count} owned`, status].filter(Boolean).join(', ')}
-                aria-description={`Weight ${item.stats.weight}`} aria-controls={detailsId} aria-pressed={tile.key === selected?.key} onClick={() => { setSelectedId(tile.key); phoneCard.show(); }}>
+                aria-description={`Weight ${item.stats.weight}`} aria-controls={detailsId} aria-pressed={tile.key === selected?.key} onClick={event => { setSelectedId(tile.key); phoneCard.show(event.currentTarget); }}>
                 <ItemIcon catalogId={item.catalogId} />
                 <span className={styles.level} aria-hidden="true">L{item.tier}</span>
                 {word && <span className={styles.mark} data-mark={word.toLowerCase()} aria-hidden="true">{word}</span>}
@@ -460,8 +468,8 @@ export function InventoryPanel({ owner, gateway, refresh, clock, preview = false
         {/* A discard's or a material sale's line shows in the card while it lies over the grid (a phone), else at the section's end. */}
         {place === 'trade' && phoneCard.open && outcomes}
         {held?.place === 'trade' && phoneCard.open && heldAt('trade')}
-        {place === 'sale' && outcomes}
-        {heldAt('sale')}
+        {place === 'sale' && inCard && outcomes}
+        {inCard && heldAt('sale')}
         {selected ? itemCard(selected) : <p className="muted">{query.trim() ? 'Nothing to show. Clear the search to see every item.' : owner.inventory.length ? `No ${filter.toLowerCase()} in your inventory.` : 'Your inventory is empty.'}</p>}
       </section>
     </div>
@@ -489,6 +497,9 @@ export function InventoryPanel({ owner, gateway, refresh, clock, preview = false
     </section>
     {place === 'trade' && section !== SHOPS && !phoneCard.open && outcomes}
     {section !== SHOPS && !phoneCard.open && heldAt('trade')}
+    {/* A sale's or a piece's line while a phone's card is closed (see `inCard`). */}
+    {!inCard && section !== SHOPS && place !== 'trade' && place !== 'gear' && place !== 'buyback' && outcomes}
+    {!inCard && section !== SHOPS && held && held.place !== 'trade' && held.place !== 'gear' && held.place !== 'buyback' && heldAt(held.place)}
     </div>
     {section === 0 && !(visibleTiles.length === 0 && query.trim()) && <PanelFooter><Pager list={paged} /></PanelFooter>}
     </div>
@@ -497,7 +508,7 @@ export function InventoryPanel({ owner, gateway, refresh, clock, preview = false
     {place === 'trade' && section === SHOPS && outcomes}
     {section === SHOPS && heldAt('trade')}
     <ShopPanel key={merchantRequest} initialMerchant={initialMerchant} owner={owner} busy={busy || selling !== null} preview={preview} buy={(catalogId, quantity) => void send({ kind: 'buy-shop', catalogId, catalogVersion: CATALOG_V1.version, quantity })}
-      clock={clock} buyBack={buyBack} buyBackOutcome={place === 'buyback' ? outcomes : heldAt('buyback') || null} buyBackRequest={buyBackRequest} gridPage={gridPage} active={section === SHOPS} />
+      clock={clock} buyBack={buyBack} buyBackOutcome={place === 'buyback' ? <>{outcomes}{heldAt('buyback')}</> : heldAt('buyback') || null} buyBackRequest={buyBackRequest} gridPage={gridPage} active={section === SHOPS} />
     </div>
     </div>
     <dialog ref={dialog} aria-labelledby="discard-heading" onCancel={() => setConfirmation(null)} onClose={() => {

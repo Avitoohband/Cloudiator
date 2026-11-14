@@ -18,6 +18,7 @@ import type { GameGateway } from '../../lib/api/gateway';
 import { NO_TITLE, titleName, wornTitleText } from './title-text';
 import { LATER_TITLES, NO_TITLE_LINE, pickerCounts, pickerGroups, wornStatus, type PickerRow } from './title-picker';
 import { WEAR_PREVIEW, WEAR_REFUSED, answeredTitle, keepsWearAttempt, wearAttemptFor, type WearAttempt } from './title-wear';
+import { readNewTitles, markTitlesSeen } from './titles-seen';
 import { Pager } from '../paging/Pager';
 import { PagingScope, PanelFooter } from '../paging/PanelFooter';
 import { usePagedList } from '../paging/usePagedList';
@@ -35,14 +36,15 @@ export function TitleButton({ wornTitle, onOpen }: { wornTitle: string | null; o
 }
 
 /** One choice: a radio named by the title, described by "✓ Earned" (an earned title) and its line. The whole row picks it. */
-function Choice({ group, id, label, line, earned, checked, onChoose }: {
-  group: string; id: string | null; label: string; line: string; earned: boolean; checked: boolean; onChoose(id: string | null): void;
+function Choice({ group, id, label, line, earned, checked, isNew = false, onChoose }: {
+  group: string; id: string | null; label: string; line: string; earned: boolean; checked: boolean; isNew?: boolean; onChoose(id: string | null): void;
 }) {
   const nameId = useId(), stateId = useId(), lineId = useId();
   return <label className={styles.option}>
-    <input type="radio" name={group} value={id ?? ''} checked={checked} onChange={() => onChoose(id)} aria-labelledby={nameId}
+    <input type="radio" name={group} value={id ?? ''} checked={checked} onChange={() => onChoose(id)} aria-label={isNew ? `${label}, new` : undefined} aria-labelledby={isNew ? undefined : nameId}
       aria-describedby={earned ? `${stateId} ${lineId}` : lineId} />
-    <span id={nameId} className={earned ? styles.name : styles.plain}>{label}</span>
+    {/* Task 36: a title earned and not yet seen here carries a tiny New, as real text inside the name ("Rare Find, New"). */}
+    <span id={nameId} className={earned ? styles.name : styles.plain}>{label}{isNew && <span className={styles.newTag} data-title-new="">New</span>}</span>
     {earned && <span id={stateId} className={styles.earned}>✓ Earned</span>}
     <span id={lineId} className={styles.rule}>{line}</span>
   </label>;
@@ -102,12 +104,24 @@ export function TitlePicker({ owner, gateway, refresh, onWorn, onClose, preview 
     ...groups.flatMap(group => group.rows.map(row => ({ family: group.family, row })))], [groups]);
   const paged = usePagedList(sequence, { list: 'titles', resetKey: view });
   // The picker opens on the page that holds the worn title (fix round 1), once.
+  // Task 36: the titles earned and not yet seen in this picker, read once when it opens (the marks stay while it is open); the earned titles on a
+  // page the player views are recorded as seen, so the marks are gone the next time. Nothing is read where there is no window (a server render).
+  const earnedIds = useMemo(() => owner.titles.map(title => title.id), [owner.titles]);
+  const [fresh] = useState<ReadonlySet<string>>(() => (typeof window === 'undefined' ? new Set<string>() : readNewTitles(owner.gladiatorId, earnedIds)));
+  // Only once the picker has landed: the first commit shows page 1 at the Fit size, before the jump to the worn title's page and the saved Show size
+  // apply, and those rows were never on screen (fix round 1).
+  const [ready, setReady] = useState(false);
+  useEffect(() => {
+    if (!ready) return;
+    markTitlesSeen(owner.gladiatorId, paged.rows.flatMap(entry => (entry.row && entry.row.earned && fresh.has(entry.row.id) ? [entry.row.id] : [])));
+  }, [ready, paged.rows, fresh, owner.gladiatorId]);
   const landed = useRef(false);
   useEffect(() => {
     if (landed.current) return;
     landed.current = true;
     const at = sequence.findIndex(entry => (entry.row?.id ?? null) === worn);
     if (at > 0) paged.goToIndex(at);
+    setReady(true);
   });
   const onPage = paged.rows.reduce<{ family: string; rows: (PickerRow | null)[] }[]>((out, entry) => {
     const last = out[out.length - 1];
@@ -220,7 +234,7 @@ export function TitlePicker({ owner, gateway, refresh, onWorn, onClose, preview 
             {family.rows.map(row => (row === null
               ? <div key="none" data-page-row="" tabIndex={-1}><Choice group={group} id={null} label={NO_TITLE} line={NO_TITLE_LINE} earned={false} checked={choice === null} onChoose={choose} /></div>
               : <div key={row.id} data-page-row="" tabIndex={-1}>{row.earned
-                ? <Choice group={group} id={row.id} label={row.name} line={row.rule} earned checked={choice === row.id} onChoose={choose} />
+                ? <Choice group={group} id={row.id} label={row.name} line={row.rule} earned checked={choice === row.id} isNew={fresh.has(row.id)} onChoose={choose} />
                 : <Locked row={row} />}</div>))}
           </fieldset>)}
           {view === 'all' && paged.page === (paged.pages ?? 1) && <p className={styles.later}>{LATER_TITLES}</p>}

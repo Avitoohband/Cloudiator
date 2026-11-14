@@ -9,7 +9,7 @@ import { ItemIcon } from '../inventory/ItemPresentation';
 import { MatchCount, ItemSearch, NoMatch } from '../inventory/ItemSearch';
 import { SHOP_SORTS, queryItems, type SortKey } from '../inventory/item-query';
 import { gridColumns, rowFill } from '../inventory/grid-page';
-import { usePhoneCard } from '../inventory/phone-card';
+import { useCloseOnTurn, usePhoneCard } from '../inventory/phone-card';
 import inventory from '../inventory/InventoryPanel.module.css';
 import { Pager } from '../paging/Pager';
 import { PanelFooter } from '../paging/PanelFooter';
@@ -96,6 +96,8 @@ export function ShopPanel({ owner, busy, preview, buy, initialMerchant, clock, b
   const phoneCard = usePhoneCard(count > 0);
   // The card closes with the section (it opens again from a cell).
   useEffect(() => { if (!active) phoneCard.close(false); }, [active, phoneCard.close]);
+  // On a phone a closed card is not shown: Buy back's line then shows above the grid, never left in the hidden card (Codex review Minor 4).
+  const inCard = !(phoneCard.phone && count > 0) || phoneCard.open;
   // A search with no match under a chip that hides matches All would show says so ("No match for “sword” in Armor").
   const hiddenBy = !back && !choices.length && query.trim() && view !== 'All' && queryItems(shopChoices('All', currency), choiceView, query, sort).length ? view : undefined;
   // The first visible cell when nothing visible is chosen; remembered, so Buy never sends an offer the grid hides.
@@ -108,6 +110,8 @@ export function ShopPanel({ owner, busy, preview, buy, initialMerchant, clock, b
   const shopPaged = usePagedList(choices, { size: gridPage, resetKey: `${view}|${currency}|${query}|${sort}` });
   const backPaged = usePagedList(backCells, { size: gridPage, resetKey: `${query}|${backSort}` });
   const paged: { listRef: RefObject<HTMLElement | null>; goToIndex(index: number): void; rows: readonly unknown[] } = back ? backPaged : shopPaged;
+  // A page the grid turns under an open phone card closes the card, and the new page's first cell takes the focus (`useCloseOnTurn`).
+  useCloseOnTurn(phoneCard, `${back ? 'back' : 'shop'}|${back ? backPaged.page : shopPaged.page}`, paged.listRef);
   const fill = rowFill(paged.rows.length, gridColumns(gridPage));
   const pageIds = back ? backPaged.rows.map(cellId) : shopPaged.rows.map(choice => choice.id);
   // The grid's one Tab stop is on the page shown: the cell the arrow keys last reached, else the chosen one, else the first.
@@ -145,7 +149,8 @@ export function ShopPanel({ owner, busy, preview, buy, initialMerchant, clock, b
     event.preventDefault();
     cells[next]?.focus();
   }
-  const choose = (id: string) => { (back ? setSaleId : setChosenId)(id); phoneCard.show(); };
+  /** A cell pressed: chosen, and on a phone its card opens over the grid (the cell takes the focus back when it closes). */
+  const choose = (id: string, cell: HTMLElement) => { (back ? setSaleId : setChosenId)(id); phoneCard.show(cell); };
   function cell(choice: ShopChoice) {
     const offer = choice.kind === 'offer' ? choice.offer : null, entry = offer ? CATALOG_V1.items[offer.catalogId] : null;
     const price = offer ? offer.unitPrice : BANNER.renownPrice;
@@ -158,7 +163,7 @@ export function ShopPanel({ owner, busy, preview, buy, initialMerchant, clock, b
     return <button key={choice.id} type="button" className={`${inventory.tile} ${styles.cell}`} data-shop-cell="" data-cell-id={choice.id} data-testid={`offer-${choice.id}`} data-page-row=""
       data-locked={locked ? '' : undefined} data-poor={poor ? '' : undefined}
       aria-label={name.filter(Boolean).join(', ')} aria-description={description} aria-controls={detailsId} aria-pressed={choice.id === chosenKey}
-      tabIndex={choice.id === tabStop ? 0 : -1} onFocus={() => setStopId(choice.id)} onClick={() => choose(choice.id)}>
+      tabIndex={choice.id === tabStop ? 0 : -1} onFocus={() => setStopId(choice.id)} onClick={event => choose(choice.id, event.currentTarget)}>
       {offer ? <ItemIcon catalogId={offer.catalogId} /> : <BannerArt />}
       {offer ? <span className={styles.level} data-shop-level="" aria-hidden="true">L{offer.requiredLevel}</span>
         : owned && <span className={styles.owned} aria-hidden="true">✓</span>}
@@ -173,7 +178,7 @@ export function ShopPanel({ owner, busy, preview, buy, initialMerchant, clock, b
     const id = cellId(entry), poor = entry.price > spendable(owner, 'money');
     return <button key={id} type="button" className={`${inventory.tile} ${styles.cell}`} data-shop-cell="" data-buyback-cell={entry.saleId} data-cell-id={id} data-page-row=""
       data-rarity={entry.item.rarity} data-poor={poor ? '' : undefined} aria-label={buyBackCellLabel(entry)} aria-description={poor ? 'Not enough gold' : undefined}
-      aria-controls={detailsId} aria-pressed={id === chosenKey} tabIndex={id === tabStop ? 0 : -1} onFocus={() => setStopId(id)} onClick={() => choose(id)}>
+      aria-controls={detailsId} aria-pressed={id === chosenKey} tabIndex={id === tabStop ? 0 : -1} onFocus={() => setStopId(id)} onClick={event => choose(id, event.currentTarget)}>
       <ItemIcon catalogId={entry.item.catalogId} />
       <span className={styles.level} aria-hidden="true">L{entry.item.tier}</span>
       <span className={styles.price} aria-hidden="true"><CurrencyIcon currency="money" size={10} />{entry.price}</span>
@@ -189,6 +194,7 @@ export function ShopPanel({ owner, busy, preview, buy, initialMerchant, clock, b
         <span><CurrencyIcon currency="renown" size={14} /> Available renown <b>{spendable(owner, 'renown')}</b></span>
       </p>
     </div>
+    {back && !inCard && buyBackOutcome && <div className={styles.outcome}>{buyBackOutcome}</div>}
     {/* On a phone the chosen cell's card lies over the grid once a cell is chosen; with no cell to choose, the card (empty or no match) shows below. */}
     <div ref={phoneCard.hostRef} className={inventory.columns} data-card={phoneCard.phone && count > 0 ? (phoneCard.open ? 'open' : 'closed') : undefined}>
       <div>
@@ -225,7 +231,7 @@ export function ShopPanel({ owner, busy, preview, buy, initialMerchant, clock, b
         onKeyDown={phoneCard.onKeyDown}>
         {phoneCard.phone && count > 0 && <button type="button" className={inventory.closeCard} aria-label="Close item card" onClick={() => phoneCard.close()}>×</button>}
         {back ? <>
-          {buyBackOutcome && <div className={styles.outcome}>{buyBackOutcome}</div>}
+          {inCard && buyBackOutcome && <div className={styles.outcome}>{buyBackOutcome}</div>}
           {sales.length === 0 ? <div className={styles.emptyCard}><p>{BUY_BACK_EMPTY_CARD}</p></div>
             : chosenSale ? <BuyBackCard key={chosenSale.saleId} entry={chosenSale} owner={owner} clock={clock} busy={busy} preview={preview} buyBack={buyBack} />
               : <p>Nothing to show. Clear the search to see every item.</p>}

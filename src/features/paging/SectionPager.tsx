@@ -9,8 +9,9 @@
 // - `SectionPager` is the optional bottom bar ("‹ Level and stamina · 3 of 5 · Worn equipment ›", the `nav` named "Section bar"). Render
 //   it, in a `PanelFooter`, only in a section that has no paged list or grid of its own; in a section with one, the bottom bar is
 //   that list's `Pager`.
-// `index` is 0-based everywhere. Task 33 fix round 1: on a phone the strip is one line (‹, the name, quiet circles, ›); the neighbours'
-// names sit in their own spans so the phone hides them while each button keeps its accessible name.
+// `index` is 0-based everywhere. Task 33: on a phone the strip is one line, the name and the circles (44 px targets); its ‹ › are not
+// shown there (fix round 2 ruling: the bottom bar has Back and Next, and ← → still work). On a pointer layout the neighbours' names sit in
+// their own spans beside ‹ ›.
 import { useEffect, useRef, useState } from 'react';
 import { PageDots } from './PageDots';
 import { usePageKeys } from './usePageKeys';

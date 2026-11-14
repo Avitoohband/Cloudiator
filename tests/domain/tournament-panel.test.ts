@@ -500,7 +500,7 @@ describe('the live Tournaments panel before the shared clock has the server’s 
   const panel = (props: Partial<PanelProps>) => text(renderToStaticMarkup(createElement(TournamentPanel,
     { reads, owner: null, clock: unsynced(), fixture: false, syncError: null, viewer: 'visitor', ...props } as PanelProps)));
 
-  it('offers the league picker only to a visitor or a viewer without a gladiator, never while a player’s owner loads (13.4 M4)', () => {
+  it('offers the league buttons to a visitor, a viewer without a gladiator and (Task 37) a player with their own league marked, never while a player’s owner loads (13.4 M4)', () => {
     const clock = unsynced();
     clock.sync(start + 10 * MIN);
     const html = (props: Partial<PanelProps>) => renderToStaticMarkup(createElement(TournamentPanel,
@@ -511,7 +511,11 @@ describe('the live Tournaments panel before the shared clock has the server’s 
     expect(loading).not.toContain('aria-label="League"');
     expect(text(loading)).toContain('Loading your gladiator’s tournament…');
     expect(text(loading)).not.toContain('Loading the tournament…');
-    expect(html({ viewer: 'player', owner: ownerFixture })).not.toContain('aria-label="League"');
+    // Task 37: a player gets the buttons too, on their own league, marked "(yours)" and pressed.
+    const player = html({ viewer: 'player', owner: ownerFixture });
+    expect(player).toContain('aria-label="League"');
+    expect(player).toMatch(/aria-pressed="true"[^>]*>Bronze \(yours\)</);
+    expect(text(player)).not.toContain('Viewing the');
   });
 
   it('shows Registration to a player only: everyone else sees the countdown and brackets (13.4 review M5)', () => {

@@ -272,32 +272,43 @@ function OfferList({ reads, seller, version, onRefresh, ...view }: {
   const loadingMore = useRef(false);
   /** The current read generation: a page that arrives for an older one (a refresh, another seller) is dropped. */
   const generation = useRef(0);
+  /** The list as last set, and the first-page read in flight: a Next waits for the read and extends the list it leaves (Codex review, finding 2). */
+  const latest = useRef<OffersList | null>(null);
+  const refreshing = useRef<Promise<void> | null>(null);
 
   useEffect(() => {
     const mine = ++generation.current;
     setStatus('loading');
     loadingMore.current = false;
-    readOffers(reads, seller, null).then(
-      next => { if (mine === generation.current) { setList(next); setStatus('ready'); } },
+    const run = readOffers(reads, seller, null).then(
+      next => { if (mine === generation.current) { latest.current = next; setList(next); setStatus('ready'); } },
       () => { if (mine === generation.current) setStatus('failed'); },
     );
+    refreshing.current = run;
+    void run.then(() => { if (refreshing.current === run) refreshing.current = null; });
     return () => { generation.current += 1; };
   }, [reads, seller, version, attempt]);
 
   const more = useCallback(async () => {
-    if (!list?.nextCursor || loadingMore.current) return;
-    const mine = generation.current;
+    if (loadingMore.current) return;
     loadingMore.current = true;
     try {
-      const next = await readOffers(reads, seller, list);
-      if (mine === generation.current) setList(next);
-    } catch (error) {
-      // The offers already shown stay, and Next tries again: the pager says so (its failure line is the one line).
-      throw error;
+      // A page whose base list is no longer the shown one (a refresh landed meanwhile) is dropped, so older offers never replace a refreshed list;
+      // it is then read once more from the new base, so the Next completes (at most three tries, each after a newer read landed).
+      for (let tries = 0; tries < 3; tries += 1) {
+        while (refreshing.current) await refreshing.current;
+        const base = latest.current;
+        if (!base?.nextCursor) return;
+        const mine = generation.current;
+        const next = await readOffers(reads, seller, base);
+        if (mine === generation.current && latest.current === base) { latest.current = next; setList(next); return; }
+        // Overtaken with no newer read to wait for (the list moved on without one): nothing to extend.
+        if (!refreshing.current && latest.current === base) return;
+      }
     } finally {
-      if (mine === generation.current) loadingMore.current = false;
+      loadingMore.current = false;
     }
-  }, [list, reads, seller]);
+  }, [reads, seller]);
 
   return <MarketOffers {...view} model={{ rows: list?.rows ?? [], nextCursor: list?.nextCursor ?? null, status }} onMore={more}
     onRetry={() => setAttempt(n => n + 1)} onRefresh={() => { setAttempt(n => n + 1); onRefresh?.(); }} />;

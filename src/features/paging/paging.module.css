@@ -323,12 +323,14 @@
     height: 12px;
   }
 
-  /* Task 33 fix round 1: the section strip is one line on a phone, as the approved mockup draws it: ‹, the section's name, quiet circles,
-     ›. The neighbours' names are read (each button keeps its accessible name) but not shown; the bottom bar shows them. */
+  /* Task 33: the section strip is one line on a phone, as the approved drawing (`my-gladiator-sections-phone.png`) has it: the section's
+     name and quiet circles, no ‹ › (fix round 2 ruling, after the 44 px targets left the name one letter). The bottom bar carries Back and
+     Next with the neighbours' names, and ← → still move sections. Each circle is a 44 px target (its dot stays small inside), and the name
+     ellipsizes only when it does not fit (its full text stays for assistive technology). A pointer window keeps ‹ ›. */
   .strip {
-    grid-template-columns: auto minmax(0, 1fr) auto auto;
-    grid-template-areas: 'prev name dots next';
-    column-gap: 4px;
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-areas: 'name dots';
+    column-gap: 0;
     margin-bottom: 6px;
     padding-bottom: 2px;
   }
@@ -344,18 +346,23 @@
     display: none;
   }
 
+  .stripName {
+    padding: 0 4px 0 0;
+  }
+
   .stripMove {
-    min-width: 40px;
-    padding: 0 8px;
+    display: none;
   }
 
   .strip .dots {
     height: 44px;
     margin: 0;
+    gap: 0;
   }
 
   .strip .dot {
-    width: 16px;
+    width: 44px;
+    min-width: 44px;
   }
 
   .strip .dot i {

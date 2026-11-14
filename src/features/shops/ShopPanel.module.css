@@ -163,7 +163,8 @@
 /* Patch 1.9 Task 33: the shop's grid and Buy back show one page each (whole rows; Buy back 5 a page), so neither box scrolls now; both
    keep the inventory grid's floor (254 px, 194 px on touch). */
 
-/* The outcome of a buy back, above the card: green when it is done, the inventory's red line when it was refused. */
-.outcome p[role='status'] { margin: 0 0 8px; padding: 8px 10px; border: 1px solid #2f6b4a; border-radius: 8px; background: #132a1f; color: #d8f2e2; font-size: .85rem; }
-.outcome p[role='alert'] { margin: 0 0 8px; padding: 8px 10px; border: 1px solid #7a3535; border-radius: 8px; background: #2c1719; color: #ffd2cc; font-size: .85rem; }
+/* The outcome of a buy back, above the card: green when it is done, the inventory's red line when it was refused. A held copy (`data-role`)
+   has the same box while the next command is on its way (Task 33 fix round 2). */
+.outcome p:is([role='status'], [data-role='status']) { margin: 0 0 8px; padding: 8px 10px; border: 1px solid #2f6b4a; border-radius: 8px; background: #132a1f; color: #d8f2e2; font-size: .85rem; }
+.outcome p:is([role='alert'], [data-role='alert']) { margin: 0 0 8px; padding: 8px 10px; border: 1px solid #7a3535; border-radius: 8px; background: #2c1719; color: #ffd2cc; font-size: .85rem; }
 .outcome button { margin: 0 0 8px; }

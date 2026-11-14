@@ -397,7 +397,7 @@ test('on a phone the chosen item’s card opens over the grid, closes with ×, E
   await expect(details).toBeHidden();
   await expect(menu).toBeVisible();
   // The Shops: a cell's card opens over the shop grid, and Buy works from it.
-  await strip.getByRole('button', { name: 'Next section: Shops', exact: true }).click();
+  await strip.getByRole('button', { name: 'Go to section: Shops', exact: true }).click();
   const shops = shopsRegion(menu), offers = offerDetails(shops);
   await expect(offers).toBeHidden();
   await tap(offerCell(shops, 'sword:1:common'));
@@ -411,6 +411,193 @@ test('on a phone the chosen item’s card opens over the grid, closes with ×, E
   await expect(offers).toBeHidden();
   await expect(offerCell(shops, 'sword:1:common')).toBeFocused();
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+});
+
+// Task 33 fix round 2 (re-review M-1): the purchase line above the Shops moves the grid down; the open card follows it and stays wholly inside
+// the menu, so its last control (Buy) is still in reach.
+test('on a phone a purchase line leaves the open card wholly inside the menu', async ({ page, context }, info) => {
+  await inventoryFlow(context);
+  await page.setViewportSize({ width: 360, height: 780 });
+  await page.goto('/game/');
+  const menu = await openSection(await openMenu(page, 'Inventory and shops'), 'Shops');
+  await menu.evaluate(el => Promise.all(el.getAnimations().map(a => a.finished)));
+  const tap = (locator: Locator) => (info.project.name === 'mobile' ? locator.tap() : locator.click());
+  const body = menu.getByTestId('menu-body'), shops = shopsRegion(menu), offers = offerDetails(shops);
+  await tap(offerCell(shops, 'sword:1:common'));
+  await expect(offers).toBeVisible();
+  const inside = async () => {
+    const card = (await offers.boundingBox())!, view = (await body.boundingBox())!;
+    const bottom = Math.min(view.y + view.height, 780);
+    return card.y >= view.y - 1 && card.y + card.height <= bottom + 1;
+  };
+  expect(await inside()).toBe(true);
+  // Buy is the card's last control: the card scrolled to its end.
+  await offers.evaluate(element => { element.scrollTop = element.scrollHeight; });
+  const buy = offers.getByRole('button', { name: 'Buy Sword', exact: true });
+  await buy.click();
+  await expect(menu.getByRole('status').filter({ hasText: 'Purchase confirmed.' })).toBeVisible();
+  await expect.poll(inside, 'the card is wholly inside the menu').toBe(true);
+  await offers.evaluate(element => { element.scrollTop = element.scrollHeight; });
+  const [card, button] = [(await offers.boundingBox())!, (await buy.boundingBox())!];
+  expect(button.y + button.height).toBeLessThanOrEqual(card.y + card.height + 1);
+});
+
+// Task 33 fix round 2 (re-review M-2, the coordinator's ruling): Escape on the empty search field or on Sort does what it did before Task 33
+// (3ed69c0, `ItemSearch`: "an empty field leaves Escape to close the menu as it always did"): it closes the menu, the card open or not. A
+// typed search still takes Escape itself (it clears) and the menu and the card stay.
+test('on a phone with the card open, Escape clears a typed search; on the empty search or on Sort it closes the menu, as before Task 33', async ({ page, context }, info) => {
+  const flow = await inventoryFlow(context);
+  await page.setViewportSize({ width: 360, height: 740 });
+  await page.goto('/game/');
+  const tap = (locator: Locator) => (info.project.name === 'mobile' ? locator.tap() : locator.click());
+  const [axe] = flow.state.inventory;
+  const open = async () => {
+    const menu = await openMenu(page, 'Inventory and shops');
+    await tap(tile(menu, axe));
+    await expect(menu.getByRole('region', { name: 'Item details' })).toBeVisible();
+    return menu;
+  };
+  let menu = await open();
+  const details = menu.getByRole('region', { name: 'Item details' });
+  const search = menu.getByRole('searchbox', { name: 'Search your items' });
+  await search.fill('axe');
+  await search.press('Escape');
+  await expect(search).toHaveValue('');
+  await expect(menu).toBeVisible();
+  await expect(details).toBeVisible();
+  // The empty search: Escape closes the menu.
+  await search.press('Escape');
+  await expect(menuDialog(page, 'Inventory and shops')).toHaveCount(0);
+  // Sort: the same.
+  menu = await open();
+  await menu.getByRole('combobox', { name: 'Sort your items' }).focus();
+  await page.keyboard.press('Escape');
+  await expect(menuDialog(page, 'Inventory and shops')).toHaveCount(0);
+});
+
+// Task 33 fix round 2 (re-review M-3): the card gives the focus back to its own tile, even where a tap does not focus the tile (iOS Safari):
+// a click dispatched to the tile, with the focus left in the search field, stands for such a tap.
+test('on a phone the card gives the focus back to its tile when it closes, even when the tap focused nothing', async ({ page, context }) => {
+  const flow = await inventoryFlow(context);
+  await page.setViewportSize({ width: 360, height: 740 });
+  await page.goto('/game/');
+  const menu = await openMenu(page, 'Inventory and shops');
+  const details = menu.getByRole('region', { name: 'Item details' }), grid = menu.getByTestId('inventory-grid');
+  const search = menu.getByRole('searchbox', { name: 'Search your items' });
+  const [axe, sword] = flow.state.inventory;
+  for (const [piece, how] of [[sword, '×'], [axe, 'Escape']] as const) {
+    await search.focus();
+    await tile(grid, piece).dispatchEvent('click');
+    await expect(details).toBeVisible();
+    await expect(search).not.toBeFocused();
+    if (how === '×') await details.getByRole('button', { name: 'Close item card', exact: true }).click();
+    else await page.keyboard.press('Escape');
+    await expect(details).toBeHidden();
+    await expect(tile(grid, piece), how).toBeFocused();
+  }
+});
+
+// Codex review 6: the page and section keys pressed in an open phone card stay in it. The grid under the card keeps its page, the section stays,
+// PageDown scrolls the card itself, and closing the card gives the focus back to its tile.
+test('on a phone the page and section keys pressed in an open card never turn the grid’s page or the section', async ({ page, context }, info) => {
+  const flow = await inventoryFlow(context);
+  flow.state.inventory = Object.keys(CATALOG_V1.items).slice(0, 27).map(id => ({ ...itemFixture(CATALOG_V1.items[id]), id: randomUUID() }));
+  await page.setViewportSize({ width: 360, height: 740 });
+  await page.goto('/game/');
+  const menu = await openMenu(page, 'Inventory and shops');
+  const tap = (locator: Locator) => (info.project.name === 'mobile' ? locator.tap() : locator.click());
+  const grid = menu.getByTestId('inventory-grid'), details = menu.getByRole('region', { name: 'Item details' });
+  const label = menu.getByRole('navigation', { name: 'Pages', exact: true }).locator('b').first();
+  const shown = menu.getByRole('navigation', { name: 'Sections', exact: true }).locator('b').first();
+  await expect(label).toHaveText('Page 1 of 2');
+  const [first] = flow.state.inventory;
+  await tap(tile(grid, first));
+  await expect(details).toBeVisible();
+  // From the card itself (it has the focus when it opens): PageDown scrolls the card, and neither the page nor the section moves.
+  await expect.poll(() => page.evaluate(() => !!document.activeElement?.closest('[aria-label="Item details"]'))).toBe(true);
+  const scrollable = await details.evaluate(element => element.scrollHeight > element.clientHeight + 1);
+  for (const key of ['PageDown', 'ArrowRight', 'PageUp', 'ArrowLeft', 'PageDown']) {
+    await page.keyboard.press(key);
+    await expect(label, key).toHaveText('Page 1 of 2');
+    await expect(shown, key).toHaveText('Inventory');
+    await expect(details, key).toBeVisible();
+  }
+  if (scrollable) expect(await details.evaluate(element => element.scrollTop)).toBeGreaterThan(0);
+  // From an action in the card: the same.
+  await card(menu, first).getByRole('button').first().focus();
+  for (const key of ['PageDown', 'ArrowRight']) {
+    await page.keyboard.press(key);
+    await expect(label, key).toHaveText('Page 1 of 2');
+    await expect(shown, key).toHaveText('Inventory');
+  }
+  await expect(tile(grid, first)).toHaveCount(1);
+  // Closing it gives the focus back to the tile, on the page it was on.
+  await details.getByRole('button', { name: 'Close item card', exact: true }).click();
+  await expect(details).toBeHidden();
+  await expect(tile(grid, first)).toBeFocused();
+  await expect(label).toHaveText('Page 1 of 2');
+});
+
+// Fix wave re-review M4: a page the grid turns under an open phone card (the bar's Next by keyboard) closes the card, and the new page's first
+// tile takes the focus, as any other turn gives it. The same in the Shops.
+test('on a phone the bar’s Next pressed by keyboard with a card open closes the card and gives the focus to the new page’s first tile', async ({ page, context }, info) => {
+  const flow = await inventoryFlow(context);
+  flow.state.inventory = Object.keys(CATALOG_V1.items).slice(0, 27).map(id => ({ ...itemFixture(CATALOG_V1.items[id]), id: randomUUID() }));
+  await page.setViewportSize({ width: 360, height: 740 });
+  await page.goto('/game/');
+  const menu = await openMenu(page, 'Inventory and shops');
+  const tap = (locator: Locator) => (info.project.name === 'mobile' ? locator.tap() : locator.click());
+  const grid = menu.getByTestId('inventory-grid'), details = menu.getByRole('region', { name: 'Item details' });
+  const bar = menu.getByRole('navigation', { name: 'Pages', exact: true }), label = bar.locator('b').first();
+  const size = await page.evaluate(() => (matchMedia('(hover: none), (max-width: 480px)').matches ? 15 : 24));
+  await expect(label).toHaveText('Page 1 of 2');
+  await tap(tile(grid, flow.state.inventory[0]));
+  await expect(details).toBeVisible();
+  await bar.getByRole('button', { name: 'Next page', exact: true }).focus();
+  await expect(details).toBeVisible();
+  await page.keyboard.press('Enter');
+  await expect(label).toHaveText('Page 2 of 2');
+  await expect(details).toBeHidden();
+  await expect(tile(grid, flow.state.inventory[size])).toBeFocused();
+  // The Shops: the same.
+  await openSection(menu, 'Shops');
+  const shops = shopsRegion(menu), offers = offerDetails(shops), cells = shops.getByRole('group', { name: 'Shop items', exact: true }).locator('[data-page-row]');
+  await expect(label).toHaveText(/^Page 1 of \d+$/);
+  await tap(cells.first());
+  await expect(offers).toBeVisible();
+  const firstOfPage1 = await cells.first().getAttribute('data-cell-id');
+  await bar.getByRole('button', { name: 'Next page', exact: true }).focus();
+  await page.keyboard.press('Enter');
+  await expect(label).toHaveText(/^Page 2 of \d+$/);
+  await expect(offers).toBeHidden();
+  await expect(cells.first()).toBeFocused();
+  expect(await cells.first().getAttribute('data-cell-id')).not.toBe(firstOfPage1);
+});
+
+// Codex review Minor 4: a sale's line never stays in a closed phone card; closed while the sale is on its way, the line shows at the section's end.
+test('on a phone a sale’s line shows outside the card when the card is closed while the sale is on its way', async ({ page, context }, info) => {
+  const flow = await inventoryFlow(context);
+  await page.setViewportSize({ width: 360, height: 740 });
+  let release = () => {}, sent = 0;
+  const held = new Promise<void>(resolve => { release = resolve; });
+  await context.route('http://127.0.0.1:54321/functions/v1/game-command', async route => {
+    if (route.request().method() === 'POST' && route.request().postDataJSON().kind === 'sell-item') { sent++; await held; }
+    return route.fallback();
+  });
+  await page.goto('/game/');
+  const menu = await openMenu(page, 'Inventory and shops');
+  const tap = (locator: Locator) => (info.project.name === 'mobile' ? locator.tap() : locator.click());
+  const details = menu.getByRole('region', { name: 'Item details' });
+  const [axe] = flow.state.inventory;
+  await tap(tile(menu, axe));
+  await card(menu, axe).getByRole('button', { name: /^Sell Axe/ }).click();
+  await expect.poll(() => sent).toBe(1);
+  await details.getByRole('button', { name: 'Close item card', exact: true }).click();
+  await expect(details).toBeHidden();
+  release();
+  const line = menu.getByRole('status').filter({ hasText: /^Sold for \d+ gold/ });
+  await expect(line).toBeVisible();
+  expect(await line.evaluate(element => !!element.closest('[aria-label="Item details"]'))).toBe(false);
 });
 
 test('explains a stale discard after an inventory refresh and recovers keyboard focus', async ({ page, context }) => {

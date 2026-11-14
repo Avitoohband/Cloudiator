@@ -6,7 +6,7 @@
 // menu does not scroll. The focus goes into the card and back to the tile when it closes (×, Escape); a press outside closes it too and
 // leaves the focus where that press puts it. What lies under it is inert meanwhile (the panel's `covered`). A pointer window keeps the card
 // beside the grid, always shown.
-import { useCallback, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type KeyboardEvent } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type KeyboardEvent, type RefObject } from 'react';
 import { COMPACT_QUERY } from '../shell/rail-reveal';
 
 const subscribe = (change: () => void) => {
@@ -15,6 +15,8 @@ const subscribe = (change: () => void) => {
   return () => media?.removeEventListener?.('change', change);
 };
 const compact = () => !!window.matchMedia?.(COMPACT_QUERY).matches;
+/** The page keys (`Pager`) and the section keys (`SectionStrip`), kept in an open card. */
+const CARD_KEYS = new Set(['PageDown', 'PageUp', 'ArrowLeft', 'ArrowRight']);
 
 /** The nearest ancestor of `element` that scrolls (the menu's body). */
 function scroller(element: HTMLElement): HTMLElement | null {
@@ -31,14 +33,17 @@ export function usePhoneCard(available = true) {
   const [shown, setShown] = useState(false);
   /** The positioned box that holds the grid and the card, the grid's box the card lies over, and the card. */
   const hostRef = useRef<HTMLDivElement>(null), anchorRef = useRef<HTMLDivElement>(null), sheetRef = useRef<HTMLElement>(null);
-  /** What had the focus when the card opened (the tile), which takes it back when the card closes. */
+  /**
+   * The tile the card opened from, which takes the focus back when the card closes. It is the tile pressed (fix round 2, re-review M-3), not
+   * the focus at that moment: iOS Safari does not focus a tapped button.
+   */
   const opener = useRef<HTMLElement | null>(null);
   const open = phone && shown && available;
   useEffect(() => { if (!available) { setShown(false); opener.current = null; } }, [available]);
 
-  const show = useCallback(() => {
+  const show = useCallback((tile: HTMLElement) => {
     if (!compact()) return;
-    opener.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    opener.current = tile;
     setShown(true);
   }, []);
   const close = useCallback((giveBack = true) => {
@@ -60,6 +65,13 @@ export function usePhoneCard(available = true) {
       sheet.style.setProperty('--card-height', `${Math.max(120, Math.min(view.bottom, window.innerHeight) - top)}px`);
     };
     place();
+    // A line that comes or goes above the grid (a purchase's, fix round 2, re-review M-1) moves the grid: the card follows it and stays
+    // wholly inside the menu. Every box from the card's host up to the menu's body grows or shrinks with such a line.
+    const body = scroller(host);
+    const boxes: Element[] = [];
+    for (let node: HTMLElement | null = host; node && node !== body; node = node.parentElement) boxes.push(node);
+    const resized = typeof ResizeObserver === 'function' ? new ResizeObserver(place) : null;
+    for (const box of boxes) resized?.observe(box);
     // The card takes the focus only as it opens: a card that kept a tabindex would catch the focus a control in it leaves (a discarded
     // piece's Discard; `useFocusRescue`) before that command's outcome could take it (`useOutcomeFocus`).
     sheet.tabIndex = -1;
@@ -67,7 +79,7 @@ export function usePhoneCard(available = true) {
     const drop = () => sheet.removeAttribute('tabindex');
     sheet.addEventListener('blur', drop, { once: true });
     window.addEventListener('resize', place);
-    return () => { window.removeEventListener('resize', place); sheet.removeEventListener('blur', drop); drop(); };
+    return () => { window.removeEventListener('resize', place); resized?.disconnect(); sheet.removeEventListener('blur', drop); drop(); };
   }, [open]);
 
   // A press outside the card closes it (the press goes on to what it pressed).
@@ -83,7 +95,9 @@ export function usePhoneCard(available = true) {
   }, [open, close]);
 
   // Escape with the focus elsewhere in the menu (on the menu itself, where the focus goes when a control in the card leaves, or on a chip):
-  // the card closes first, not the menu. A field keeps its own Escape (the search clears), and the card's own keys are the card's.
+  // the card closes first, not the menu. A field keeps its Escape as before Task 33 (3ed69c0; fix round 2, the coordinator's ruling on
+  // re-review M-2): a typed search clears itself, and an empty search or the Sort select leave it to the shell, which closes the menu.
+  // The card's own keys are the card's.
   useEffect(() => {
     const menu = hostRef.current?.closest<HTMLElement>('[data-menu-surface]');
     if (!open || !menu) return;
@@ -98,11 +112,42 @@ export function usePhoneCard(available = true) {
     return () => menu.removeEventListener('keydown', onKey);
   }, [open, close]);
 
-  /** Escape closes the card, not the menu. */
+  /**
+   * The card's own keys. Escape closes the card, not the menu. The page and section keys pressed in the card are the card's (Codex review 6):
+   * they go no further than the card, so the grid under it never turns a page and the section stays; PageDown and PageUp still scroll the
+   * card itself (the browser's own scrolling), and a control in the card still gets them first. The page keys (`usePageKeys`) listen on the
+   * document, where React's own listener is too (the app is hydrated on the document) and was added first: stopping the other listeners
+   * there as well keeps the key from them.
+   */
   const onKeyDown = (event: KeyboardEvent<HTMLElement>) => {
-    if (!open || event.key !== 'Escape' || event.defaultPrevented) return;
+    if (!open) return;
+    if (CARD_KEYS.has(event.key)) { event.stopPropagation(); event.nativeEvent.stopImmediatePropagation(); return; }
+    if (event.key !== 'Escape' || event.defaultPrevented) return;
     event.preventDefault();
     close();
   };
   return { phone, open, show, close, hostRef, anchorRef, sheetRef, onKeyDown };
+}
+
+/**
+ * A page the grid turns under the open card (the bar's Next by keyboard, a page key pressed outside the card) closes the card, so it never
+ * lies over another page than its tile's (Codex review 6). The turn's own focus move ran while the grid was still inert under the card, so
+ * once the card has closed the new page's first tile takes the focus, as every other turn gives it (fix wave re-review M4). `turn` changes
+ * with the page shown; `list` is the page's container (`usePagedList`'s `listRef`).
+ */
+export function useCloseOnTurn(card: { open: boolean; close(giveBack?: boolean): void }, turn: unknown, list: RefObject<HTMLElement | null>) {
+  const open = useRef(card.open);
+  open.current = card.open;
+  const focusFirst = useRef(false);
+  const { close } = card;
+  useEffect(() => {
+    if (!open.current) return;
+    focusFirst.current = true;
+    close(false);
+  }, [turn, close]);
+  useEffect(() => {
+    if (card.open || !focusFirst.current) return;
+    focusFirst.current = false;
+    list.current?.querySelector<HTMLElement>('[data-page-row]')?.focus({ preventScroll: true });
+  });
 }

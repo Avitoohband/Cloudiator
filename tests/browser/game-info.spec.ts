@@ -381,6 +381,56 @@ test.describe('Game Info by the page', () => {
     await expect(list).toHaveAttribute('aria-activedescendant', await second.getAttribute('id') as string);
   });
 
+  test('page turns keep the focus on the listbox, including End across a page boundary', async ({ page }) => {
+    const wiki = draft('wiki');
+    await page.goto('/game/?mode=fixture&info=draft');
+    await cornerChip(page).getByRole('button', { name: 'Game Info', exact: true }).click();
+    const panel = page.getByRole('dialog', { name: 'Game Info' });
+    const list = panel.getByRole('listbox', { name: 'Wiki topics' });
+    const bar = pagesBar(panel);
+    const label = bar.locator('b').first();
+    const activeOnPage = async () => {
+      const id = await list.getAttribute('aria-activedescendant');
+      expect(id, 'an active descendant').toBeTruthy();
+      await expect(list.locator(`[id="${id}"]`)).toHaveCount(1);
+    };
+    await bar.getByRole('button', { name: 'Go to page 1', exact: true }).click();
+    await expect(list).toBeFocused();
+    await bar.getByRole('button', { name: 'Next page', exact: true }).click();
+    await expect(label).toHaveText('Page 2 of 3');
+    await expect(list).toBeFocused();
+    await activeOnPage();
+    // End goes to the last topic, on page 3: across the boundary, the focus stays on the listbox.
+    await page.keyboard.press('End');
+    await expect(label).toHaveText('Page 3 of 3');
+    await expect(list).toBeFocused();
+    await expect(panel.getByRole('article', { name: wiki.entries.at(-1)!.title })).toBeVisible();
+    await activeOnPage();
+    await page.keyboard.press('ArrowUp');
+    await expect(panel.getByRole('article', { name: wiki.entries.at(-2)!.title })).toBeVisible();
+    await expect(list).toBeFocused();
+    await activeOnPage();
+    // PageUp turns back; the focus stays and the active option is on the page.
+    await page.keyboard.press('PageUp');
+    await expect(label).toHaveText('Page 2 of 3');
+    await expect(list).toBeFocused();
+    await activeOnPage();
+  });
+
+  test('changing the Show size on page 2 keeps the focus on the select and the topic unchanged', async ({ page }) => {
+    const wiki = draft('wiki');
+    await page.goto('/game/?mode=fixture&info=draft');
+    await cornerChip(page).getByRole('button', { name: 'Game Info', exact: true }).click();
+    const panel = page.getByRole('dialog', { name: 'Game Info' });
+    await expect(pagesBar(panel).locator('b').first()).toHaveText('Page 2 of 3');
+    const show = panel.getByRole('combobox', { name: 'Rows per page' });
+    await show.focus();
+    await page.keyboard.press('ArrowDown');
+    await expect(show).toHaveValue('10');
+    await expect(show).toBeFocused();
+    await expect(panel.getByRole('article', { name: wiki.entries[5].title })).toBeVisible();
+  });
+
   test('the Wiki bar sits directly under the topic box and above the article', async ({ page }) => {
     await page.goto('/game/?mode=fixture&info=draft');
     await cornerChip(page).getByRole('button', { name: 'Game Info', exact: true }).click();

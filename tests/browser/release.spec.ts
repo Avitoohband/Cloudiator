@@ -14,7 +14,7 @@ import { REPLAY_FIXTURES } from '../fixtures/replay-ids';
 import { a11yShot, contrastIssues, expectNamedControls, focusDrops, focusedElement, noHorizontalScroll, watchFocus } from './a11y-helpers';
 import { SUPABASE_URL, emptyWorld, isPresence, routeLiveReads, seedSession, testUser } from './live-routes';
 import { reviewShot, reviewShot360 } from './review-shots';
-import { chipToggle, cornerChip, creationDialog, everyoneResults, expectOwnerShown, joinButton, menuDialog, openMenu, quietArrivals, railMenus, revealRail, touchLayout, pageTo } from './shell-helpers';
+import { campReady, chipToggle, cornerChip, creationDialog, everyoneResults, expectOwnerShown, joinButton, menuDialog, openMenu, quietArrivals, railMenus, revealRail, touchLayout, pageTo } from './shell-helpers';
 import { openItemCard, openSection } from './section-helpers';
 import { showChoice } from './show-choice';
 
@@ -29,7 +29,6 @@ const MIN = 60_000;
 const NOW = worldFixture.serverNowMs;
 const LABELS = MENUS.map(m => m.label);
 const readJson = (path: string) => JSON.parse(readFileSync(path, 'utf8'));
-const campReady = (page: Page) => page.waitForFunction(() => window.__cloudiatorCamp?.state()?.ready === true, null, { timeout: 45_000 });
 /** The fixture camp, ready, with the fixture owner shown (or as a visitor). */
 async function openFixtureCamp(page: Page, url = '/game/?mode=fixture') {
   await page.goto(url);

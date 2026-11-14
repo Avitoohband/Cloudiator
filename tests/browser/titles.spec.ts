@@ -5,7 +5,7 @@ import type { ActivitySummary } from '../../supabase/functions/_shared/contracts
 import type { OwnerState, PrestigeAward, PublicProfile } from '../../supabase/functions/_shared/contracts/reads';
 import { titleText } from '../../src/features/seasons/season-text';
 import { ownerFixture, worldFixture } from '../fixtures/domain';
-import { ASTER_AWARD, withAsterTitles } from '../fixtures/titles';
+import { ASTER_AWARD, ASTER_TITLES, withAsterTitles } from '../fixtures/titles';
 import { a11yShot, contrastIssues, expectNamedControls, focusDrops, noHorizontalScroll, watchFocus } from './a11y-helpers';
 import { SUPABASE_URL, isPresence, routeLiveReads, seedSession, type LiveNotification } from './live-routes';
 import { cornerChip, expectOwnerShown, menuDialog, openMenu, quietArrivals } from './shell-helpers';
@@ -318,6 +318,88 @@ test.describe('the Title button and "Choose your title" in live mode', () => {
     await bar.getByRole('button', { name: 'Go to page 9', exact: true }).click();
     await expect(dialog.getByText('4 more arrive later')).toBeVisible();
     await expect(dialog.locator('[data-page-row]').first()).toBeVisible();
+  });
+
+  // Patch 1.9 Task 36 (Avi, 2026-11-14): a tiny New mark on a title earned but not yet seen in the picker; seen once its row was on a page viewed there.
+  const SEEN_KEY = 'cloudiator.titles-seen.v1';
+  /** Aster's earned titles, as the device record holds them: everything but Moneyed (the last row of Earned, alone on page 3), unless `all`. */
+  const seenRecord = (all = false) => ({ [ownerFixture.gladiatorId]: ASTER_TITLES.map(t => t.id).filter(id => all || id !== 'moneyed') });
+  const seed = (page: Page, record: unknown) => page.context().addInitScript(([key, value]) => { localStorage.setItem(key as string, JSON.stringify(value)); }, [SEEN_KEY, record]);
+  const toLastPage = (dialog: Locator) => dialog.getByRole('navigation', { name: 'Pages' }).getByRole('button', { name: 'Go to page 3', exact: true }).click();
+  const newMarks = (dialog: Locator) => dialog.locator('[data-title-new]');
+
+  test('a newly earned title shows New, as part of its name, and is gone the next time the picker opens', async ({ page }) => {
+    await seed(page, seenRecord());
+    await player(page);
+    await openLive(page);
+    const { button, dialog } = await openPicker(page);
+    await toLastPage(dialog);
+    const moneyed = dialog.getByRole('radio', { name: /^Moneyed, new$/i });
+    await expect(moneyed).toBeVisible();
+    await expect(newMarks(dialog)).toHaveText(['New']);
+    // The mark stays while the picker is open (turn away and back), and is gone after closing and reopening.
+    await dialog.getByRole('navigation', { name: 'Pages' }).getByRole('button', { name: 'Go to page 1', exact: true }).click();
+    await toLastPage(dialog);
+    await expect(newMarks(dialog)).toHaveCount(1);
+    await dialog.getByRole('button', { name: 'Close', exact: true }).click();
+    await expect(dialog).toBeHidden();
+    await button.click();
+    await toLastPage(dialog);
+    await expect(dialog.getByRole('radio', { name: 'Moneyed', exact: true })).toBeVisible();
+    await expect(newMarks(dialog)).toHaveCount(0);
+  });
+
+  test('a new title on page 1 stays New when the picker opened on the worn title page, until page 1 is viewed', async ({ page }) => {
+    // Moneyed is worn, so the picker opens on page 3; Wanderer (page 1) is new and has not been on screen.
+    await seed(page, { [ownerFixture.gladiatorId]: ASTER_TITLES.map(t => t.id).filter(id => id !== 'wanderer') });
+    await player(page, { worn: 'moneyed' });
+    await openLive(page);
+    const { button, dialog } = await openPicker(page);
+    const bar = dialog.getByRole('navigation', { name: 'Pages' });
+    await expect(bar.locator('b').first()).toHaveText('Page 3 of 3');
+    await dialog.getByRole('button', { name: 'Close', exact: true }).click();
+    await button.click();
+    await bar.getByRole('button', { name: 'Go to page 1', exact: true }).click();
+    await expect(dialog.getByRole('radio', { name: /^Wanderer, new$/i })).toBeVisible();
+    // Now page 1 has been viewed: the mark is gone the next time.
+    await dialog.getByRole('button', { name: 'Close', exact: true }).click();
+    await button.click();
+    await bar.getByRole('button', { name: 'Go to page 1', exact: true }).click();
+    await expect(dialog.getByRole('radio', { name: 'Wanderer', exact: true })).toBeVisible();
+    await expect(newMarks(dialog)).toHaveCount(0);
+  });
+
+  test('with no record on the device, nothing is marked', async ({ page }) => {
+    await player(page);
+    await openLive(page);
+    const { dialog } = await openPicker(page);
+    await showAll(dialog);
+    await expect(dialog.getByRole('radio')).toHaveCount(9);
+    await expect(newMarks(dialog)).toHaveCount(0);
+  });
+
+  test('a new title on a page the player never turned to stays New after closing', async ({ page }) => {
+    await seed(page, seenRecord());
+    await player(page);
+    await openLive(page);
+    const { button, dialog } = await openPicker(page);
+    await expect(newMarks(dialog)).toHaveCount(0);
+    await dialog.getByRole('button', { name: 'Close', exact: true }).click();
+    await button.click();
+    await toLastPage(dialog);
+    await expect(newMarks(dialog)).toHaveCount(1);
+  });
+
+  test('the mark shows in All too, on a title earned and not seen, and not on a locked one', async ({ page }) => {
+    await seed(page, seenRecord());
+    await player(page);
+    await openLive(page);
+    const { dialog } = await openPicker(page);
+    await dialog.getByRole('button', { name: 'All · 35', exact: true }).click();
+    await showAll(dialog);
+    await expect(newMarks(dialog)).toHaveCount(1);
+    await expect(dialog.getByTestId('locked-title').locator('[data-title-new]')).toHaveCount(0);
+    expect(await contrastIssues(dialog), 'the picker with a New mark').toEqual([]);
   });
 
   test('opens on the page that holds the worn title', async ({ page }) => {

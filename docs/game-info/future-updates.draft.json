@@ -97,8 +97,8 @@
     },
     {
       "id": "name-toggles",
-      "title": "Names and titles in camp",
-      "body": "In Settings, choose when names and titles show above gladiators in camp: Off, When zoomed in, or Always.",
+      "title": "Names and titles",
+      "body": "In Settings, choose when names and titles show above gladiators in camp: Off, When zoomed in, or Always. Newly earned titles carry a small New mark in the titles menu until you have seen them.",
       "patch": "1.9"
     },
     {
@@ -152,7 +152,7 @@
     {
       "id": "tournament-look",
       "title": "Tournaments look different",
-      "body": "Tournament fights get a gold header band, their own rows in history, and a fancier arena called League Stands, with stands in the four league colours and league banners.",
+      "body": "Tournament fights get a gold header band, their own rows in history, and a fancier arena called League Stands, with stands in the four league colours and league banners. You can also open any league's tournament and watch its bouts, even when your gladiator is not in it.",
       "patch": "1.9"
     },
     {

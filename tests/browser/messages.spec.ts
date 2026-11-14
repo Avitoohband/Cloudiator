@@ -1878,6 +1878,27 @@ test.describe('Messages and Notifications by the page', () => {
     await expect(rows(panel)).toHaveCount(3);
   });
 
+  test('Back finds the opener again when a message arrived meanwhile and moved it to the next page', async ({ page }) => {
+    await page.clock.install();
+    const poll = await watchSyncPoll(page);
+    const { live, world, post } = await player(page, { messages: notes, readIds: [] });
+    await openLive(page);
+    await poll.idle();
+    const panel = await openPanel(page);
+    // Note 13 is the third row of page 1; open it, and while it is open a newer message arrives (so Note 13 moves to the fourth place: page 2).
+    await row(panel, 'Note 13').click();
+    await expect(panel.getByRole('heading', { name: 'Note 13', exact: true })).toBeVisible();
+    const lists = live.count('game_messages');
+    post({ id: 300, kind: 'admin', title: 'Fresh news', preview: 'Just posted', body: [{ p: 'Fresh.' }], action: null, publishedAtMs: at(9, 2) + 30 * 60_000 });
+    live.setWorld({ ...world, revision: 'live-2' });
+    await poll.nextSyncPoll();
+    await expect.poll(() => live.count('game_messages')).toBeGreaterThan(lists);
+    await page.evaluate(() => new Promise(resolve => setTimeout(resolve, 0)));
+    await panel.getByRole('button', { name: /Back to messages/ }).click();
+    await expect(pageLabel(panel)).toHaveText('Page 2 of 6');
+    await expect(row(panel, 'Note 13')).toBeFocused();
+  });
+
   // Task 31 fix round 1 (I1): a full page of Fit rows does not scroll at the reference sizes (1280x720 and the 360x780 phone).
   for (const [name, size] of [['desktop 1280x720', { width: 1280, height: 720 }], ['phone 360x780', { width: 360, height: 780 }]] as const) {
     test(`a full page of Notifications and of Messages fits the popover (${name})`, async ({ page }, testInfo) => {

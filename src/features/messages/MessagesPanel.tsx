@@ -266,8 +266,21 @@ export function MessagesPanel({ id, inbox, load, loadNotifications, loadPatches,
     if (current !== null) { back.current?.focus(); return; }
     const row = rowToFocus.current;
     rowToFocus.current = null;
-    if (row !== null) root.current?.querySelector<HTMLElement>(`[data-message-row="${row}"]`)?.focus();
+    if (row === null) return;
+    const found = root.current?.querySelector<HTMLElement>(`[data-message-row="${row}"]`);
+    if (found) { found.focus(); return; }
+    // The list changed while the message was open (one arrived, or one was hidden): find the opener by its id, turn to its page and focus it once it
+    // mounts; if it is gone, the tab is where the focus goes.
+    const at = messages.items?.findIndex(message => message.id === row) ?? -1;
+    if (at >= 0) { pendingRow.current = row; messagesPaged.goToIndex(at); }
+    else root.current?.querySelector<HTMLElement>('[role="tab"][aria-selected="true"]')?.focus();
   }, [current]);
+  const pendingRow = useRef<number | null>(null);
+  useEffect(() => {
+    if (pendingRow.current === null) return;
+    const found = root.current?.querySelector<HTMLElement>(`[data-message-row="${pendingRow.current}"]`);
+    if (found) { pendingRow.current = null; found.focus(); }
+  });
   const detail = current === null ? null : messages.items?.find(message => message.id === current) ?? null;
   // My feedback: opened from the footer (or a request), closed by "Back to messages", which gives the focus back to My feedback.
   const mineBack = useRef(false);

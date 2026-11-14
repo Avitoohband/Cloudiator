@@ -9,7 +9,7 @@ import { EXPEDITION_FIXTURES, EXPEDITION_GLADIATORS, type ExpeditionFixtureKey }
 import { ownerFixture, worldFixture } from '../fixtures/domain';
 import { contrastIssues, expectNamedControls, focusDrops, noHorizontalScroll, watchFocus } from './a11y-helpers';
 import { SLOT_MS, SUPABASE_URL, emptyWorld, routeLiveReads, seedSession, type LiveTransport } from './live-routes';
-import { closeMenu, cornerChip, expectOwnerShown, openChipMenu, openMenu, quietArrivals, railMenus, revealRail, touchLayout } from './shell-helpers';
+import { campReady, closeMenu, cornerChip, expectOwnerShown, openChipMenu, openMenu, quietArrivals, railMenus, revealRail, touchLayout } from './shell-helpers';
 
 // Patch A Task 11 (spec "Item 3 + Task 10", "The button on the camp", the approved mockup; plan Review Focus 2 and 4): while a player's
 // gladiator is away on an expedition, a button on the camp says where it is and opens the live view; once it is back, the same button
@@ -578,9 +578,8 @@ test.describe('the Arena bout button on the camp', () => {
     return transport;
   }
   const replay = (page: Page) => page.getByRole('dialog', { name: 'Replay', exact: true });
-  const campRendered = (page: Page) => page.waitForFunction(() => window.__cloudiatorCamp?.state()?.ready === true, null, { timeout: 45_000 });
   async function capture(page: Page, name: string, project: string) {
-    await campRendered(page);
+    await campReady(page);
     await page.evaluate(() => Promise.all(document.getAnimations().map(a => a.finished)));
     if (process.env.TASK_SHOTS) {
       mkdirSync(process.env.TASK_SHOTS, { recursive: true });
@@ -830,7 +829,7 @@ test.describe('the Arena bout button on the camp', () => {
     const at = ARENA_START + 61 * MIN;
     await quietArrivals(context);
     const transport = await routeLiveReads(context, { world: emptyWorld(at), timelines: ARENA, serverNowMs: () => at });
-    await page.goto('/game/'); await campRendered(page);
+    await page.goto('/game/'); await campReady(page);
     await page.waitForTimeout(400); await expect(awayButton(page)).toHaveCount(0);
     expect(transport.count('activities')).toBe(0);
     await seedSession(context);

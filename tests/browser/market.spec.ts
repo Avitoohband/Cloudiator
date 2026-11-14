@@ -9,7 +9,7 @@ import { ARENA_OWNER } from '../fixtures/arena-build';
 import { itemFixture, worldFixture } from '../fixtures/domain';
 import { MARKET_ROWS } from '../fixtures/market';
 import { SUPABASE_URL, isPresence, routeLiveReads, seedSession, type LiveTransport } from './live-routes';
-import { expectOwnerShown, joinButton, openMenu } from './shell-helpers';
+import { campReady, expectOwnerShown, joinButton, openMenu } from './shell-helpers';
 import { a11yShot, focusDrops, watchFocus } from './a11y-helpers';
 import { forbidRemote } from './remote';
 import { showChoice } from './show-choice';
@@ -52,7 +52,6 @@ const tileLook = (tile: Locator) => tile.evaluate(el => { const style = getCompu
 const itemName = (listing: MarketListing) => CATALOG_V1.items[listing.item.catalogId].name;
 const noHorizontalScroll = (page: Page) => page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth);
 /** Waits until the camp scene is drawn, so a capture for the visual review shows the camp behind the menu. */
-const campReady = (page: Page) => page.waitForFunction(() => window.__cloudiatorCamp?.state()?.ready === true, null, { timeout: 45_000 });
 
 type Flow = {
   live: LiveTransport; state: OwnerState; offers: MarketListing[]; commands: GameCommand[]; bought: ItemInstance[];
@@ -1072,10 +1071,10 @@ test('browses the fixture preview Marketplace, whose actions say they are unavai
 test.describe('the Marketplace in pages', () => {
   const many = (count: number) => Array.from({ length: count }, (_, i): MarketListing => ({ ...MARKET_ROWS[i % MARKET_ROWS.length], listingId: randomUUID(),
     listedAtMs: MARKET_ROWS[i % MARKET_ROWS.length].listedAtMs - i * 1000 }));
-  async function openPaged(page: Page, context: BrowserContext, count = 120) {
+  async function openPaged(page: Page, context: BrowserContext, count = 120, rows: MarketListing[] = many(count)) {
     // This case is about paging: it takes the Fit size, whatever the cases above save.
     await context.addInitScript(() => { try { localStorage.removeItem('cloudiator.page-size.v1'); } catch { /* none */ } });
-    const live = await routeLiveReads(context, { world: world(), market: many(count) });
+    const live = await routeLiveReads(context, { world: world(), market: rows });
     await page.goto('/game/');
     await expect(joinButton(page)).toBeVisible();
     const market = await openMenu(page, 'Marketplace');
@@ -1130,6 +1129,37 @@ test.describe('the Marketplace in pages', () => {
     await market.getByRole('searchbox', { name: 'Search the Marketplace' }).fill('spear');
     await expect(label).toHaveText('Page 1');
     await expect(bar).toContainText('more to see');
+  });
+
+  test('a Next pressed while Refresh is in flight extends the refreshed list: older offers never replace it', async ({ page, context }) => {
+    const rows = many(120);
+    const { live, market, cards, bar, label, next } = await openPaged(page, context, 120, rows);
+    await bar.getByRole('button', { name: 'Go to page 16', exact: true }).click();
+    await expect(label).toHaveText('Page 16');
+    // Every listed price is 100 higher after the refresh; the refresh reads slowly, and Next is pressed before it settles.
+    live.setMarket(rows.map(row => ({ ...row, price: row.price + 100 })));
+    live.delay('market_offer_reads', 1200);
+    await market.getByRole('button', { name: 'Refresh', exact: true }).click();
+    await next.click();
+    await expect(label).toHaveText('Page 17', { timeout: 20_000 });
+    live.delay('market_offer_reads', 0);
+    await bar.getByRole('button', { name: 'Go to page 1', exact: true }).click();
+    await expect(cards.first()).toContainText(`${rows[0].price + 100} gold`);
+  });
+
+  test('a Next whose page read is overtaken by Refresh is read again from the refreshed list, so it completes', async ({ page, context }) => {
+    const rows = many(120);
+    const { live, market, cards, bar, label, next } = await openPaged(page, context, 120, rows);
+    await bar.getByRole('button', { name: 'Go to page 16', exact: true }).click();
+    await expect(label).toHaveText('Page 16');
+    live.delay('market_offer_reads', 1200);
+    await next.click();
+    live.setMarket(rows.map(row => ({ ...row, price: row.price + 100 })));
+    await market.getByRole('button', { name: 'Refresh', exact: true }).click();
+    await expect(label).toHaveText('Page 17', { timeout: 20_000 });
+    live.delay('market_offer_reads', 0);
+    await bar.getByRole('button', { name: 'Go to page 1', exact: true }).click();
+    await expect(cards.first()).toContainText(`${rows[0].price + 100} gold`);
   });
 
   test('under a price sort, reading more starts again at page 1 of the new order, and no offer shows twice going forward', async ({ page, context }) => {

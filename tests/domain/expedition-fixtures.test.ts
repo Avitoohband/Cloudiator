@@ -35,8 +35,15 @@ function build(classId: BuildSnapshot['classId'], stance: BuildSnapshot['stance'
   return { rulesVersion: 'v1', classId, stance, allocations,
     equipment: { ...none, ...Object.fromEntries(Object.entries(equipment).map(([slot, id]) => [slot, item(id!)])) } };
 }
-const mapOf = (id: ExpeditionId) => JSON.parse(readFileSync(join(__dirname, '..', '..', 'public', 'assets', 'expeditions', `${id}-map.json`), 'utf8')) as
-  { expedition: { encounters: { index: number; creature: string }[] } };
+function mapOf(id: ExpeditionId): { expedition: { encounters: { index: number; creature: string }[] } } {
+  return JSON.parse(readFileSync(join(__dirname, '..', '..', 'public', 'assets', 'expeditions', `${id}-map.json`), 'utf8'));
+}
+// Each of the hundreds of candidate seeds for a destination uses the same map and enemy template.
+const destinations = {
+  woodland: { encounters: mapOf('woodland').expedition.encounters, enemy: enemy('woodland') },
+  outpost: { encounters: mapOf('outpost').expedition.encounters, enemy: enemy('outpost') },
+  mountain: { encounters: mapOf('mountain').expedition.encounters, enemy: enemy('mountain') },
+};
 
 /** Task 9's canonical enemy template: the catalog enemy, with its listed damage as base damage, efficiency 1 and no equipment. */
 function enemy(expedition: ExpeditionId): FighterSnapshot {
@@ -58,8 +65,7 @@ const zeroHpWin = (log: BattleLog | undefined) => !!log && log.winnerId === log.
  */
 function encounters(key: ExpeditionFixtureKey, gladiator: Gladiator, player: FighterSnapshot, seed: string): BattleLog[] {
   const { expedition, activityId } = EXPEDITION_FIXTURES[key];
-  const creatures = mapOf(expedition).expedition.encounters;
-  const template = enemy(expedition);
+  const { encounters: creatures, enemy: template } = destinations[expedition];
   const logs: BattleLog[] = [];
   let hp = player.maxHealth;
   for (let i = 0; i < 3; i += 1) {
@@ -234,7 +240,7 @@ describe('fixture expedition timelines', () => {
         const [gladiator, creature] = s.battleLog.participants;
         expect(s.battleLog.battleId).toBe(`${activityId}:encounter:${i + 1}`);
         expect(gladiator).toMatchObject({ id: CASES[key].gladiator.id, gladiatorId: CASES[key].gladiator.id, name: 'Gladiator' });
-        expect(creature).toMatchObject({ id: `creature:${mapOf(expedition).expedition.encounters[i].creature}:${i + 1}`, gladiatorId: null, name: CATALOG_V1.expeditions[expedition].enemy.name });
+        expect(creature).toMatchObject({ id: `creature:${destinations[expedition].encounters[i].creature}:${i + 1}`, gladiatorId: null, name: CATALOG_V1.expeditions[expedition].enemy.name });
         expect(s.endsAtMs).toBe(s.startedAtMs + s.battleLog.durationMs);
         // The label follows the logged winner alone.
         expect(s.label.endsWith(s.battleLog.winnerId === gladiator.id ? 'victory' : 'defeat')).toBe(true);

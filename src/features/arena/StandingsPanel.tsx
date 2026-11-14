@@ -471,17 +471,23 @@ export function StandingsPanel({ reads, owner, clock, revision, onProfile, timeZ
   // pager says so and Next tries again.
   // A first-page refresh in flight is waited for first, and the page read extends the list as the refresh left it: a response whose base list is
   // no longer the shown one is dropped, so older rows never replace a refreshed list.
+  // A page overtaken by a newer first-page read is not lost: once that read has settled, the page is read once more from the new base, so the Next
+  // completes (at most three tries, each after a newer read landed).
   const more = async () => {
     const reader = counted();
     if (!reader) return;
-    while (refreshing.current) await refreshing.current;
-    const base = shown.current;
-    if (!base?.nextCursor || base.key !== keyOf(league, chosen)) return;
-    const mine = request.current;
-    const next: ShownPages = { ...await readNextPage(reader, base), key: base.key };
-    if (mine !== request.current || shown.current !== base) return;
-    shown.current = next;
-    setPage(next);
+    for (let tries = 0; tries < 3; tries += 1) {
+      while (refreshing.current) await refreshing.current;
+      const base = shown.current;
+      if (!base?.nextCursor || base.key !== keyOf(league, chosen)) return;
+      const mine = request.current;
+      const next: ShownPages = { ...await readNextPage(reader, base), key: base.key };
+      if (mine === request.current && shown.current === base) {
+        shown.current = next;
+        setPage(next);
+        return;
+      }
+    }
   };
 
   const list = seasons ?? [];

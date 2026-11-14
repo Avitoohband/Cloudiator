@@ -3,7 +3,7 @@
 // Patch 1.9 Task 27 (Avi, 2026-11-12: "option to see gladiators arena match history\expedition history and tournaments battles history"; the
 // approved mockup `.superpowers/design/2026-11-12-gladiator-history/`): a gladiator's History, in place of its card's sections. ← goes back to
 // the card; the chips Arena (won–lost) · 🏆 Tournament fights (n) · Expeditions (n) each show a list of their own, newest first by day, read 20
-// at a time and shown six a page with Back and Next (Patch 1.9 Task 32: Next past the loaded rows reads the next 20, and Back from a replay
+// at a time and shown six a page (four on the touch layout) with Back and Next (Patch 1.9 Task 32: Next past the loaded rows reads the next 20, and Back from a replay
 // reopens the page and row it was opened from); the line under the chips says how long replays are kept. ▶ Watch opens a kept replay in the existing viewer for
 // anyone; a row whose replay is gone is dimmed with Result. Tournament fights are gold rows (Avi: "should be fancier, so people can
 // distinguish"): a gold double-trimmed frame, a trophy medallion with laurels, the round in gold small caps, the tournament's name, a WON
@@ -15,7 +15,8 @@ import { useClockMode } from '../../lib/clock-setting';
 import type { SceneView } from '../shell/scene-url';
 import { BotTag } from './BotTag';
 import { useHistory, type HistoryStore } from './history-store';
-import { rememberHistoryRow, takeHistoryRow } from './history-return';
+import { landingStep, rememberHistoryRow, takeHistoryRow, type Landing } from './history-return';
+import { useCompactLayout } from './useCompactLayout';
 import { usePagedList } from '../paging/usePagedList';
 import { Pager } from '../paging/Pager';
 import { PanelFooter } from '../paging/PanelFooter';
@@ -103,8 +104,10 @@ export function GladiatorHistory({ store, kind, onKind, name, own, nowMs, onBack
   const chipRefs = useRef(new Map<HistoryKind, HTMLButtonElement>());
   // Six a page (Patch 1.9 Task 32); a chip goes back to page 1. Next past the loaded rows reads the next server page; a failed read
   // rejects, so the pager says so and Next tries again.
+  // On the touch layout the sheet holds four of its rows, so a page is four there (the hook's `size`, as a grid passes its layout's): no Show.
+  const compact = useCompactLayout();
   const paged = usePagedList(list.rows, {
-    list: 'history', resetKey: kind,
+    list: 'history', resetKey: kind, size: compact ? 4 : undefined,
     more: list.nextCursor ? { hasMore: true, load: async () => {
       const done = await store.more(kind);
       if (!done && store.list(kind).moreFailed) throw new Error('More could not be loaded.');
@@ -114,18 +117,18 @@ export function GladiatorHistory({ store, kind, onKind, name, own, nowMs, onBack
   const retry = () => { chipRefs.current.get(kind)?.focus({ preventScroll: true }); store.load(kind); };
   // Back from a replay this card opened: the page and row it was opened from (kept in `history-return`, taken once). Rows not read yet are
   // read first, a page at a time, and a row on the partly read last page waits for the rest of it.
-  const landing = useRef<string | null>(null);
+  const landing = useRef<Landing | null>(null);
   useEffect(() => {
     const found = gladiatorId ? takeHistoryRow(gladiatorId, kind) : null;
-    if (found) landing.current = found;
+    if (found) landing.current = { kind, entryId: found };
   }, [gladiatorId, kind]);
   useEffect(() => {
     const wanted = landing.current;
     if (!wanted || list.status !== 'ready') return;
-    const index = list.rows.findIndex(row => row.entryId === wanted);
-    const whole = Math.floor(list.rows.length / paged.size) * paged.size;
-    if (index >= 0 && (!list.nextCursor || index < whole)) { landing.current = null; paged.goToIndex(index); return; }
-    if (list.nextCursor && !list.moreFailed) { if (!list.loadingMore) void store.more(kind); } else landing.current = null;
+    const next = landingStep(wanted, { kind, ids: list.rows.map(row => row.entryId), hasMore: list.nextCursor !== null, failed: list.moreFailed, size: paged.size });
+    if (next.step === 'jump') { landing.current = null; paged.goToIndex(next.index); }
+    else if (next.step === 'read') { if (!list.loadingMore) void store.more(kind); }
+    else landing.current = null;
   });
   return (
     <section className={styles.history} aria-labelledby={`${ids}-title`} data-history={kind}>
@@ -145,7 +148,7 @@ export function GladiatorHistory({ store, kind, onKind, name, own, nowMs, onBack
           </button>;
         })}
       </div>
-      <p className={styles.keep}>{retentionText(kind)}</p>
+      <p className={styles.keep} title={retentionText(kind)}>{retentionText(kind)}</p>
       {list.rows.length === 0
         ? list.status === 'failed'
           ? <div className={styles.failed} role="alert"><p>This history could not be loaded right now.</p>
@@ -165,10 +168,9 @@ export function GladiatorHistory({ store, kind, onKind, name, own, nowMs, onBack
               </section>
             ))}
           </div>
-          <PanelFooter><Pager list={paged} show /></PanelFooter>
+          <PanelFooter><Pager list={paged} show={!compact} /></PanelFooter>
           {/* The end of a list that paged is said on its last page. */}
           {!list.nextCursor && list.pages > 1 && paged.page === paged.knownPages ? <p className={styles.everything}>{EVERYTHING}</p> : null}
-          {list.moreFailed && <p className={styles.moreFailed} role="alert">More could not be loaded. Please try again.</p>}
         </>}
       <p className={styles.footer} data-history-footer="">{footerText(own)}</p>
     </section>

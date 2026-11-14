@@ -86,7 +86,6 @@ export function MyBouts({ store, filter, onFilter, nowMs, onOpen, timeZone }: {
           </div>
           <PanelFooter><Pager list={paged} show /></PanelFooter>
         </>}
-      {list.moreFailed && <p className={styles.moreFailed} role="alert">More bouts could not be loaded. Please try again.</p>}
     </div>
   );
 }

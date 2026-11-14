@@ -97,7 +97,7 @@ function useServerTime(clock: DisplayClock, expiries: readonly ReplayExpiry[]): 
 }
 
 /** Pure view of the loaded results. */
-export function ResultsView({ model, viewerId, serverNowMs, onMore, onRetry, onWatch, moreFailed = false, timeZone, rested, rules = RULES_V2 }: {
+export function ResultsView({ model, viewerId, serverNowMs, onMore, onRetry, onWatch, timeZone, rested, rules = RULES_V2 }: {
   model: ResultsModel;
   /**
    * Patch 1.9 Task 29: the viewer's own rests that replaced a planned activity, by activity id: its own row then says so ("Aster rested instead
@@ -114,7 +114,6 @@ export function ResultsView({ model, viewerId, serverNowMs, onMore, onRetry, onW
   onMore(): Promise<unknown> | void;
   onRetry(): void;
   onWatch: WatchResult;
-  moreFailed?: boolean;
   /** Tests only: the time zone of the settlement times (the viewer's own otherwise). */
   timeZone?: string;
 }) {
@@ -148,12 +147,11 @@ export function ResultsView({ model, viewerId, serverNowMs, onMore, onRetry, onW
               );
             })}</ul>}
       <PanelFooter><Pager list={paged} show /></PanelFooter>
-      {moreFailed && <p className={styles.moreFailed} role="alert">More results could not be loaded. Please try again.</p>}
     </section>
   );
 }
 
-/** Everyone's results (today's list): the first page when it mounts, then More. */
+/** Everyone's results (today's list): the first page when it mounts, then Next past the loaded rows. */
 function EveryoneResults({ reads, viewerId, clock, onWatch, loadRested, rules }: {
   reads: ResultsReader; viewerId: string | null; clock: DisplayClock; onWatch: WatchResult;
   /** Patch 1.9 Task 29: the owner's own rests that replaced a planned activity, by id (owner only; absent for a visitor). */
@@ -163,7 +161,6 @@ function EveryoneResults({ reads, viewerId, clock, onWatch, loadRested, rules }:
   const [list, setList] = useState<ResultsList | null>(null);
   const [status, setStatus] = useState<ResultsModel['status']>('loading');
   const [attempt, setAttempt] = useState(0);
-  const [moreFailed, setMoreFailed] = useState(false);
   /** The next page being read (a second Next while it reads does nothing); the controller also holds one read at a time. */
   const loadingMore = useRef(false);
   /** The current read generation: a page that arrives for an older one (another reader, a retry) is dropped. */
@@ -184,13 +181,11 @@ function EveryoneResults({ reads, viewerId, clock, onWatch, loadRested, rules }:
     if (!list?.nextCursor || loadingMore.current) return;
     const mine = generation.current;
     loadingMore.current = true;
-    setMoreFailed(false);
     try {
       const next = await readResults(reads, list);
       if (mine === generation.current) setList(next);
     } catch (error) {
-      // The rows already shown stay, and Next tries again; the pager says so as well.
-      if (mine === generation.current) setMoreFailed(true);
+      // The rows already shown stay, and Next tries again: the pager says so (its failure line is the one line).
       throw error;
     } finally {
       if (mine === generation.current) loadingMore.current = false;
@@ -203,7 +198,7 @@ function EveryoneResults({ reads, viewerId, clock, onWatch, loadRested, rules }:
   const rested = useOwnRests(rows, viewerId, loadRested);
   const model: ResultsModel = { rows, nextCursor: list?.nextCursor ?? null, status };
   return <ResultsView model={model} viewerId={viewerId} serverNowMs={serverNowMs} onMore={more} onRetry={() => setAttempt(n => n + 1)}
-    onWatch={onWatch} moreFailed={moreFailed} rested={rested} rules={rules} />;
+    onWatch={onWatch} rested={rested} rules={rules} />;
 }
 
 const NO_RESTS: ReadonlyMap<string, RestedActivity> = new Map();

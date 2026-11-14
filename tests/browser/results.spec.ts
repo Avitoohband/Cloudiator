@@ -76,6 +76,19 @@ test.describe('Results in pages', () => {
     await expect(label(menu)).toHaveText('Page 1');
   });
 
+  test('a page of eight fits the menu on page 1 and page 2, without a scroll', async ({ page, context }) => {
+    const { menu } = await openResults(page, context);
+    await everyone(menu);
+    await menu.evaluate(el => Promise.all(el.getAnimations({ subtree: true }).map(a => a.finished)));
+    const fits = () => menu.getByTestId('menu-body').evaluate(el => ({ scroll: el.scrollHeight, client: el.clientHeight }));
+    let measured = await fits();
+    expect(measured.scroll, 'page 1').toBeLessThanOrEqual(measured.client + 1);
+    await bar(menu).getByRole('button', { name: 'Next page', exact: true }).click();
+    await expect(label(menu)).toHaveText('Page 2');
+    measured = await fits();
+    expect(measured.scroll, 'page 2').toBeLessThanOrEqual(measured.client + 1);
+  });
+
   test('Everyone: the last server page ends the list and the label knows it; a failed read says so and keeps the page', async ({ page, context }) => {
     const { live, menu } = await openResults(page, context, {}, 60);
     await everyone(menu);
@@ -84,7 +97,6 @@ test.describe('Results in pages', () => {
     live.fail('recent_results');
     await next.click();
     await expect(bar(menu)).toContainText('Could not load more. Try Next again.');
-    await expect(menu.getByRole('alert')).toContainText('More results could not be loaded. Please try again.');
     await expect(label(menu)).toHaveText('Page 6');
     await expect(list(menu, 'Recent results').getByRole('listitem')).toHaveCount(8);
     live.fail('recent_results', false);

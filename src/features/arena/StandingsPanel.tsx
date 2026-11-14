@@ -209,6 +209,15 @@ export function StandingsView({ model, onLeague, onSeason, onMore, onRetry, onPr
     list: 'standings', resetKey: `${league}|${model.seasonId ?? ''}`,
     more: model.nextCursor ? { hasMore: true, load: async () => { await onMore(); } } : undefined,
   });
+  // After a turn the page's ten rows are what the reader came for, not the card above the table: the table's top goes to the top of the menu
+  // body (Task 32 fix round 1, I1). This effect is declared after the hook's, so it runs after its focus of the first row.
+  const tableTop = useRef<HTMLDivElement>(null);
+  const shownPage = useRef(paged.page);
+  useEffect(() => {
+    if (shownPage.current === paged.page) return;
+    shownPage.current = paged.page;
+    tableTop.current?.scrollIntoView?.({ block: 'start' });
+  }, [paged.page]);
   const ownValue = (ready: string) => (own?.season.status === 'ready' ? ready : own?.season.status === 'loading' ? 'Loading…' : 'not available');
   return (
     <section className={styles.standings} aria-labelledby={titleId}>
@@ -264,7 +273,7 @@ export function StandingsView({ model, onLeague, onSeason, onMore, onRetry, onPr
             : rows.length === 0 ? <p className="muted" role="status">No standings in the {leagueName(league)} league {archived && model.seasonId ? `in ${seasonName(model.seasonId)}` : 'yet'}.</p>
               : <>
                 {failed && <div className={styles.failed} role="alert"><p>The latest standings could not be loaded; these rows may be out of date.</p><button type="button" onClick={onRetry}>Try again</button></div>}
-                <div className={styles.tableWrap}>
+                <div ref={tableTop} className={styles.tableWrap}>
                   <table className={styles.table} aria-labelledby={tableId}>
                     <caption id={tableId}>{leagueName(league)} league standings</caption>
                     <thead><tr><th scope="col">Rank</th><th scope="col">Gladiator</th><th scope="col">Rating</th><th scope="col">Human <span className={styles.nowrap}>W–L</span></th><th scope="col">Notes</th></tr></thead>

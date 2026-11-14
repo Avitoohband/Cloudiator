@@ -142,12 +142,12 @@ function SellerBand({ listing, own, onProfile }: { listing: MarketListing; own: 
 }
 
 /**
- * Pure view of a list of offers (Task 26): the rows a chip, a search and a sort leave, the count under them with Refresh, More, and the
+ * Pure view of a list of offers (Task 26): the rows a chip, a search and a sort leave, the count under them with Refresh, the pager, and the
  * foot. `access` decides each row's action: a trader's Buy (others' offers) or Cancel listing (their own), a visitor's "Sign in to buy.",
  * or none. `mine` is My listings (the seller's own read).
  */
 export function MarketOffers({ model, access, ownerId, now, busy, onBuy, onCancel, onProfile, onMore, onRetry, onRefresh, onSell, onClearQuery,
-  query = '', sort = 'newest', filter = 'All', mine = false, moreFailed = false, available = null, full = false, rules = RULES_V1 }: {
+  query = '', sort = 'newest', filter = 'All', mine = false, available = null, full = false, rules = RULES_V1 }: {
   model: OffersModel;
   access: MarketAccess;
   /** The viewer's gladiator, whose own offers say "Your listing" and offer Cancel listing, never Buy; null for a visitor. */
@@ -170,7 +170,6 @@ export function MarketOffers({ model, access, ownerId, now, busy, onBuy, onCance
   sort?: SortKey;
   filter?: ItemFilter;
   mine?: boolean;
-  moreFailed?: boolean;
   /** A buyer's available gold: a dearer offer cannot be bought. */
   available?: number | null;
   /** A buyer's inventory has no free slot. */
@@ -188,7 +187,9 @@ export function MarketOffers({ model, access, ownerId, now, busy, onBuy, onCance
     : mine ? `${shown.length} of your ${MAXIMUM_LISTINGS} listings` : marketCountLine(shown.length, sort);
   // Three cards a page (Patch 1.9 Task 32): a chip, a search, a sort or My listings goes back to page 1; a refresh keeps the page.
   const paged = usePagedList(shown, {
-    list: 'market', resetKey: `${filter}|${query}|${sort}|${mine}`,
+    // Under a sort that re-orders the loaded offers, a read starts again at page 1 of the new order (Task 32 fix round 1, I4): the loaded count joins
+    // the key, or the page asked for would skip and repeat offers. Newest keeps the load order, so it pages on.
+    list: 'market', resetKey: `${filter}|${query}|${sort}|${mine}|${model.nextCursor !== null && sort !== 'newest' ? rows.length : ''}`,
     more: model.nextCursor ? { hasMore: true, load: async () => { await onMore(); } } : undefined,
   });
   const partial = model.nextCursor !== null && (sort !== 'newest' || searched !== '');
@@ -253,7 +254,6 @@ export function MarketOffers({ model, access, ownerId, now, busy, onBuy, onCance
       <button type="button" className={styles.refresh} onClick={onRefresh} disabled={status === 'loading'}>Refresh</button>
     </div>
     <PanelFooter><Pager list={paged} show /></PanelFooter>
-    {moreFailed && <p className={styles.failedNote} role="alert">More listings could not be loaded. Please try again.</p>}
     <p className={styles.foot}>{foot}{partial && ' Sort and search apply to the listings loaded so far.'}</p>
   </div>;
 }
@@ -264,11 +264,10 @@ export function MarketOffers({ model, access, ownerId, now, busy, onBuy, onCance
  */
 function OfferList({ reads, seller, version, onRefresh, ...view }: {
   reads: MarketReader; seller: string | null; version: number; onRefresh?(): void;
-} & Omit<Parameters<typeof MarketOffers>[0], 'model' | 'onMore' | 'onRetry' | 'onRefresh' | 'moreFailed'>) {
+} & Omit<Parameters<typeof MarketOffers>[0], 'model' | 'onMore' | 'onRetry' | 'onRefresh'>) {
   const [list, setList] = useState<OffersList | null>(null);
   const [status, setStatus] = useState<OffersModel['status']>('loading');
   const [attempt, setAttempt] = useState(0);
-  const [moreFailed, setMoreFailed] = useState(false);
   /** The next page being read (a second Next while it reads does nothing). */
   const loadingMore = useRef(false);
   /** The current read generation: a page that arrives for an older one (a refresh, another seller) is dropped. */
@@ -278,7 +277,6 @@ function OfferList({ reads, seller, version, onRefresh, ...view }: {
     const mine = ++generation.current;
     setStatus('loading');
     loadingMore.current = false;
-    setMoreFailed(false);
     readOffers(reads, seller, null).then(
       next => { if (mine === generation.current) { setList(next); setStatus('ready'); } },
       () => { if (mine === generation.current) setStatus('failed'); },
@@ -290,13 +288,11 @@ function OfferList({ reads, seller, version, onRefresh, ...view }: {
     if (!list?.nextCursor || loadingMore.current) return;
     const mine = generation.current;
     loadingMore.current = true;
-    setMoreFailed(false);
     try {
       const next = await readOffers(reads, seller, list);
       if (mine === generation.current) setList(next);
     } catch (error) {
-      // The offers already shown stay, and Next tries again; the pager says so as well.
-      if (mine === generation.current) setMoreFailed(true);
+      // The offers already shown stay, and Next tries again: the pager says so (its failure line is the one line).
       throw error;
     } finally {
       if (mine === generation.current) loadingMore.current = false;
@@ -304,7 +300,7 @@ function OfferList({ reads, seller, version, onRefresh, ...view }: {
   }, [list, reads, seller]);
 
   return <MarketOffers {...view} model={{ rows: list?.rows ?? [], nextCursor: list?.nextCursor ?? null, status }} onMore={more}
-    onRetry={() => setAttempt(n => n + 1)} onRefresh={() => { setAttempt(n => n + 1); onRefresh?.(); }} moreFailed={moreFailed} />;
+    onRetry={() => setAttempt(n => n + 1)} onRefresh={() => { setAttempt(n => n + 1); onRefresh?.(); }} />;
 }
 
 /**

@@ -410,7 +410,6 @@
 }
 
 .refresh,
-.more,
 .ghost,
 .retry,
 .failed button {
@@ -424,17 +423,9 @@
 }
 
 .refresh:hover:not(:disabled),
-.more:hover:not(:disabled),
 .ghost:hover,
 .retry:hover:not(:disabled) {
   background: #38302a;
-}
-
-.more {
-  display: block;
-  width: 100%;
-  min-height: 36px;
-  margin-top: 8px;
 }
 
 .retry {
@@ -587,7 +578,6 @@
 .cancel:focus-visible,
 .profile:focus-visible,
 .refresh:focus-visible,
-.more:focus-visible,
 .ghost:focus-visible,
 .retry:focus-visible,
 .actions button:focus-visible,
@@ -688,7 +678,6 @@
   .tabs button,
   .chips button,
   .refresh,
-  .more,
   .ghost,
   .retry,
   .failed button,

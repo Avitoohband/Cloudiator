@@ -18,7 +18,7 @@ const SEP = ' · ';
 export const HISTORY_KINDS: readonly HistoryKind[] = ['arena', 'tournament', 'expedition'];
 /** The view's title: "Lucilla's history", or on the viewer's own card "My history". */
 export const historyTitle = (name: string, own: boolean): string => (own ? 'My history' : `${name}'s history`);
-export const HISTORY_SUBTITLE = 'Newest first · 20 at a time';
+export const HISTORY_SUBTITLE = 'Newest first';
 /** After the last page: nothing more to show. */
 export const EVERYTHING = 'That is everything.';
 

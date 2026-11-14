@@ -122,9 +122,9 @@ test.describe('seasons in the fixture preview', () => {
     expect(remote).toEqual([]);
   });
 
-  test('a season picked from the picker goes back to page 1 of its standings', async ({ page }) => {
+  test('a season picked from the picker goes back to page 1 of its standings', async ({ page, context }) => {
     // This case is about paging: it takes the Fit size, whatever the other cases of this file save.
-    await page.addInitScript(() => { try { localStorage.removeItem('cloudiator.page-size.v1'); } catch { /* none */ } });
+    await context.addInitScript(() => { try { localStorage.removeItem('cloudiator.page-size.v1'); } catch { /* none */ } });
     await page.emulateMedia({ reducedMotion: 'reduce' });
     await page.goto('/game/?mode=fixture');
     await expectOwnerShown(page, 'Aster');

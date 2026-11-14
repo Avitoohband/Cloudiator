@@ -28,7 +28,7 @@ describe('the history view words', () => {
     expect(HISTORY_KINDS).toEqual(['arena', 'tournament', 'expedition']);
     expect(historyTitle('Lucilla', false)).toBe("Lucilla's history");
     expect(historyTitle('Aster', true)).toBe('My history');
-    expect(HISTORY_SUBTITLE).toBe('Newest first · 20 at a time');
+    expect(HISTORY_SUBTITLE).toBe('Newest first');
     // The controller's ruling: the tournament chip counts fights.
     expect(HISTORY_KINDS.map(chipText)).toEqual([{ icon: null, label: 'Arena' }, { icon: '🏆', label: 'Tournament fights' }, { icon: null, label: 'Expeditions' }]);
     const counts = { arena: { total: 24, won: 21 }, tournament: { total: 4, won: 3 }, expedition: { total: 12, won: 10 } };

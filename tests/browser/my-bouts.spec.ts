@@ -702,6 +702,19 @@ test.describe('My bouts in pages', () => {
     await shot(page, testInfo, 'my-bouts-paged');
   });
 
+  test('a page of eight fits the menu on page 1 and page 2, without a scroll', async ({ page, context }) => {
+    const { results, bar } = await openPaged(page, context);
+    // The menu's body is the part that scrolls: a page of eight rows (the day groups, and the chips above them) fits it (Task 32 fix round 1, I3).
+    const fits = () => results.getByTestId('menu-body').evaluate(el => ({ scroll: el.scrollHeight, client: el.clientHeight }));
+    await settled(page);
+    let measured = await fits();
+    expect(measured.scroll, 'page 1').toBeLessThanOrEqual(measured.client + 1);
+    await bar.getByRole('button', { name: 'Next page', exact: true }).click();
+    await expect(bar.locator('b').first()).toHaveText('Page 2');
+    measured = await fits();
+    expect(measured.scroll, 'page 2').toBeLessThanOrEqual(measured.client + 1);
+  });
+
   test('a failed read of the next twenty keeps the page and says so; Next tries again', async ({ page, context }) => {
     const { live, results, bar } = await openPaged(page, context);
     const label = bar.locator('b').first();
@@ -711,7 +724,6 @@ test.describe('My bouts in pages', () => {
     live.fail('activities');
     await next.click();
     await expect(bar).toContainText('Could not load more. Try Next again.');
-    await expect(results.getByRole('alert')).toContainText('More bouts could not be loaded. Please try again.');
     await expect(label).toHaveText('Page 2');
     live.fail('activities', false);
     await next.click();

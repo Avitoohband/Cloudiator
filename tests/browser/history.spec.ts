@@ -22,6 +22,11 @@ const profileCard = (page: Page, name: string) => page.getByRole('dialog', { nam
 const historyRows = (card: Locator) => card.locator('[data-history-row]');
 const chips = (card: Locator) => card.getByRole('group', { name: 'Show history', exact: true });
 
+/** Rows a page of the History shows on this layout: six, four on the touch layout (Task 32 fix round 1, I3). */
+const perPage = async (page: Page) => ((await touchLayout(page)) ? 4 : 6);
+/** Whether the card's page of rows fits its paging surface without a scroll (the scope's body is the part that scrolls). */
+const scopeFits = (card: Locator) => card.locator('[data-paging-scope] > div').first().evaluate(el => el.scrollHeight <= el.clientHeight + 1);
+
 async function openCamp(page: Page) {
   await page.emulateMedia({ reducedMotion: 'reduce' });
   await page.goto('/game/?mode=fixture');
@@ -70,7 +75,7 @@ test.describe('A gladiator’s history on the card (fixture)', () => {
     await open.click();
 
     await expect(card.getByRole('heading', { name: 'Varro\'s history', level: 2 })).toBeVisible();
-    await expect(card).toContainText('Newest first · 20 at a time');
+    await expect(card).toContainText('Newest first');
     await expect(card.getByRole('button', { name: 'Back to the card', exact: true })).toBeFocused();
     // Chips: the Arena record (won–lost) and the number of tournament fights and expeditions this history lists.
     await expect(chips(card).getByRole('button')).toHaveText([/^Arena\s*15–8$/, /^🏆\s*Tournament fights\s*6$/, /^Expeditions\s*2$/]);
@@ -84,7 +89,11 @@ test.describe('A gladiator’s history on the card (fixture)', () => {
     // Patch 1.9 Task 32: six a page of the 20 read; 23 exist, so the label says "Page 1" with "more to see" until the last is read.
     const bar = card.getByRole('navigation', { name: 'Pages' });
     const label = bar.locator('b').first();
-    await expect(rows).toHaveCount(6);
+    const per = await perPage(page);
+    // Of the 23 rows the first 20 are read: whole pages of `per` are known, and the last read turns to the page that holds the 23rd row.
+    const known = Math.floor(20 / per), end = Math.ceil(23 / per), tail = 23 - (end - 1) * per;
+    await expect(rows).toHaveCount(per);
+    expect(await scopeFits(card), 'page 1 fits the card').toBe(true);
     await expect(label).toHaveText('Page 1');
     await expect(bar).toContainText('more to see');
     await expect(card.getByRole('button', { name: 'Show more', exact: true })).toHaveCount(0);
@@ -108,14 +117,19 @@ test.describe('A gladiator’s history on the card (fixture)', () => {
 
     // Next (by keyboard) from the last page read (page 3 of the 20 read) reads the last three: "Page 4 of 4", the five rows of the last page, the
     // focus on its first row, and "That is everything." on it.
-    await bar.getByRole('button', { name: 'Go to page 3', exact: true }).click();
-    await expect(label).toHaveText('Page 3');
+    await bar.getByRole('button', { name: `Go to page ${known}`, exact: true }).click();
+    await expect(label).toHaveText(`Page ${known}`);
     await bar.getByRole('button', { name: 'Next page', exact: true }).focus();
     await page.keyboard.press('Enter');
-    await expect(label).toHaveText('Page 4 of 4');
-    await expect(rows).toHaveCount(5);
+    await expect(label).toHaveText(`Page ${end} of ${end}`);
+    await expect(rows).toHaveCount(tail);
     await expect(card.getByText('That is everything.', { exact: true })).toBeVisible();
     await expect(rows.first()).toBeFocused();
+    // Back goes one page back, and the end line is only on the last page.
+    await bar.getByRole('button', { name: 'Previous page', exact: true }).click();
+    await expect(label).toHaveText(`Page ${end - 1} of ${end}`);
+    await expect(rows).toHaveCount(per);
+    await expect(card.getByText('That is everything.', { exact: true })).toHaveCount(0);
     await bar.getByRole('button', { name: 'Go to page 1', exact: true }).click();
     await expect(card.getByText('That is everything.', { exact: true })).toHaveCount(0);
 
@@ -138,7 +152,7 @@ test.describe('A gladiator’s history on the card (fixture)', () => {
     // Two expeditions are one page: no bar. A chip goes back to page 1: Arena shows its first page again.
     await expect(bar).toHaveCount(0);
     await chips(card).getByRole('button', { name: /^Arena/ }).click();
-    await expect(label).toHaveText('Page 1 of 4');
+    await expect(label).toHaveText(`Page 1 of ${end}`);
     await chips(card).getByRole('button', { name: 'Expeditions 2', exact: true }).click();
 
     // ▶ Watch on his kept trip opens the existing expedition scene (the whole trip); the card closes.
@@ -270,7 +284,7 @@ test.describe('A gladiator’s history on the card (fixture)', () => {
     await expect(card.getByRole('heading', { name: 'My history', level: 2 })).toBeVisible();
     await expect(card.locator('[data-history-footer]')).toHaveText('You see your own rewards here. Other players see only the results.');
     const rows = historyRows(card);
-    await expect(rows).toHaveCount(6);
+    await expect(rows).toHaveCount(await perPage(page));
     await expect(rows.first()).toContainText('vs Varro');
     await expect(rows.first()).toContainText(/Arena · .* · Bronze league · \+10 renown · Rating \+13/);
     await expect(rows.nth(2)).toContainText(/vs Iron Warden\s*NPC/);
@@ -296,14 +310,23 @@ test.describe('A gladiator’s history on the card (fixture)', () => {
     expect(await noHorizontalScroll(page)).toBe(true);
   });
 
-  test('phone 360 × 740: the history fills the sheet, which scrolls, and its buttons are 44 px', async ({ page }) => {
+  test('phone 360 × 740: the history shows four rows a page in the sheet, its bar is the sheet’s bottom edge, and its buttons are 44 px', async ({ page }) => {
     await page.setViewportSize({ width: 360, height: 740 });
     await openCamp(page);
     expect(await touchLayout(page)).toBe(true);
     const card = await varroCard(page);
     await card.getByRole('button', { name: 'History', exact: true }).click();
-    await expect(historyRows(card)).toHaveCount(6);
+    // Task 32 fix round 1 (I3): four rows a page on the touch layout, and all four are inside the sheet, with no scroll.
+    await expect(historyRows(card)).toHaveCount(4);
     const box = (await card.boundingBox())!;
+    for (let i = 0; i < 4; i += 1) {
+      const rowBox = (await historyRows(card).nth(i).boundingBox())!;
+      expect(rowBox.y, `row ${i} starts inside the sheet`).toBeGreaterThanOrEqual(box.y);
+      expect(rowBox.y + rowBox.height, `row ${i} ends inside the sheet`).toBeLessThanOrEqual(box.y + box.height);
+    }
+    expect(await scopeFits(card), 'page 1 fits the sheet').toBe(true);
+    expect(await chips(card).getByRole('button').evaluateAll(buttons => new Set(buttons.map(b => Math.round(b.getBoundingClientRect().top))).size), 'the chips share one row').toBe(1);
+    await expect(card.getByRole('combobox', { name: 'Rows per page' })).toHaveCount(0);
     expect(Math.round(box.x)).toBe(10);
     expect(Math.round(box.x + box.width)).toBe(350);
     const body = card.getByTestId('profile-body');
@@ -400,7 +423,7 @@ test.describe('A gladiator’s history from the live views', () => {
 
   // Patch 1.9 Task 32: Back from a replay lands on the page and row the replay was opened from. The card closes under a scene and its store is
   // new when it reopens, so the rows before the one opened are read again (a page of 20 at a time) until it is on the page shown.
-  for (const [pageNo, n] of [[3, 13], [4, 21]] as const) test(`Back from a replay reopens the History on page ${pageNo}, at the row it was opened from`, async ({ page, context }) => {
+  for (const afterRead of [false, true]) test(`Back from a replay reopens the History ${afterRead ? 'on a page that needed a second server read' : 'on the page'}, at the row it was opened from`, async ({ page, context }) => {
     await quietArrivals(context);
     const many = Array.from({ length: 30 }, (_, i) => row(lucilla.id, i + 1, { opponent: { name: `Rival ${i + 1}`, npc: false } }));
     await routeLiveReads(context, { world, history: many });
@@ -410,10 +433,13 @@ test.describe('A gladiator’s history from the live views', () => {
     await card.getByRole('button', { name: 'History', exact: true }).click();
     const bar = card.getByRole('navigation', { name: 'Pages' });
     const label = bar.locator('b').first();
-    await expect(historyRows(card)).toHaveCount(6);
-    await bar.getByRole('button', { name: 'Go to page 3', exact: true }).click();
-    if (pageNo === 4) await bar.getByRole('button', { name: 'Next page', exact: true }).click();
-    await expect(label).toHaveText(pageNo === 4 ? 'Page 4 of 5' : 'Page 3');
+    const per = await perPage(page);
+    await expect(historyRows(card)).toHaveCount(per);
+    // The last whole page of the 20 read (page 3 of 6 a page, page 5 of 4 a page), or the next one, which reads the other 10 first.
+    const known = Math.floor(20 / per), pageNo = afterRead ? known + 1 : known, n = (pageNo - 1) * per + 2;
+    await bar.getByRole('button', { name: `Go to page ${known}`, exact: true }).click();
+    if (afterRead) await bar.getByRole('button', { name: 'Next page', exact: true }).click();
+    await expect(label).toHaveText(afterRead ? `Page ${pageNo} of ${Math.ceil(30 / per)}` : `Page ${pageNo}`);
     const opened = historyRows(card).filter({ hasText: `vs Rival ${n}` });
     await expect(opened).toHaveCount(1);
     await opened.getByRole('button', { name: new RegExp(`^Watch: vs Rival ${n},`) }).click();
@@ -422,7 +448,50 @@ test.describe('A gladiator’s history from the live views', () => {
     await replay.getByRole('button', { name: /^Back to Lucilla.s history$/ }).click();
     await expect(replay).toHaveCount(0);
     await expect(card.getByRole('heading', { name: /^Lucilla.s history$/, level: 2 })).toBeVisible();
-    await expect(label).toHaveText(pageNo === 4 ? 'Page 4 of 5' : /^Page 3( of 5)?$/);
+    await expect(label).toHaveText(afterRead ? `Page ${pageNo} of ${Math.ceil(30 / per)}` : new RegExp(`^Page ${pageNo}( of \\d+)?$`));
     await expect(historyRows(card).filter({ hasText: `vs Rival ${n}` })).toBeVisible();
+  });
+
+  test('a failed read of the next twenty keeps the page and says so; Next tries again', async ({ page, context }) => {
+    await quietArrivals(context);
+    const many = Array.from({ length: 30 }, (_, i) => row(lucilla.id, i + 1, { opponent: { name: `Rival ${i + 1}`, npc: false } }));
+    const live = await routeLiveReads(context, { world, history: many });
+    await page.goto('/game/');
+    await page.waitForFunction(() => window.__cloudiatorCamp?.state()?.ready === true, null, { timeout: 45_000 });
+    const card = await fromList(page, 'Lucilla');
+    await card.getByRole('button', { name: 'History', exact: true }).click();
+    const bar = card.getByRole('navigation', { name: 'Pages' });
+    const label = bar.locator('b').first();
+    const per = await perPage(page), known = Math.floor(20 / per);
+    await expect(historyRows(card)).toHaveCount(per);
+    await bar.getByRole('button', { name: `Go to page ${known}`, exact: true }).click();
+    live.fail('gladiator_history_reads');
+    await bar.getByRole('button', { name: 'Next page', exact: true }).click();
+    await expect(bar).toContainText('Could not load more. Try Next again.');
+    await expect(label).toHaveText(`Page ${known}`);
+    await expect(historyRows(card)).toHaveCount(per);
+    live.fail('gladiator_history_reads', false);
+    await bar.getByRole('button', { name: 'Next page', exact: true }).click();
+    await expect(label).toHaveText(`Page ${known + 1} of ${Math.ceil(30 / per)}`);
+  });
+
+  test('desktop: Show 25 makes a page taller than the card, and the bar stays the card’s bottom edge', async ({ page, context }) => {
+    await quietArrivals(context);
+    const many = Array.from({ length: 30 }, (_, i) => row(lucilla.id, i + 1, { opponent: { name: `Rival ${i + 1}`, npc: false } }));
+    await routeLiveReads(context, { world, history: many });
+    await page.setViewportSize({ width: 1280, height: 720 });
+    await page.goto('/game/');
+    await page.waitForFunction(() => window.__cloudiatorCamp?.state()?.ready === true, null, { timeout: 45_000 });
+    test.skip(await touchLayout(page), 'The desktop card only; the phone case checks its sheet.');
+    const card = await fromList(page, 'Lucilla');
+    await card.getByRole('button', { name: 'History', exact: true }).click();
+    const bar = card.getByRole('navigation', { name: 'Pages' });
+    await bar.getByRole('combobox', { name: 'Rows per page' }).selectOption('25');
+    await expect(historyRows(card)).toHaveCount(20);
+    const box = (await card.boundingBox())!, foot = (await bar.boundingBox())!;
+    expect(box.y + box.height, 'the card fits the window').toBeLessThanOrEqual(720);
+    expect(Math.abs(foot.y + foot.height - (box.y + box.height)), 'the bar is the card’s bottom').toBeLessThanOrEqual(18);
+    expect(await scopeFits(card), 'twenty rows scroll inside the card, not the card').toBe(false);
+    await expect(bar.getByRole('button', { name: 'Next page', exact: true })).toBeInViewport();
   });
 });

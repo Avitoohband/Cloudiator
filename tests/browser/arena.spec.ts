@@ -875,6 +875,25 @@ test.describe('the Arena card and league standings', () => {
     expect(remote).toEqual([]);
   });
 
+  test('after Next all ten rows of the page are inside the menu body (the table’s top goes to the top of the body)', async ({ page, baseURL }) => {
+    const remote = forbidRemote(page, baseURL);
+    await openGame(page);
+    const menu = await openMenu(page, 'Arena');
+    const table = page.getByRole('table', { name: 'Bronze league standings' });
+    const bar = menu.getByRole('navigation', { name: 'Pages' });
+    await expect(table.locator('tbody tr')).toHaveCount(10);
+    for (const target of ['Next page', 'Next page', 'Previous page']) {
+      await bar.getByRole('button', { name: target, exact: true }).click();
+      // The turn's scroll settles (the focus's own nearest-scroll first, then the table's top to the top of the body).
+      await expect.poll(async () => {
+        const body = (await menu.getByTestId('menu-body').boundingBox())!;
+        const boxes = await table.locator('tbody tr').evaluateAll(rows => rows.map(row => { const r = row.getBoundingClientRect(); return [r.top, r.bottom]; }));
+        return boxes.length === 10 && boxes.every(([top, bottom]) => top >= body.y - 1 && bottom <= body.y + body.height + 1);
+      }, { message: `all ten rows after ${target}` }).toBe(true);
+    }
+    expect(remote).toEqual([]);
+  });
+
   test('opens a spectator Arena card from the camp without owner rewards', { tag: '@render' }, async ({ page, baseURL }) => {
     const remote = forbidRemote(page, baseURL);
     await page.emulateMedia({ reducedMotion: 'reduce' });

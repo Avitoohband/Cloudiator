@@ -59,7 +59,6 @@
 }
 
 .watch,
-.more,
 .failed button {
   flex: none;
   min-height: 36px;
@@ -72,20 +71,14 @@
 }
 
 .watch:hover,
-.more:hover,
 .failed button:hover {
   background: rgba(255, 255, 255, 0.15);
 }
 
 .watch:focus-visible,
-.more:focus-visible,
 .failed button:focus-visible {
   outline: 2px solid var(--gold);
   outline-offset: 2px;
-}
-
-.more {
-  margin-top: 10px;
 }
 
 .failed {
@@ -96,8 +89,7 @@
   font-size: 0.8rem;
 }
 
-.failed p,
-.moreFailed {
+.failed p {
   margin: 0;
   font-size: 0.8rem;
 }
@@ -162,4 +154,11 @@
 .row[data-rested] {
   padding-left: 8px;
   box-shadow: inset 3px 0 0 #f2a63b;
+}
+
+/* A phone (and any touch screen): eight rows fit the tall sheet under the tabs and the retention line (Task 32 fix round 1, I3). */
+@media (hover: none), (max-width: 480px) {
+  .row {
+    padding: 3px 0;
+  }
 }

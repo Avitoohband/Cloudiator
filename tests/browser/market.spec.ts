@@ -1116,13 +1116,59 @@ test.describe('the Marketplace in pages', () => {
     await expect(label).toHaveText('Page 1');
   });
 
+  test('a search goes back to page 1, and a Refresh keeps the page', async ({ page, context }) => {
+    const { live, market, bar, label, next } = await openPaged(page, context);
+    await next.click();
+    await next.click();
+    await expect(label).toHaveText('Page 3');
+    // Refresh reads the first page again and keeps the page asked for (the offers are the same fifty).
+    const before = live.count('market_offer_reads');
+    await market.getByRole('button', { name: 'Refresh', exact: true }).click();
+    await expect.poll(() => live.count('market_offer_reads')).toBeGreaterThan(before);
+    await expect(label).toHaveText('Page 3');
+    // A search is another view of the loaded offers: back to page 1.
+    await market.getByRole('searchbox', { name: 'Search the Marketplace' }).fill('spear');
+    await expect(label).toHaveText('Page 1');
+    await expect(bar).toContainText('more to see');
+  });
+
+  test('under a price sort, reading more starts again at page 1 of the new order, and no offer shows twice going forward', async ({ page, context }) => {
+    // Offers listed later are dearer, so the oldest (read last) are the cheapest: a sort by price puts them first once they are read.
+    const rows = Array.from({ length: 120 }, (_, i): MarketListing => ({ ...MARKET_ROWS[i % MARKET_ROWS.length], listingId: randomUUID(),
+      listedAtMs: MARKET_ROWS[0].listedAtMs - i * 1000, price: 1000 - i * 5 }));
+    await context.addInitScript(() => { try { localStorage.removeItem('cloudiator.page-size.v1'); } catch { /* none */ } });
+    await routeLiveReads(context, { world: world(), market: rows });
+    await page.goto('/game/');
+    await expect(joinButton(page)).toBeVisible();
+    const market = await openMenu(page, 'Marketplace');
+    const cards = market.getByRole('list', { name: 'Open listings' }).getByRole('listitem');
+    await expect(cards).toHaveCount(3, { timeout: 45_000 });
+    const bar = market.getByRole('navigation', { name: 'Pages' });
+    const label = bar.locator('b').first(), next = bar.getByRole('button', { name: 'Next page', exact: true });
+    await market.getByRole('combobox', { name: 'Sort the Marketplace' }).selectOption({ label: 'Price low-high' });
+    await expect(label).toHaveText('Page 1');
+    // The cheapest of the first fifty is the 50th offer (price 755).
+    await expect(cards.first()).toContainText('755');
+    await bar.getByRole('button', { name: 'Go to page 16', exact: true }).click();
+    await next.click();
+    // The next fifty are read, and the view starts again at page 1 of the order of all hundred: its cheapest is the 100th offer (price 505).
+    await expect(label).toHaveText('Page 1', { timeout: 15_000 });
+    await expect(cards.first()).toContainText('505');
+    const seen: string[] = [];
+    for (let turn = 0; turn < 6; turn += 1) {
+      seen.push(...await cards.evaluateAll(items => items.map(item => item.getAttribute('data-testid') ?? '')));
+      await next.click();
+      await expect(label).toHaveText(`Page ${turn + 2}`);
+    }
+    expect(new Set(seen).size, 'no offer twice going forward').toBe(seen.length);
+  });
+
   test('the last read ends the list and the label knows it; a failed read keeps the page and says so', async ({ page, context }) => {
     const { live, market, cards, bar, label, next } = await openPaged(page, context, 52);
     await bar.getByRole('button', { name: 'Go to page 16', exact: true }).click();
     live.fail('market_offer_reads');
     await next.click();
     await expect(bar).toContainText('Could not load more. Try Next again.');
-    await expect(market.getByRole('alert')).toContainText('More listings could not be loaded. Please try again.');
     await expect(label).toHaveText('Page 16');
     await expect(cards).toHaveCount(3);
     live.fail('market_offer_reads', false);

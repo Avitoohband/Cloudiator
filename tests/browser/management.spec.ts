@@ -8,6 +8,7 @@ import { ARENA_GLADIATORS } from '../fixtures/arena-ids';
 import { ownerFixture } from '../fixtures/domain';
 import { SLOT_MS, SUPABASE_URL, emptyWorld, isPresence, routeLiveReads, seedSession } from './live-routes';
 import { closeMenu, cornerChip, everyoneResults, expectOwnerShown, menuDialog, openMenu, quietArrivals, railMenus, touchLayout, pageTo } from './shell-helpers';
+import { showChoice } from './show-choice';
 
 // Task 13.7: the Results list, the profile card a click on a gladiator opens (and its keyboard paths: the Gladiators
 // list and the standings), the merchants' stalls as shortcuts into Inventory and shops, and the owner's pending build through a
@@ -76,6 +77,9 @@ async function clickStall(page: Page, frame: 'stall-weapons' | 'stall-armor', cl
   expect(await page.evaluate(({ x, y }) => document.elementFromPoint(x, y) instanceof HTMLCanvasElement, { x: box.x + at.x, y: box.y + at.y })).toBe(true);
   await page.mouse.click(box.x + at.x, box.y + at.y);
 }
+
+// These cases look for a row by its name, not for how the list pages: Show 50 puts the rows read on the page (Patch 1.9 Task 32).
+test.beforeEach(async ({ context }) => { await showChoice(context, { standings: 50 }); });
 
 test.describe('profile cards and merchants in the fixture preview', () => {
   test.skip(production, 'These checks use the fixture preview.');

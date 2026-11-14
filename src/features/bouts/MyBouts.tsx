@@ -2,16 +2,20 @@
 
 // My bouts, the player's tab of 📜 Results (Arena replays spec 1, the approved mockup): the owner's own Arena and tournament bouts,
 // newest first, by day, each with its result, opponent, renown and rating change, a dot until watched on this device and ▶ Watch (or
-// Result once the replay is gone). The chips All · Won · Lost each show a list of their own; 20 a page, then More. Each time it is shown
+// Result once the replay is gone). The chips All · Won · Lost each show a list of their own; eight a page with Back and Next (Patch 1.9 Task 32),
+// the bouts read 20 at a time: Next past the loaded bouts reads the next page. Each time it is shown
 // (Results reads once each time it opens) the chip on screen and All are read again, keeping the rows on screen until the new page
 // lands; should that read fail, the rows stay and the failure is said above them, with Try again.
-import { useEffect, useId, useRef } from 'react';
+import { useEffect, useId, useRef, type RefObject } from 'react';
 import type { BoutFilter, MyBout } from '../../lib/api/reads';
 import { useClockMode } from '../../lib/clock-setting';
 import { boutRow, dayGroups, emptyText } from './bout-text';
 import { BoutRow } from './BoutRow';
 import { useBoutList, type BoutsStore } from './bouts-store';
 import { useWatched } from './watched';
+import { usePagedList } from '../paging/usePagedList';
+import { Pager } from '../paging/Pager';
+import { PanelFooter } from '../paging/PanelFooter';
 import styles from './bouts.module.css';
 
 const CHIPS: readonly { filter: BoutFilter; label: string }[] = [{ filter: 'all', label: 'All' }, { filter: 'won', label: 'Won' }, { filter: 'lost', label: 'Lost' }];
@@ -46,6 +50,14 @@ export function MyBouts({ store, filter, onFilter, nowMs, onOpen, timeZone }: {
   const clock = useClockMode();
   const { rows, status } = list;
   const retry = () => store.load(filter);
+  // Eight a page; a chip goes back to page 1. Next past the loaded bouts reads the next server page (rejects when that read failed).
+  const paged = usePagedList(rows, {
+    list: 'bouts', resetKey: filter,
+    more: list.nextCursor ? { hasMore: true, load: async () => {
+      const done = await store.more(filter);
+      if (!done && store.list(filter).moreFailed) throw new Error('More bouts could not be loaded.');
+    } } : undefined,
+  });
 
   return (
     <div className={styles.bouts}>
@@ -61,18 +73,19 @@ export function MyBouts({ store, filter, onFilter, nowMs, onOpen, timeZone }: {
         : <>
           {/* A reload that failed: the rows read before stay below, and the failure is said above them. */}
           {status === 'failed' && <Failed onRetry={retry} />}
-          {dayGroups(rows, nowMs ?? Number.NaN, timeZone).map((group, n) => (
-            <section key={group.label} className={styles.group} aria-labelledby={`${ids}-day-${n}`}>
-              <p id={`${ids}-day-${n}`} className={`eyebrow ${styles.day}`}>{group.label}</p>
-              <ul className={styles.list}>
-                {group.bouts.map(bout => <BoutRow key={bout.activityId} text={boutRow(bout, nowMs, clock, timeZone)} watched={watched.has(bout.activityId)}
-                  onOpen={() => onOpen(bout)} />)}
-              </ul>
-            </section>
-          ))}
+          <div ref={paged.listRef as RefObject<HTMLDivElement | null>}>
+            {dayGroups(paged.rows, nowMs ?? Number.NaN, timeZone).map((group, n) => (
+              <section key={group.label} className={styles.group} aria-labelledby={`${ids}-day-${n}`}>
+                <p id={`${ids}-day-${n}`} className={`eyebrow ${styles.day}`}>{group.label}</p>
+                <ul className={styles.list}>
+                  {group.bouts.map(bout => <BoutRow key={bout.activityId} text={boutRow(bout, nowMs, clock, timeZone)} watched={watched.has(bout.activityId)}
+                    onOpen={() => onOpen(bout)} paged />)}
+                </ul>
+              </section>
+            ))}
+          </div>
+          <PanelFooter><Pager list={paged} show /></PanelFooter>
         </>}
-      {rows.length > 0 && list.nextCursor && <button type="button" className={styles.more} onClick={() => void store.more(filter)}
-        disabled={list.loadingMore || status !== 'ready'}>More</button>}
       {list.moreFailed && <p className={styles.moreFailed} role="alert">More bouts could not be loaded. Please try again.</p>}
     </div>
   );

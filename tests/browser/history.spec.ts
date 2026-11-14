@@ -11,7 +11,7 @@ import { EXPEDITION_FIXTURES } from '../fixtures/expedition-ids';
 
 // Patch 1.9 Task 27 (Avi, 2026-11-12: "option to see gladiators arena match history\expedition history and tournaments battles history"; the
 // approved mockup `.superpowers/design/2026-11-12-gladiator-history/`): every player's card opens their History (📜 History, or "See all" in
-// RECORD): chips Arena · 🏆 Tournament fights · Expeditions with counts, newest first by day, 20 at a time with Show more, ▶ Watch on every
+// RECORD): chips Arena · 🏆 Tournament fights · Expeditions with counts, newest first by day, 20 at a time and six a page with Back and Next (Task 32), ▶ Watch on every
 // kept replay (the existing viewer), never another gladiator's rewards; tournament rows in gold, and a tournament bout's replay under a gold
 // band. The fixture preview's history is tests/fixtures/history.ts: Varro (every kind, 23 Arena rows), Corvina (the 7 Oct tournament, lost
 // in the Final; no expedition) and the viewer, Aster (her own rewards).
@@ -40,7 +40,9 @@ async function fromList(page: Page, name: string): Promise<Locator> {
 /** Varro's card, from his Bronze standings row (he is not in the camp now). */
 async function varroCard(page: Page): Promise<Locator> {
   const arena = await openMenu(page, 'Arena');
-  await arena.getByRole('table', { name: 'Bronze league standings' }).getByRole('button', { name: 'Profile: Varro', exact: true }).click();
+  const varro = arena.getByRole('table', { name: 'Bronze league standings' }).getByRole('button', { name: 'Profile: Varro', exact: true });
+  await pageTo(arena, varro);
+  await varro.click();
   await expect(profileCard(page, 'Varro')).toBeVisible();
   return profileCard(page, 'Varro');
 }
@@ -56,7 +58,7 @@ test.describe('A gladiator’s history on the card (fixture)', () => {
     await page.setViewportSize(info.project.name === 'mobile' ? { width: 360, height: 740 } : { width: 1280, height: 720 });
   });
 
-  test('another gladiator’s History: chips with counts, 20 a page with Show more, newest first by day, no reward, and ← back to the card', async ({ page }, info) => {
+  test('another gladiator’s History: chips with counts, six a page with Back and Next, newest first by day, no reward, and ← back to the card', async ({ page }, info) => {
     await openCamp(page);
     const card = await varroCard(page);
     // The entries: "History · See all" in RECORD and 📜 History after ⚔ Spar a copy.
@@ -79,7 +81,13 @@ test.describe('A gladiator’s history on the card (fixture)', () => {
     await expect(card.locator('[data-history-footer]')).toHaveText('Rewards stay private. Anyone can watch a kept replay; it shows the fights, never loot.');
 
     const rows = historyRows(card);
-    await expect(rows).toHaveCount(20);
+    // Patch 1.9 Task 32: six a page of the 20 read; 23 exist, so the label says "Page 1" with "more to see" until the last is read.
+    const bar = card.getByRole('navigation', { name: 'Pages' });
+    const label = bar.locator('b').first();
+    await expect(rows).toHaveCount(6);
+    await expect(label).toHaveText('Page 1');
+    await expect(bar).toContainText('more to see');
+    await expect(card.getByRole('button', { name: 'Show more', exact: true })).toHaveCount(0);
     // Newest first: his bout with Aster (kept: ▶ Watch), then older bouts whose replays are gone (dimmed, no opponent, Result).
     await expect(rows.first()).toContainText('vs Aster');
     await expect(rows.first()).toContainText(/Arena · \d{1,2}:\d{2}\s?[AP]M · Bronze league/);
@@ -98,14 +106,18 @@ test.describe('A gladiator’s history on the card (fixture)', () => {
     expect(await noHorizontalScroll(page)).toBe(true);
     await shot(page, info, 'history');
 
-    // Show more (by keyboard): the last three, then "That is everything." and no Show more. Fix round 1: the button that goes away hands the
-    // focus to the first new row, never to the page.
-    await card.getByRole('button', { name: 'Show more', exact: true }).focus();
+    // Next (by keyboard) from the last page read (page 3 of the 20 read) reads the last three: "Page 4 of 4", the five rows of the last page, the
+    // focus on its first row, and "That is everything." on it.
+    await bar.getByRole('button', { name: 'Go to page 3', exact: true }).click();
+    await expect(label).toHaveText('Page 3');
+    await bar.getByRole('button', { name: 'Next page', exact: true }).focus();
     await page.keyboard.press('Enter');
-    await expect(rows).toHaveCount(23);
+    await expect(label).toHaveText('Page 4 of 4');
+    await expect(rows).toHaveCount(5);
     await expect(card.getByText('That is everything.', { exact: true })).toBeVisible();
-    await expect(card.getByRole('button', { name: 'Show more', exact: true })).toHaveCount(0);
-    await expect(rows.nth(20)).toBeFocused();
+    await expect(rows.first()).toBeFocused();
+    await bar.getByRole('button', { name: 'Go to page 1', exact: true }).click();
+    await expect(card.getByText('That is everything.', { exact: true })).toHaveCount(0);
 
     // Expeditions: his Ruined Outpost (kept) and an older Woodland Path (gone). The chip choice stays while the card is open.
     await chips(card).getByRole('button', { name: 'Expeditions 2', exact: true }).click();
@@ -123,6 +135,11 @@ test.describe('A gladiator’s history on the card (fixture)', () => {
     await expect(open).toBeFocused();
     await record.getByRole('button', { name: 'See all', exact: true }).click();
     await expect(chips(card).getByRole('button', { name: 'Expeditions 2', exact: true })).toHaveAttribute('aria-pressed', 'true');
+    // Two expeditions are one page: no bar. A chip goes back to page 1: Arena shows its first page again.
+    await expect(bar).toHaveCount(0);
+    await chips(card).getByRole('button', { name: /^Arena/ }).click();
+    await expect(label).toHaveText('Page 1 of 4');
+    await chips(card).getByRole('button', { name: 'Expeditions 2', exact: true }).click();
 
     // ▶ Watch on his kept trip opens the existing expedition scene (the whole trip); the card closes.
     await rows.first().getByRole('button', { name: /^Watch: Ruined Outpost/ }).click();
@@ -285,20 +302,25 @@ test.describe('A gladiator’s history on the card (fixture)', () => {
     expect(await touchLayout(page)).toBe(true);
     const card = await varroCard(page);
     await card.getByRole('button', { name: 'History', exact: true }).click();
-    await expect(historyRows(card)).toHaveCount(20);
+    await expect(historyRows(card)).toHaveCount(6);
     const box = (await card.boundingBox())!;
     expect(Math.round(box.x)).toBe(10);
     expect(Math.round(box.x + box.width)).toBe(350);
     const body = card.getByTestId('profile-body');
-    expect(await body.evaluate(el => el.scrollHeight > el.clientHeight)).toBe(true);
+    // Task 32: the sheet no longer scrolls its list (Back and Next page it); the bar is the sheet's bottom edge, inside the card.
+    const bar = card.getByRole('navigation', { name: 'Pages' });
+    await expect(bar).toBeInViewport();
+    const bottom = (await bar.boundingBox())!;
+    expect(Math.abs(bottom.y + bottom.height - (box.y + box.height))).toBeLessThanOrEqual(12);
     // Fix round 1: the sheet's history is opaque, so nothing behind it shows through under the rows.
     expect(await body.evaluate(el => getComputedStyle(el).backgroundColor)).toBe('rgb(21, 19, 28)');
     for (const button of [card.getByRole('button', { name: 'Back to the card' }), historyRows(card).first().getByRole('button'),
       chips(card).getByRole('button').first(), card.getByRole('button', { name: 'Close profile' })]) {
       expect((await button.boundingBox())!.height).toBeGreaterThanOrEqual(44);
     }
-    await card.getByRole('button', { name: 'Show more', exact: true }).scrollIntoViewIfNeeded();
-    await expect(card.getByRole('button', { name: 'Show more', exact: true })).toBeInViewport();
+    for (const control of [bar.getByRole('button', { name: 'Next page', exact: true }), bar.getByRole('button', { name: 'Previous page', exact: true })]) {
+      expect((await control.boundingBox())!.height).toBeGreaterThanOrEqual(44);
+    }
     expect(await noHorizontalScroll(page)).toBe(true);
   });
 });
@@ -375,5 +397,32 @@ test.describe('A gladiator’s history from the live views', () => {
     expect(live.requests.filter(r => r.table === 'activities')).toEqual([]);
     expect(live.requests.filter(r => r.table === 'gladiator_history_reads').every(r => r.reader === null)).toBe(true);
   });
-});
 
+  // Patch 1.9 Task 32: Back from a replay lands on the page and row the replay was opened from. The card closes under a scene and its store is
+  // new when it reopens, so the rows before the one opened are read again (a page of 20 at a time) until it is on the page shown.
+  for (const [pageNo, n] of [[3, 13], [4, 21]] as const) test(`Back from a replay reopens the History on page ${pageNo}, at the row it was opened from`, async ({ page, context }) => {
+    await quietArrivals(context);
+    const many = Array.from({ length: 30 }, (_, i) => row(lucilla.id, i + 1, { opponent: { name: `Rival ${i + 1}`, npc: false } }));
+    await routeLiveReads(context, { world, history: many });
+    await page.goto('/game/');
+    await page.waitForFunction(() => window.__cloudiatorCamp?.state()?.ready === true, null, { timeout: 45_000 });
+    const card = await fromList(page, 'Lucilla');
+    await card.getByRole('button', { name: 'History', exact: true }).click();
+    const bar = card.getByRole('navigation', { name: 'Pages' });
+    const label = bar.locator('b').first();
+    await expect(historyRows(card)).toHaveCount(6);
+    await bar.getByRole('button', { name: 'Go to page 3', exact: true }).click();
+    if (pageNo === 4) await bar.getByRole('button', { name: 'Next page', exact: true }).click();
+    await expect(label).toHaveText(pageNo === 4 ? 'Page 4 of 5' : 'Page 3');
+    const opened = historyRows(card).filter({ hasText: `vs Rival ${n}` });
+    await expect(opened).toHaveCount(1);
+    await opened.getByRole('button', { name: new RegExp(`^Watch: vs Rival ${n},`) }).click();
+    const replay = page.getByRole('dialog', { name: 'Replay', exact: true });
+    await expect(replay).toBeVisible();
+    await replay.getByRole('button', { name: /^Back to Lucilla.s history$/ }).click();
+    await expect(replay).toHaveCount(0);
+    await expect(card.getByRole('heading', { name: /^Lucilla.s history$/, level: 2 })).toBeVisible();
+    await expect(label).toHaveText(pageNo === 4 ? 'Page 4 of 5' : /^Page 3( of 5)?$/);
+    await expect(historyRows(card).filter({ hasText: `vs Rival ${n}` })).toBeVisible();
+  });
+});

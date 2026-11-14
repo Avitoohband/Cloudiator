@@ -1,6 +1,6 @@
 'use client';
 
-// League standings: paginated rows (at most 50 per page, a "More" cursor) with rating, human wins and losses and the
+// League standings: rows read 50 at a time and shown ten a page with Back and Next (Patch 1.9 Task 32) with rating, human wins and losses and the
 // promoted and inactive markers; separately the owner's own rating, renown and current combat strength; and a short
 // explanation of the leagues from the spec thresholds. It re-reads the pages it shows when the shared world revision
 // changes (Task 13.4: the server credits results with a new revision, and the sync controller polls it), so standings
@@ -15,7 +15,7 @@
 //
 // Patch 1.6 (spec "Season card (a v2 season)", the approved mockup): a season opened under rules v2 lists every league's gold prizes in a
 // table instead, the owner's league marked "· yours" and highlighted (a visitor sees no mark), then the renown line and the rule.
-import { useCallback, useEffect, useId, useRef, useState } from 'react';
+import { useCallback, useEffect, useId, useRef, useState, type RefObject } from 'react';
 import type { GladiatorId, LeagueId } from '@contracts/commands';
 import type { OwnerState, SeasonView, StandingRow, StandingsPage } from '@contracts/reads';
 import type { DisplayClock } from '../../game/display-clock';
@@ -25,6 +25,9 @@ import { leagueName, leagueRules } from './arena-text';
 import {
   ELIGIBLE_NOTE, PLACE_HEADERS, medalOf, placeParts, promotionNote, qualifyText, seasonEnds, seasonLabel, seasonName, seasonPrizeNote, seasonPrizeTable,
 } from '../seasons/season-text';
+import { usePagedList } from '../paging/usePagedList';
+import { Pager } from '../paging/Pager';
+import { PanelFooter } from '../paging/PanelFooter';
 import styles from './StandingsPanel.module.css';
 
 /**
@@ -179,8 +182,9 @@ function FinalSeason({ season, clockMode, timeZone }: { season: SeasonView; cloc
 }
 
 /** Pure view of one league's standings of one season and the owner's own figures. */
-export function StandingsView({ model, onLeague, onSeason, onMore, onRetry, onProfile, loadingMore = false, timeZone }: {
-  model: StandingsModel; onLeague(league: LeagueId): void; onMore(): void; onRetry(): void; loadingMore?: boolean;
+export function StandingsView({ model, onLeague, onSeason, onMore, onRetry, onProfile, timeZone }: {
+  /** `onMore` reads the next server page: it resolves once the rows have grown and rejects when the read fails (Patch 1.9 Task 32: Next past the loaded rows). */
+  model: StandingsModel; onLeague(league: LeagueId): void; onMore(): Promise<unknown> | void; onRetry(): void;
   /** Shows another season (a `SeasonView.seasonId` from the picker). */
   onSeason?(seasonId: string): void;
   /** Opens a row's profile card (Task 13.7: the keyboard path of a camp click); without it names are plain text. */
@@ -200,6 +204,11 @@ export function StandingsView({ model, onLeague, onSeason, onMore, onRetry, onPr
   const minimum = RULES_V1.seasons.minimumHumanBouts;
   const ownRow = own?.season.status === 'ready' ? own.season.row : null;
   const ownBouts = ownRow ? ownRow.humanWins + ownRow.humanLosses : 0;
+  // Patch 1.9 Task 32: ten rows a page; Next past the loaded rows reads the next 50. A league or a season goes back to page 1.
+  const paged = usePagedList(rows, {
+    list: 'standings', resetKey: `${league}|${model.seasonId ?? ''}`,
+    more: model.nextCursor ? { hasMore: true, load: async () => { await onMore(); } } : undefined,
+  });
   const ownValue = (ready: string) => (own?.season.status === 'ready' ? ready : own?.season.status === 'loading' ? 'Loading…' : 'not available');
   return (
     <section className={styles.standings} aria-labelledby={titleId}>
@@ -259,8 +268,8 @@ export function StandingsView({ model, onLeague, onSeason, onMore, onRetry, onPr
                   <table className={styles.table} aria-labelledby={tableId}>
                     <caption id={tableId}>{leagueName(league)} league standings</caption>
                     <thead><tr><th scope="col">Rank</th><th scope="col">Gladiator</th><th scope="col">Rating</th><th scope="col">Human <span className={styles.nowrap}>W–L</span></th><th scope="col">Notes</th></tr></thead>
-                    <tbody>{rows.map(row => (
-                      <tr key={row.gladiatorId} aria-current={row.gladiatorId === model.ownerId ? 'true' : undefined} className={row.gladiatorId === model.ownerId ? styles.mine : undefined}>
+                    <tbody ref={paged.listRef as RefObject<HTMLTableSectionElement | null>}>{paged.rows.map(row => (
+                      <tr key={row.gladiatorId} data-page-row="" tabIndex={-1} aria-current={row.gladiatorId === model.ownerId ? 'true' : undefined} className={row.gladiatorId === model.ownerId ? styles.mine : undefined}>
                         <td>{row.rank}</td>
                         <th scope="row">{onProfile
                           ? <button type="button" className={styles.name} aria-label={`Profile: ${row.name}`} onClick={() => onProfile(row, archived ? model.seasonId : null)}>{row.name}</button>
@@ -280,7 +289,7 @@ export function StandingsView({ model, onLeague, onSeason, onMore, onRetry, onPr
                 </div>
                 <p className={`muted ${styles.footnote}`}>{archived ? promotionNote(rows, league) : ELIGIBLE_NOTE}</p>
               </>}
-      {model.nextCursor && <button type="button" className={styles.more} onClick={onMore} disabled={loadingMore}>More</button>}
+      <PanelFooter><Pager list={paged} show /></PanelFooter>
 
       <section className={styles.explain} aria-label="How leagues work">
         <h3>How leagues work</h3>
@@ -338,7 +347,7 @@ function seasonsStale(list: readonly SeasonView[] | null, shown: ShownPages | nu
 }
 
 /**
- * Live standings: reads the chosen league and season, pages with "More", and re-reads the loaded pages of an open season
+ * Live standings: reads the chosen league and season, pages with Next, and re-reads the loaded pages of an open season
  * when the world revision changes, which is when the server credits results (a finished season's archive never changes).
  * A failed read keeps any rows shown and offers a retry. The season list and the owner's own season row are read at
  * opening; the owner's row again with each revision, the list only when it may be out of date (`seasonsStale`).
@@ -349,7 +358,6 @@ export function StandingsPanel({ reads, owner, clock, revision, onProfile, timeZ
   const [chosen, setChosen] = useState<string | null>(null);
   const [page, setPage] = useState<ShownPages | null>(null);
   const [status, setStatus] = useState<StandingsModel['status']>(reads ? 'loading' : 'unavailable');
-  const [loadingMore, setLoadingMore] = useState(false);
   const [strength, setStrength] = useState<{ id: string; value: number | null } | null>(null);
   /** The season list as last read (kept when a later read fails), or null before the first one succeeds. */
   const [seasons, setSeasons] = useState<SeasonView[] | null>(null);
@@ -442,21 +450,16 @@ export function StandingsPanel({ reads, owner, clock, revision, onProfile, timeZ
     return () => { alive = false; };
   }, [ownerId, ownLeague, reads, revision]);
 
+  // Next past the loaded rows (Patch 1.9 Task 32): reads the next server page. A failed read keeps the rows and the page and rejects, so the
+  // pager says so and Next tries again.
   const more = async () => {
     const reader = counted();
     if (!reader || !page?.nextCursor) return;
     const mine = request.current;
-    setLoadingMore(true);
-    try {
-      const next: ShownPages = { ...await readNextPage(reader, page), key: page.key };
-      if (mine !== request.current) return;
-      shown.current = next;
-      setPage(next);
-    } catch {
-      // Keep the rows already shown; the button stays for another try.
-    } finally {
-      setLoadingMore(false);
-    }
+    const next: ShownPages = { ...await readNextPage(reader, page), key: page.key };
+    if (mine !== request.current) return;
+    shown.current = next;
+    setPage(next);
   };
 
   const list = seasons ?? [];
@@ -488,6 +491,5 @@ export function StandingsPanel({ reads, owner, clock, revision, onProfile, timeZ
     void load(league, chosen, true);
     if (seasonsFailed.current || !seasons) void loadSeasons();
   };
-  return <StandingsView model={model} onLeague={setLeague} onSeason={pick} onMore={() => void more()} onRetry={retry} onProfile={onProfile}
-    loadingMore={loadingMore} timeZone={timeZone} />;
+  return <StandingsView model={model} onLeague={setLeague} onSeason={pick} onMore={more} onRetry={retry} onProfile={onProfile} timeZone={timeZone} />;
 }

@@ -8,6 +8,7 @@ import { emptyWorld, routeLiveReads, seedSession } from './live-routes';
 import { forbidRemote } from './remote';
 import { expectOwnerShown, menuDialog, openMenu } from './shell-helpers';
 import { storeClock } from './slot-time';
+import { showChoice } from './show-choice';
 import { watchSyncPoll } from './sync-poll';
 
 // Task 21.4 (plan Decision 8, the approved mockup): seasons inside Arena standings. A season picker, the current season's
@@ -53,7 +54,8 @@ async function shot(page: Page, testInfo: TestInfo, name: string, align: { top?:
 }
 
 // The expected times below are written in the 24-hour form (Patch A item 7: the clock setting decides, and the browser's own locale is 12-hour).
-test.beforeEach(({ context }) => storeClock(context, '24'));
+// These cases read the standings' rows, not their paging: Show 50 puts all fifty read on the page (Patch 1.9 Task 32; arena.spec.ts pages them).
+test.beforeEach(async ({ context }) => { await storeClock(context, '24'); await showChoice(context, { standings: 50 }); });
 
 test.describe('seasons in the fixture preview', () => {
   test.skip(production, 'These checks use the fixture preview.');
@@ -118,6 +120,31 @@ test.describe('seasons in the fixture preview', () => {
     await expect(prizes.locator('[aria-current]')).toHaveCount(0);
     await season.screenshot({ path: '.superpowers/sdd/2026-10-30-economy-1-6/task-9-shots/season-prizes-visitor-' + testInfo.project.name + '.png' });
     expect(remote).toEqual([]);
+  });
+
+  test('a season picked from the picker goes back to page 1 of its standings', async ({ page }) => {
+    // This case is about paging: it takes the Fit size, whatever the other cases of this file save.
+    await page.addInitScript(() => { try { localStorage.removeItem('cloudiator.page-size.v1'); } catch { /* none */ } });
+    await page.emulateMedia({ reducedMotion: 'reduce' });
+    await page.goto('/game/?mode=fixture');
+    await expectOwnerShown(page, 'Aster');
+    await page.waitForFunction(() => !!window.__cloudiatorShell);
+    await page.evaluate(ms => window.__cloudiatorShell!.clock.freeze(ms), NOW);
+    const menu = await openMenu(page, 'Arena');
+    const bar = menu.getByRole('navigation', { name: 'Pages' });
+    const label = bar.locator('b').first();
+    await expect(table(page, 'Bronze').locator('tbody tr')).toHaveCount(10, { timeout: 45_000 });
+    await bar.getByRole('button', { name: 'Next page', exact: true }).click();
+    await expect(label).toHaveText('Page 2');
+    await picker(page).selectOption({ label: 'Season 1 · ended Sat 26 Sep' });
+    await expect(standings(page).getByText('Archived season', { exact: true })).toBeVisible();
+    await expect(table(page, 'Bronze').locator('tbody tr')).toHaveCount(10);
+    await expect(label).toHaveText(/^Page 1( of \d+)?$/);
+    await bar.getByRole('button', { name: 'Next page', exact: true }).click();
+    await expect(label).toHaveText(/^Page 2/);
+    await picker(page).selectOption({ label: 'Season 2 · current' });
+    await expect(standings(page).getByText('Current season', { exact: true })).toBeVisible();
+    await expect(label).toHaveText('Page 1');
   });
 
   for (const visitor of [false, true]) {

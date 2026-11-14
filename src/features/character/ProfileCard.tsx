@@ -55,6 +55,7 @@ import { ClassChips } from './ClassCard';
 import { attributeHelp, attributeRows, cardStats, compareStats, gearRows, overloadLine, pointsTotal, recordText, sinceText, statHelp, statRows, type CompareSide } from './profile-card';
 import { CompareBlock } from './ProfileCompare';
 import { GladiatorHistory } from './GladiatorHistory';
+import { PagingScope } from '../paging/PanelFooter';
 import { createHistoryStore, type HistoryReads, type HistoryStore } from './history-store';
 import { withHistoryOrigin, type SceneView } from '../shell/scene-url';
 import { copySide, type PracticeSide } from '../practice/practice';
@@ -175,8 +176,12 @@ export function ProfileCard({ actor, profile, profileFailed = false, own, ownPla
   const openHistory = (from: 'button' | 'link') => { opener.current = from; setShown(current => ({ ...current, open: true })); };
   if (historyOpen && history) {
     return <div ref={bodyRef} className={`${styles.body} ${styles.historyBody}`} data-testid="profile-body">
-      <GladiatorHistory store={history} kind={shown.kind} onKind={kind => setShown({ open: true, kind })} name={actor.name} own={own} nowMs={nowMs}
-        onBack={() => setShown(current => ({ ...current, open: false }))} onWatch={view => onWatchHistory?.(view, shown.kind)} backRef={historyBack} />
+      {/* Patch 1.9 Task 32: the History's pages and their bar are the card's own (a card is not a menu), the bar at the card's foot. */}
+      <PagingScope className={styles.historyScope}>
+        <GladiatorHistory store={history} kind={shown.kind} onKind={kind => setShown({ open: true, kind })} name={actor.name} own={own} nowMs={nowMs}
+          onBack={() => setShown(current => ({ ...current, open: false }))} onWatch={view => onWatchHistory?.(view, shown.kind)} backRef={historyBack}
+          gladiatorId={actor.gladiatorId} />
+      </PagingScope>
     </div>;
   }
   return <>

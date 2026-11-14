@@ -8,6 +8,7 @@ import { ownerFixture } from '../fixtures/domain';
 import { SLOT_MS, emptyWorld, routeLiveReads, seedSession } from './live-routes';
 import { noHorizontalScroll } from './a11y-helpers';
 import { expectOwnerShown, menuDialog, openMenu, quietArrivals, touchLayout } from './shell-helpers';
+import { showChoice } from './show-choice';
 
 // Arena replays Task 5 (spec 2, the approved mockup; plan Review Focus 1, 4 and 5): one replay viewer with Patch A's bar (▶/⏸, a
 // track, the time, a speed this device remembers and ⚑ Result), the result card on the arena at the end with ↺ Watch again and the
@@ -311,6 +312,8 @@ test.describe('the replay viewer', () => {
   });
 
   test('a held next page cannot replace a newer replay after the list reopened', async ({ page, context }) => {
+    // The twenty bouts read are on the page (Show 50): the case is about the replay's queue, not the list's paging (Patch 1.9 Task 32).
+    await showChoice(context, { bouts: 50 });
     await seedSession(context);
     const now = Date.now(), bouts = Array.from({ length: 22 }, (_, i) => pagedBout(now, i + 1));
     await routeLiveReads(context, { world: emptyWorld(now), owner: ownerFixture, bouts });
@@ -330,7 +333,7 @@ test.describe('the replay viewer', () => {
     await page.getByRole('button', { name: 'Back to My bouts', exact: true }).click();
     const results = menuDialog(page, 'Results');
     await expect(results.locator('[data-bout-row]')).toHaveCount(20);
-    await expect(results.getByRole('status')).toHaveCount(0);
+    await expect(results.locator('[role="status"]:not(nav[aria-label="Pages"] *)')).toHaveCount(0);
     await results.getByRole('button', { name: /^Watch: vs Varro,/ }).first().click();
     await replayReady(page);
     await expect.poll(() => page.evaluate(() => window.__cloudiatorReplay!.queue())).toMatchObject({ index: 0, count: 20, more: true });

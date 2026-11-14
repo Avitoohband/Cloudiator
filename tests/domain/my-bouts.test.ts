@@ -406,7 +406,10 @@ describe('the My bouts view', () => {
     expect(html.match(/data-gone=""/g)).toHaveLength(1);
     expect(text(html)).toContain('Won');
     expect(text(html)).toContain('Lost');
-    expect(html).toMatch(/<button[^>]*>More<\/button>/);
+    // More can be read: no More button; the pager says "more to see" and Next reads the next page (Patch 1.9 Task 32).
+    expect(html).not.toMatch(/<button[^>]*>More<\/button>/);
+    expect(text(html)).toContain('more to see');
+    expect(html.match(/data-page-row/g)).toHaveLength(3);
   });
 
   it('says loading, a failure and an empty chip', async () => {

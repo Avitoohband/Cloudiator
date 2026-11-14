@@ -266,6 +266,9 @@ describe('the Marketplace panel', () => {
     const spear = MARKET_ROWS.find(r => r.item.catalogId === 'spear:10:rare')!;
     const helmet = MARKET_ROWS.find(r => r.seller.name === 'Aster')!;
     const bow = MARKET_ROWS.find(r => r.item.catalogId === 'bow:10:common')!;
+    /** The view of every page of `rows` (three cards a page, Patch 1.9 Task 32): each chunk of three rendered on its own, joined. */
+    const everyPage = (props: Partial<Parameters<typeof MarketOffers>[0]> = {}, rows: readonly MarketListing[] = MARKET_ROWS) =>
+      Array.from({ length: Math.ceil(rows.length / 3) }, (_, n) => offers({ ...props, model: { ...model, rows: rows.slice(n * 3, n * 3 + 3) } })).join('');
     const order = (html: string) => [...html.matchAll(/data-testid="listing-([^"]+)"/g)].map(m => m[1]);
     const idsOf = (rows: readonly MarketListing[]) => rows.map(r => r.listingId);
 
@@ -306,7 +309,7 @@ describe('the Marketplace panel', () => {
     });
 
     it('offers Buy for the price on others’ listings, and Cancel listing with what the sale pays on the viewer’s own', () => {
-      const html = offers({ access: 'trade', ownerId: helmet.seller.gladiatorId, available: 10_000 });
+      const html = everyPage({ access: 'trade', ownerId: helmet.seller.gladiatorId, available: 10_000 });
       expect((html.match(/aria-label="Buy /g) ?? []).length).toBe(MARKET_ROWS.length - 1);
       expect(html).toContain(`aria-label="Buy Spear for 450 gold"`);
       expect(text(html)).toContain('Buy for 450 gold');
@@ -346,7 +349,7 @@ describe('the Marketplace panel', () => {
     });
 
     it('lets a visitor see every row with "Sign in to buy." and no trading control', () => {
-      const html = offers({ access: 'sign-in', onProfile: noop });
+      const html = everyPage({ access: 'sign-in', onProfile: noop });
       expect((text(html).match(/Sign in to buy\./g) ?? []).length).toBe(MARKET_ROWS.length);
       expect(html).not.toMatch(/aria-label="(Buy|Cancel listing)/);
       expect((html.match(/>View profile</g) ?? []).length).toBe(MARKET_ROWS.length);
@@ -390,14 +393,16 @@ describe('the Marketplace panel', () => {
       const weapons = MARKET_ROWS.filter(r => CATALOG_V1.items[r.item.catalogId].slot === 'weapon');
       const armor = MARKET_ROWS.filter(r => CATALOG_V1.items[r.item.catalogId]?.slot !== 'weapon');
       expect(weapons.length).toBeGreaterThan(0);
-      expect(order(offers({ filter: 'Weapons' }))).toEqual(idsOf(weapons));
-      expect(order(offers({ filter: 'Armor' }))).toEqual(idsOf(armor));
+      // Three cards a page: the first page of each chip, in the loaded order.
+      expect(order(offers({ filter: 'Weapons' }))).toEqual(idsOf(weapons).slice(0, 3));
+      expect(order(offers({ filter: 'Armor' }))).toEqual(idsOf(armor).slice(0, 3));
       expect(order(offers({ query: 'BOW' }))).toEqual([bow.listingId]);
       expect(text(offers({ query: 'bow' }))).toContain('1 listing match “bow”');
       const by = (key: (r: MarketListing) => number, direction = 1) => idsOf([...MARKET_ROWS].sort((a, b) => direction * (key(a) - key(b))));
-      expect(order(offers({ sort: 'price' }))).toEqual(by(r => r.price));
-      expect(order(offers({ sort: 'priceDesc' }))).toEqual(by(r => r.price, -1));
-      expect(order(offers({ sort: 'level' }))).toEqual(by(r => r.item.tier));
+      expect(order(offers({ sort: 'price' }))).toEqual(by(r => r.price).slice(0, 3));
+      expect(order(offers({ sort: 'priceDesc' }))).toEqual(by(r => r.price, -1).slice(0, 3));
+      expect(order(offers({ sort: 'level' }))).toEqual(by(r => r.item.tier).slice(0, 3));
+      expect(text(offers())).toContain(`Page 1 of ${Math.ceil(MARKET_ROWS.length / 3)}`);
       expect(text(offers())).toContain(`${MARKET_ROWS.length} open listings · newest first`);
       expect(text(offers({ sort: 'priceDesc' }))).toContain(`${MARKET_ROWS.length} open listings · dearest first`);
       // A search the chip hides says so, and offers to clear it.
@@ -428,7 +433,9 @@ describe('the Marketplace panel', () => {
       expect(text(offers({ model: { rows: [], nextCursor: null, status: 'ready' }, filter: 'Weapons' }))).toContain('No open listings right now.');
       expect(text(offers({ model: { rows: [], nextCursor: null, status: 'failed' } }))).toContain('Listings could not be loaded right now.');
       expect(text(offers({ model: { rows: [], nextCursor: null, status: 'loading' } }))).toContain('Loading listings…');
-      expect(offers({ model: { ...model, nextCursor: 'x' } })).toContain('>More<');
+      // More can be read: no More button; the pager says "Page 1" with "more to see" (Next reads the next 50).
+      expect(offers({ model: { ...model, nextCursor: 'x' } })).not.toContain('>More<');
+      expect(text(offers({ model: { ...model, nextCursor: 'x' } }))).toContain('more to see');
       expect(text(offers({ model: { ...model, nextCursor: 'x' }, sort: 'price' }))).toContain('Sort and search apply to the listings loaded so far.');
       expect(text(offers({ model: { ...model, nextCursor: 'x' } }))).not.toContain('loaded so far');
       expect(text(offers({ model: { ...model, nextCursor: null }, sort: 'price' }))).not.toContain('loaded so far');

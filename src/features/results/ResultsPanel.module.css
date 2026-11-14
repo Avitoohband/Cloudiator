@@ -1,7 +1,13 @@
 /* Recent results in the Results menu (the approved mockup's rows): what happened, its kind and time, and a Replay button. */
 .results {
   min-width: 0;
-  margin-bottom: 1rem;
+  margin-bottom: 0.3rem;
+}
+
+/* Patch 1.9 Task 32: a page of eight fits the panel, so the retention line and the eyebrow sit close above it. */
+.results > p {
+  margin-top: 0;
+  margin-bottom: 4px;
 }
 
 .list {
@@ -16,7 +22,7 @@
   justify-content: space-between;
   gap: 10px;
   min-width: 0;
-  padding: 7px 0;
+  padding: 4px 0;
   border-bottom: 1px solid rgba(255, 255, 255, 0.06);
 }
 
@@ -108,7 +114,7 @@
   display: flex;
   gap: 18px;
   min-width: 0;
-  margin: 0 0 9px;
+  margin: 0 0 3px;
   border-bottom: 1px solid rgba(255, 255, 255, 0.11);
 }
 

@@ -15,6 +15,7 @@ import { a11yShot, contrastIssues, expectNamedControls, focusDrops, focusedEleme
 import { SUPABASE_URL, emptyWorld, isPresence, routeLiveReads, seedSession, testUser } from './live-routes';
 import { reviewShot, reviewShot360 } from './review-shots';
 import { chipToggle, cornerChip, creationDialog, everyoneResults, expectOwnerShown, joinButton, menuDialog, openMenu, quietArrivals, railMenus, revealRail, touchLayout, pageTo } from './shell-helpers';
+import { showChoice } from './show-choice';
 
 // Task 23.5: the release browser spec. The game is usable by keyboard and screen reader (every control named, the focus
 // never left on <body>, validation messages linked to their fields), readable (WCAG contrast), calm with reduced motion,
@@ -64,6 +65,9 @@ function poorPlayer(): OwnerState {
   state.inventory.push(axe);
   return state;
 }
+
+// These cases look for a row by its name, not for how the list pages: Show 50 puts the rows read on the page (Patch 1.9 Task 32).
+test.beforeEach(async ({ context }) => { await showChoice(context, { standings: 50 }); });
 
 test.describe('release accessibility in the fixture preview', () => {
   test.skip(production, 'These checks use the fixture preview.');

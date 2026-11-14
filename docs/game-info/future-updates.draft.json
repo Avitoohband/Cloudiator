@@ -97,8 +97,8 @@
     },
     {
       "id": "name-toggles",
-      "title": "Names and titles in camp",
-      "body": "In Settings, choose when names and titles show above gladiators in camp: Off, When zoomed in, or Always.",
+      "title": "Names and titles",
+      "body": "In Settings, choose when names and titles show above gladiators in camp: Off, When zoomed in, or Always. Newly earned titles carry a small New mark in the titles menu until you have seen them.",
       "patch": "1.9"
     },
     {

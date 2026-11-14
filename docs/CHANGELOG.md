@@ -30,7 +30,7 @@ Project folders under `D:\Avi\Projects\Animation\Cloudiator\`.
 
 ### Built
 
-- Open Game Info from camp to read the Wiki and the Future Updates plans. Pick a Wiki topic from one short scrolling list: combat, attributes, stamina, Training, the Arena, dungeons and more.
+- Open Game Info from camp to read the Wiki and the Future Updates plans. Wiki topics cover combat, attributes, stamina, Training, the Arena, dungeons and more, with their own YouTube video guide, and more guides on the way.
 - Open Inventory and shops to browse your inventory in a square grid of pixel-art items. Select a tile to check its details, wear it, or manage it.
 - In My gladiator, hover, focus or tap worn gear and replacements to see stats, attribute bonuses and weight, and any attribute or stat to see what it does. Wear or replace gear straight from the Worn equipment slots in My gladiator.
 - Shops are an icon grid with the same detail card as your inventory. Search and sort both. The Marketplace is a list with big item icons, every detail on the row and the seller in front.
@@ -41,7 +41,6 @@ Project folders under `D:\Avi\Projects\Animation\Cloudiator\`.
 - Click or tap a camp NPC to hear a line from them, and again for the next. The Weaponsmith's and Armorer's stalls open the shops.
 - Resting gladiators lie straight on their beds, with an eye cover and a floating ZzZ, and take off their armor while they sleep.
 - My gladiator and gladiator cards show the extra damage of a critical hit, and how much renown armor and weapons add in the Arena.
-- Wiki topics show their own YouTube video guide, with more guides on the way.
 - Compare your gladiator's stats with any other gladiator's from their card. Practice fights: test your build against a dummy with stats you choose, or spar a copy of any gladiator. No stamina, no slot, no rating, nothing saved.
 - See any gladiator's Arena, tournament and expedition history from their card and watch kept replays. Tournament fights look different: gold rows, a gold header and their own arena.
 - Phones scroll a tapped item's card into view, plus small fixes to the inventory, shops, messages, Settings and the Wiki list.
@@ -50,6 +49,7 @@ Project folders under `D:\Avi\Projects\Animation\Cloudiator\`.
 - The schedule warns when your gladiator will not have the stamina for a planned activity, and says when he rested instead.
 - Long menus turn into pages with Back and Next: jump with the circles, choose how many rows a page shows; My gladiator and Inventory open as named sections.
 - When you come back, a pop-up sums up what your gladiators gained since your last visit: XP and levels, gold and renown, items, and fight, tournament and expedition results.
+- Newly earned titles carry a small New mark in the titles menu until you have seen them.
 
 ## 1.8.1 — Clearer gladiator stats (2026-11-11)
 

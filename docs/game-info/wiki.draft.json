@@ -11,8 +11,8 @@
       "id": "schedule",
       "title": "Your daily schedule",
       "body": "Open Schedule, choose one activity for morning, afternoon, and evening, and save the whole day. Each slot lasts 80 minutes in real time, so a game day takes four hours. Your schedule repeats while you’re away. Edits apply to slots that haven’t started. Dungeons run in the afternoon and Arena bouts run in the evening.",
-      "video": "https://youtu.be/n_JSh16FMkY",
-      "videoLength": "0:56"
+      "video": "https://youtu.be/33XA-hv1ccQ",
+      "videoLength": "1:01"
     },
     {
       "id": "stamina",
@@ -25,15 +25,15 @@
       "id": "training",
       "title": "Training and leveling",
       "body": "Training earns attribute points up to your current level’s Training limit. You can complete two Training sessions per game day. A third becomes Rest. Expeditions and dungeons award XP, which raises your level and unlocks harder content and more gear. Spend earned points in My gladiator → Plan a build.\n\nThe XP bar sits under Stamina in My gladiator, and a thin XP line shows in the corner chip. A lighter segment shows what your next expedition could add, as an upper estimate (“up to”). If it says the expedition can level you up, finishing it may take you to the next level. The hint uses your scheduled expedition, or the best one available if none is scheduled.",
-      "video": "https://youtu.be/5ddb8dLd4Eo",
-      "videoLength": "1:03"
+      "video": "https://youtu.be/SoPHhPdNSik",
+      "videoLength": "0:58"
     },
     {
       "id": "attributes",
       "title": "Classes and attributes",
       "body": "Berserkers favor Strength, Guardians favor Vitality and Endurance, and Duelists favor Agility and Precision. Any class can use any weapon it meets the requirements for.\n\nStrength increases damage. Agility shortens the time between attacks and makes you harder to hit. Vitality raises maximum health. Endurance increases maximum stamina and gear capacity. Precision increases your chances to hit and to land a critical hit. Your class and the points in an active build are fixed.\n\nMy gladiator has Attributes and Stats blocks. Hover, focus, or tap an attribute or stat to read what it means and what changes it.",
-      "video": "https://youtu.be/RcJHwplvJ9Q",
-      "videoLength": "0:57"
+      "video": "https://youtu.be/gQ1pgAnvMx0",
+      "videoLength": "0:59"
     },
     {
       "id": "combat",

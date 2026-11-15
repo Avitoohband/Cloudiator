@@ -26,6 +26,10 @@ Project folders under `D:\Avi\Projects\Animation\Cloudiator\`.
 
 **Last video's patch: 1.6.** The 5 Nov film covers all ten 1.6 bullets. Patches 1.7, 1.7.1 and 1.8 are new since.
 
+## 1.9.1 — Section names on phones (in progress, not yet released)
+
+- The section name that shows when you touch a circle in My gladiator or Inventory and shops is no longer cut off by the top of the menu.
+
 ## 1.9 — Game Info, a pixel-art inventory and paged menus (2026-11-15)
 
 - Open Game Info from camp to read the Wiki and the Future Updates plans. Wiki topics cover combat, attributes, stamina, Training, the Arena, dungeons and more, with their own YouTube video guide, and more guides on the way.

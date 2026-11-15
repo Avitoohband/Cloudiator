@@ -45,7 +45,8 @@ export function SectionStrip({ sections, index, onGo }: { sections: readonly Sec
       {count > 1 && <>
         <button type="button" className={styles.stripMove} aria-label={prev ? `Previous section: ${prev.name}` : 'Previous section'} aria-disabled={!prev}
           onClick={back}>‹{prev && <span className={styles.stripMoveName}>{` ${prev.name}`}</span>}</button>
-        <PageDots count={count} current={at + 1} names={sections.map(section => section.name)} onGo={page => onGo(page - 1)} />
+        {/* 1.9.1: the strip is the top of the part of the menu that scrolls, right under the title: its bubble shows below the circles. */}
+        <PageDots count={count} current={at + 1} names={sections.map(section => section.name)} place="below" onGo={page => onGo(page - 1)} />
         <button type="button" className={styles.stripMove} aria-label={next ? `Next section: ${next.name}` : 'Next section'} aria-disabled={!next}
           onClick={forward}>{next && <span className={styles.stripMoveName}>{`${next.name} `}</span>}›</button>
       </>}

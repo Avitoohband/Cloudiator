@@ -77,3 +77,39 @@ export function slidePage(startPage: number, dx: number, width: number, pages: n
   if (width <= 0) return clampPage(startPage, pages);
   return clampPage(startPage + Math.round((dx / width) * (Math.max(1, pages) - 1)), pages);
 }
+
+/** 1.9.1: the side of its circles a hint bubble shows on. */
+export type BubbleSide = 'above' | 'below';
+/** A box's edges in page pixels (a `DOMRect`'s; an edge that does not clip is infinite). */
+export type Edges = { left: number; top: number; right: number; bottom: number };
+
+/** The part of the page every one of `clips` leaves visible (the window, and each box around a row that clips what overflows it). */
+export function clipEdges(clips: readonly Edges[]): Edges {
+  return clips.reduce((seen, clip) => ({ left: Math.max(seen.left, clip.left), top: Math.max(seen.top, clip.top),
+    right: Math.min(seen.right, clip.right), bottom: Math.min(seen.bottom, clip.bottom) }),
+  { left: -Infinity, top: -Infinity, right: Infinity, bottom: Infinity });
+}
+
+/** How tall a part of `box` is inside `visible`. */
+const shownHeight = (box: Edges, visible: Edges) => Math.max(0, Math.min(box.bottom, visible.bottom) - Math.max(box.top, visible.top));
+const fits = (box: Edges, visible: Edges) => box.top >= visible.top && box.bottom <= visible.bottom;
+
+/**
+ * The side a hint bubble shows on (1.9.1, Avi's phone: the section strip's bubble was cut off by the top of the menu): its row's own side
+ * (`preferred`: above, or below for the section strip at the top of a menu) when the bubble fits the visible box there (`above` and `below`
+ * are its box on each side); else the other side when it fits there; else the side that shows more of it, its own on a tie.
+ */
+export function bubbleSide(preferred: BubbleSide, above: Edges, below: Edges, visible: Edges): BubbleSide {
+  const other: BubbleSide = preferred === 'above' ? 'below' : 'above';
+  const at = { above, below };
+  if (fits(at[preferred], visible)) return preferred;
+  if (fits(at[other], visible)) return other;
+  return shownHeight(at[other], visible) > shownHeight(at[preferred], visible) ? other : preferred;
+}
+
+/** How far to move a bubble along its row (pixels, + to the right) so it stays `margin` inside `visible`; a wider one keeps its start in view. */
+export function bubbleShift(bubble: Edges, visible: Edges, margin = 0): number {
+  let shift = Math.min(0, visible.right - margin - bubble.right);
+  if (bubble.left + shift < visible.left + margin) shift = visible.left + margin - bubble.left;
+  return shift;
+}

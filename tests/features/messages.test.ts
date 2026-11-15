@@ -228,7 +228,7 @@ it('names the browser, the system and phone or desktop, and builds exactly the f
   expect(deviceText(edge, false)).toBe('Edge 131 on Windows (desktop)');
   expect(deviceText('', false)).toBe('A browser (desktop)');
   const details = feedbackDetails({ screen: 'Messages', userAgent: chrome, phone: false, width: 1280, height: 720, sentAtMs: 1_791_592_800_000 });
-  expect(details).toEqual({ patch: '1.9', screen: 'Messages', device: 'Chrome 131 on Windows (desktop)', window: '1280 x 720', sentAtMs: 1_791_592_800_000 });
+  expect(details).toEqual({ patch: '1.9.1', screen: 'Messages', device: 'Chrome 131 on Windows (desktop)', window: '1280 x 720', sentAtMs: 1_791_592_800_000 });
   expect(Object.keys(details)).toEqual(['patch', 'screen', 'device', 'window', 'sentAtMs']);
   const long = feedbackDetails({ screen: 'S'.repeat(200), userAgent: `${'x'.repeat(300)} Chrome/1`, phone: true, width: 360.4, height: 780.6, sentAtMs: 5 });
   for (const key of ['patch', 'screen', 'device', 'window'] as const) expect([...long[key]].length).toBeLessThanOrEqual(80);

@@ -180,7 +180,8 @@
   line-height: 1;
 }
 
-/* The hint bubble: above its circle; above the finger while sliding (the finger would hide one drawn under it). */
+/* The hint bubble: above its circle; above the finger while sliding (the finger would hide one drawn under it). 1.9.1: below them in the
+   section strip (at the top of a menu), and wherever there is no room above inside what the menu shows (`data-side`, set by PageDots). */
 .bubble {
   position: absolute;
   bottom: calc(100% + 3px);
@@ -203,6 +204,15 @@
   color: var(--gold);
   border-radius: 8px;
   box-shadow: 0 4px 14px #000a;
+}
+
+.bubble[data-side='below'] {
+  top: calc(100% + 3px);
+  bottom: auto;
+}
+
+.bubble[data-scrub][data-side='below'] {
+  top: calc(100% + 18px);
 }
 
 .finger {

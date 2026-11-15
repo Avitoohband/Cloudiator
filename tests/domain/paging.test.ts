@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
-  GRID_PAGE, MAX_DOTS, PAGE_SIZES, SHOW_CHOICES, clampPage, dotWindow, pageCount, pageOfIndex, pageRows, pagerLabel, showChoices, slidePage,
+  GRID_PAGE, MAX_DOTS, PAGE_SIZES, SHOW_CHOICES, bubbleShift, bubbleSide, clampPage, clipEdges, dotWindow, pageCount, pageOfIndex, pageRows,
+  pagerLabel, showChoices, slidePage,
 } from '../../src/features/paging/paging';
 import { createPageController } from '../../src/features/paging/page-controller';
 import { createElement } from 'react';
@@ -103,6 +104,32 @@ describe('the paging arithmetic', () => {
   it('offers Fit first, then the larger choices', () => {
     expect(showChoices(7)).toEqual([7, 10, 25, 50]);
     expect(showChoices(10)).toEqual([10, 25, 50]);
+  });
+
+  // 1.9.1 (Avi's phone, 2026-11-15): the section strip's bubble was cut off by the top of the menu. A bubble shows on its row's side (below
+  // for the strip) unless it leaves the visible box there, and moves along the row to stay inside it.
+  it('keeps a circle\'s bubble inside what its menu shows', () => {
+    const box = (left: number, top: number, right: number, bottom: number) => ({ left, top, right, bottom });
+    // The visible box: the window, cut by each box around the row that clips.
+    expect(clipEdges([box(0, 0, 360, 780), box(0, 161, 360, 721), box(-Infinity, 100, Infinity, 760)])).toEqual(box(0, 161, 360, 721));
+    const body = box(0, 161, 360, 721);
+    // The strip's row (173 to 217) under the title: above leaves the body's top, below fits.
+    const above = box(170, 146, 300, 170), below = box(170, 220, 300, 244);
+    expect(bubbleSide('below', above, below, body)).toBe('below');
+    expect(bubbleSide('above', above, below, body)).toBe('below');
+    // A bottom bar's bubble with room above stays above, even where below would fit too.
+    expect(bubbleSide('above', box(170, 600, 300, 624), box(170, 680, 300, 704), body)).toBe('above');
+    // No room either side: the side that shows more of it (the row's own side on a tie).
+    expect(bubbleSide('above', box(0, 150, 10, 174), box(0, 715, 10, 739), body)).toBe('above');
+    expect(bubbleSide('above', box(0, 140, 10, 164), box(0, 710, 10, 734), body)).toBe('below');
+    expect(bubbleSide('below', box(0, 140, 10, 164), box(0, 718, 10, 742), body)).toBe('below');
+    // Along the row: no move when it fits; back inside from the right or the left edge, keeping a margin; a bubble wider than the box keeps
+    // its start (its left edge) in view.
+    expect(bubbleShift(box(170, 0, 300, 20), body, 4)).toBe(0);
+    expect(bubbleShift(box(292, 0, 356, 20), body, 4)).toBe(0);
+    expect(bubbleShift(box(292, 0, 364, 20), body, 4)).toBe(-8);
+    expect(bubbleShift(box(-10, 0, 60, 20), body, 4)).toBe(14);
+    expect(bubbleShift(box(-50, 0, 400, 20), body, 4)).toBe(54);
   });
 });
 

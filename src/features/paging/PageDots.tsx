@@ -7,8 +7,11 @@
 // circle pressed. With more pages than circles the slide is measured from the pressed circle along the row, which stands for all
 // pages (fix round 1, I3), and the row does not re-centre until the finger lifts. Sliding never reads from the server: only the "+"
 // circle ("Load more") does, and it is never held. Pointer events with pointer capture, on this row only.
+// 1.9.1 (Avi's phone, 2026-11-15: the section strip's bubble was cut off by the top of My gladiator): the bubble is never cut off by its
+// menu, popover or card. A bottom bar's shows above its circles; the section strip, at the top of the part of a menu that scrolls, has
+// its bubble below them (`place`); a bubble with no room on its side shows on the other, and moves along the row to stay inside.
 import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type PointerEvent as ReactPointerEvent } from 'react';
-import { MAX_DOTS, dotWindow, slidePage } from './paging';
+import { MAX_DOTS, bubbleShift, bubbleSide, clipEdges, dotWindow, slidePage, type BubbleSide, type Edges } from './paging';
 import { useCompactLayout } from './useCompactLayout';
 import styles from './paging.module.css';
 
@@ -28,16 +31,35 @@ const subscribeNarrow = (onChange: () => void) => {
 const readNarrow = () => window.matchMedia?.(NARROW_QUERY).matches ?? false;
 const serverNarrow = () => false;
 
+const edgesOf = (rect: DOMRect): Edges => ({ left: rect.left, top: rect.top, right: rect.right, bottom: rect.bottom });
+/** What the page shows of `element`'s surroundings: the window, cut by every box around it that clips what overflows it (1.9.1). */
+function visibleEdges(element: HTMLElement): Edges {
+  const root = document.documentElement;
+  const clips: Edges[] = [{ left: 0, top: 0, right: root.clientWidth, bottom: root.clientHeight }];
+  for (let node = element.parentElement; node; node = node.parentElement) {
+    const { overflowX, overflowY } = getComputedStyle(node);
+    if (overflowX === 'visible' && overflowY === 'visible') continue;
+    const outer = node.getBoundingClientRect(), left = outer.left + node.clientLeft, top = outer.top + node.clientTop;
+    clips.push({ left: overflowX === 'visible' ? -Infinity : left, right: overflowX === 'visible' ? Infinity : left + node.clientWidth,
+      top: overflowY === 'visible' ? -Infinity : top, bottom: overflowY === 'visible' ? Infinity : top + node.clientHeight });
+  }
+  return clipEdges(clips);
+}
+/** A bubble keeps this far inside what its menu shows as it moves along the row. */
+const EDGE_PX = 4;
+
 /** A bubble: where, and why (a tap's flash and a slide outlast the focus and the pointer leaving). */
 type Tip = { at: number | 'more'; x?: number; scrub?: boolean; flash?: boolean };
 type Press = { pointer: number; x: number; y: number; startX: number; startPage: number; timer: number; scrub: boolean; frozen: readonly (number | 'gap')[] | null; type: string; on: number | 'more' | null };
 
-export function PageDots({ count, current, names, more = false, onGo, onMore }: {
+export function PageDots({ count, current, names, more = false, place = 'above', onGo, onMore }: {
   count: number; current: number;
   /** Sections: each circle's name ("Go to section: Worn equipment"). */
   names?: readonly string[];
   /** The total is unknown: a last "+" circle reads more. */
   more?: boolean;
+  /** The bubble's side of the circles: above (a bottom bar), or below (the section strip, under a menu's title). */
+  place?: BubbleSide;
   onGo(page: number): void; onMore?(): void;
 }) {
   const compact = useCompactLayout();
@@ -77,12 +99,24 @@ export function PageDots({ count, current, names, more = false, onGo, onMore }: 
   const text = (at: number | 'more') => (at === 'more' ? 'Load more' : names ? names[at - 1] ?? '' : more ? `Page ${at}` : `Page ${at} of ${count}`);
   const label = (at: number) => (names ? `Go to section: ${names[at - 1] ?? at}` : `Go to page ${at}`);
 
-  // A bubble that is not following a finger sits above its circle.
+  // A bubble sits over the middle of its circle (or of the finger sliding), on the row's side (`place`), inside what its menu shows: with no
+  // room on that side it shows on the other, and it moves along the row to stay in (1.9.1). Measured before the paint, so it never shows cut.
   useLayoutEffect(() => {
     const box = row.current, tipBox = bubble.current;
-    if (!shownTip || shownTip.x !== undefined || !box || !tipBox) return;
-    const dot = box.querySelector<HTMLElement>(`[data-dot="${shownTip.at}"]`);
-    if (dot) tipBox.style.left = `${dot.offsetLeft + dot.offsetWidth / 2}px`;
+    if (!shownTip || !box || !tipBox) return;
+    let left = shownTip.x;
+    if (left === undefined) {
+      const dot = box.querySelector<HTMLElement>(`[data-dot="${shownTip.at}"]`);
+      if (!dot) return;
+      left = dot.offsetLeft + dot.offsetWidth / 2;
+    }
+    tipBox.style.left = `${left}px`;
+    const visible = visibleEdges(box);
+    const at = (side: BubbleSide) => { tipBox.dataset.side = side; return edgesOf(tipBox.getBoundingClientRect()); };
+    const above = at('above'), below = at('below'), side = bubbleSide(place, above, below, visible);
+    tipBox.dataset.side = side;
+    const shift = bubbleShift(side === 'above' ? above : below, visible, EDGE_PX);
+    if (shift !== 0) tipBox.style.left = `${left + shift}px`;
   });
 
   const circles = () => [...(row.current?.querySelectorAll<HTMLElement>('[data-dot]:not([data-dot="more"])') ?? [])];
@@ -190,8 +224,7 @@ export function PageDots({ count, current, names, more = false, onGo, onMore }: 
         onPointerEnter={event => { if (event.pointerType === 'mouse') setTip({ at: 'more' }); }}
         onPointerLeave={() => hide('more')}
         onFocus={event => { if (keyboardFocus(event.currentTarget)) setTip(t => (t?.flash || t?.scrub ? t : { at: 'more' })); }} onBlur={() => hide('more')}>+</button>}
-      {shownTip && <span ref={bubble} role="tooltip" className={styles.bubble} data-scrub={shownTip.scrub ? '' : undefined}
-        style={shownTip.x !== undefined ? { left: `${shownTip.x}px` } : undefined}>{text(shownTip.at)}</span>}
+      {shownTip && <span ref={bubble} role="tooltip" className={styles.bubble} data-scrub={shownTip.scrub ? '' : undefined}>{text(shownTip.at)}</span>}
       {shownTip?.scrub && <span className={styles.finger} style={{ left: `${shownTip.x}px` }} aria-hidden="true" />}
     </div>
   );

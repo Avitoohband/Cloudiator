@@ -37,6 +37,11 @@ async function gladiators(page: Page) {
 }
 /** Fix round 1 (I6): a full page of the list fits the panel: the menu's body does not scroll. */
 const fits = (menu: Locator) => menu.getByTestId('menu-body').evaluate(el => el.scrollHeight <= el.clientHeight + 1);
+/** 1.9.1: `tip` (a dots bubble) sits wholly above `circle`. */
+async function expectAbove(tip: Locator, circle: Locator) {
+  const [tipBox, circleBox] = [(await tip.boundingBox())!, (await circle.boundingBox())!];
+  expect(tipBox.y + tipBox.height).toBeLessThanOrEqual(circleBox.y);
+}
 /** The centre of an element, in page pixels. */
 const centre = async (locator: Locator) => {
   const box = (await locator.boundingBox())!;
@@ -105,6 +110,8 @@ test.describe('menus with Back and Next: the Gladiators list', () => {
     const tip = bar.getByRole('tooltip');
     await expect(tip).toHaveText('Page 3 of 8');
     await expect(tip).toBeVisible();
+    // 1.9.1: a bottom bar's bubble is still above its circle (only the section strip, at the top of a menu, puts it below).
+    await expectAbove(tip, bar.getByRole('button', { name: 'Go to page 3', exact: true }));
     await shot(page, 'task-30-dots-hint-desktop.png');
     await page.mouse.move(600, 400);
     await expect(tip).toHaveCount(0);
@@ -132,7 +139,30 @@ test.describe('menus with Back and Next: the Gladiators list', () => {
     await expect(label(menu)).toHaveText('Page 4 of 8');
     const tip = bar.getByRole('tooltip');
     await expect(tip).toHaveText('Page 4 of 8');
+    await expectAbove(tip, bar.getByRole('button', { name: 'Go to page 4', exact: true }));
     await expect(tip).toHaveCount(0, { timeout: 3_000 });
+  });
+
+  // 1.9.1: a bubble that would leave the visible box of the box that scrolls around it (here, made so: the phone bar moved to the top of a
+  // sheet that scrolls, its circles' row first) shows below its circle instead, inside that box.
+  test('a bubble with no room above its circle shows below it, inside the box that scrolls (360 × 780)', async ({ page }, info) => {
+    await page.setViewportSize({ width: 360, height: 780 });
+    await openCamp(page);
+    const menu = await gladiators(page);
+    await page.addStyleTag({ content: '[data-menu-surface="gladiators"] { overflow-y: auto } [data-menu-surface="gladiators"] > :first-child { display: none }'
+      + ' [data-menu-surface="gladiators"] > [data-panel-footer] { order: -1 }' });
+    const bar = pager(menu);
+    const circle = bar.getByRole('button', { name: 'Go to page 4', exact: true });
+    if (info.project.name === 'mobile') await circle.tap();
+    else await circle.hover();
+    const tip = bar.getByRole('tooltip');
+    await expect(tip).toHaveText('Page 4 of 8');
+    const [tipBox, circleBox] = [(await tip.boundingBox())!, (await circle.boundingBox())!];
+    const sheet = await menu.evaluate(el => { const r = el.getBoundingClientRect(); return { top: r.top + el.clientTop, bottom: r.top + el.clientTop + el.clientHeight }; });
+    expect(circleBox.y - sheet.top, 'the circles are the first row of the sheet').toBeLessThan(16);
+    expect(tipBox.y).toBeGreaterThanOrEqual(circleBox.y + circleBox.height);
+    expect(tipBox.y).toBeGreaterThanOrEqual(sheet.top);
+    expect(tipBox.y + tipBox.height).toBeLessThanOrEqual(sheet.bottom);
   });
 
   test('a mouse press released outside the dots row cancels its hold', async ({ page, hasTouch }) => {

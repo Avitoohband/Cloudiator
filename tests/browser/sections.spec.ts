@@ -317,4 +317,60 @@ test.describe('named sections and paged grids (fixture preview)', () => {
     await expect(menu.getByTestId('inventory-grid')).toBeVisible();
     expect(await noHorizontalScroll(page)).toBe(true);
   });
+
+  // 1.9.1 (Avi's phone, 2026-11-15): the strip is the first thing in the part of the menu that scrolls, right under the title, so the hint
+  // bubble of its circles shows below them. Above them the menu's top cut it off: only its lower half showed, under "My gladiator". Every
+  // circle's bubble is wholly inside the visible box of the menu's body, below the title and below the circles; a tap's bubble is gone after
+  // its 1.2 s flash, and a hover's when the pointer leaves.
+  for (const [label, first] of [['My gladiator', 'Attributes and stats'], ['Inventory and shops', 'Inventory']] as const) {
+    test(`${label}: the strip circles' hint bubble shows below them, inside the menu (360 × 780 phone, desktop panel)`, async ({ page }, info) => {
+      const phone = info.project.name === 'mobile';
+      if (phone) await page.setViewportSize({ width: 360, height: 780 });
+      await openCamp(page);
+      const menu = await openSection(await openMenu(page, label), first);
+      await menu.evaluate(el => Promise.all(el.getAnimations({ subtree: true }).map(a => a.finished)));
+      const tip = sectionStrip(menu).getByRole('tooltip');
+      const names = await circles(menu).evaluateAll(list => list.map(circle => circle.getAttribute('aria-label')!.replace('Go to section: ', '')));
+      // The section shown first: its own circle, as Avi tapped it (the review shot), then every other circle.
+      for (const name of [first, ...names.filter(other => other !== first)]) {
+        const circle = sectionStrip(menu).getByRole('button', { name: `Go to section: ${name}`, exact: true });
+        if (phone) await circle.tap();
+        else await circle.hover();
+        await expect(tip).toHaveText(name);
+        if (name === first && label === 'My gladiator' && phone && process.env.TASK_SHOTS) await page.screenshot({ path: `${process.env.TASK_SHOTS}/hotfix-1.9.1-phone.png` });
+        const where = await stripBubble(menu);
+        const why = `${label} → ${name}: ${JSON.stringify(where)}`;
+        expect(where.tip.left, why).toBeGreaterThanOrEqual(where.body.left);
+        expect(where.tip.right, why).toBeLessThanOrEqual(where.body.right);
+        expect(where.tip.top, why).toBeGreaterThanOrEqual(where.body.top);
+        expect(where.tip.bottom, why).toBeLessThanOrEqual(where.body.bottom);
+        expect(where.tip.top, why).toBeGreaterThanOrEqual(where.title);
+        expect(where.tip.top, why).toBeGreaterThanOrEqual(where.row.bottom);
+        if (phone) {
+          await page.waitForTimeout(1_600);
+          expect(await tip.count(), `${name}: a tap's bubble is gone after 1.6 s`).toBe(0);
+          await expect(shownSection(menu)).toHaveText(name);
+        } else {
+          const size = page.viewportSize()!;
+          await page.mouse.move(size.width - 4, size.height - 4);
+          await expect(tip).toHaveCount(0);
+        }
+      }
+    });
+  }
+});
+
+/** A box in page pixels. */
+type Box = { left: number; top: number; right: number; bottom: number };
+/**
+ * The strip's shown hint bubble, the visible box of the menu's body (its client box: under the title, not scrolled out of sight), the bottom
+ * of the menu's title and the circles' row.
+ */
+const stripBubble = (menu: Locator) => sectionStrip(menu).getByRole('tooltip').evaluate(tip => {
+  const box = (rect: DOMRect): Box => ({ left: rect.left, top: rect.top, right: rect.right, bottom: rect.bottom });
+  const body = tip.closest<HTMLElement>('[data-testid="menu-body"]')!, outer = body.getBoundingClientRect();
+  const left = outer.left + body.clientLeft, top = outer.top + body.clientTop;
+  const title = tip.closest('[data-menu-surface]')!.querySelector('[data-testid="menu-title"]')!.getBoundingClientRect().bottom;
+  return { tip: box(tip.getBoundingClientRect()), body: { left, top, right: left + body.clientWidth, bottom: top + body.clientHeight }, title,
+    row: box(tip.closest('[data-page-dots]')!.getBoundingClientRect()) };
 });

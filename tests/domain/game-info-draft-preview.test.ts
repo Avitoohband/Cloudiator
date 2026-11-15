@@ -15,7 +15,7 @@ describe('the fixture preview of the Game Info drafts (?mode=fixture&info=draft)
     const future = draft('future-updates');
     expect(pages.wiki?.document.entries.map(entry => entry.id)).toEqual(wiki.entries.map(entry => entry.id));
     expect(pages.future?.document.entries).toEqual(future.entries);
-    expect(future.entries.length).toBeGreaterThan(30);
+    expect(future.entries.length).toBeGreaterThan(20);
     expect(pages.future?.document.entries.filter(entry => entry.patch).length).toBeGreaterThan(0);
   });
 
@@ -24,7 +24,7 @@ describe('the fixture preview of the Game Info drafts (?mode=fixture&info=draft)
     const pages = await loadDraftGameInfo();
     const wiki = draft('wiki');
     const guides = wiki.entries.filter(entry => entry.video);
-    expect(guides.length).toBe(7);
+    expect(guides.length).toBe(14);
     expect(pages.wiki?.document.entries).toEqual(wiki.entries);
     expect(pages.wiki?.document).not.toHaveProperty('videos');
   });

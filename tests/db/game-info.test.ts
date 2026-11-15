@@ -261,7 +261,7 @@ describe('Game Info database boundary', () => {
     expect(await definition()).toEqual(installed);
   });
 
-  it('accepts both local drafts in docs/game-info (a read-only check), the Wiki with its seven filmed guides', async () => {
+  it('accepts both local drafts in docs/game-info (a read-only check), the Wiki with its fourteen filmed guides', async () => {
     const draft = (name: string) => JSON.parse(readFileSync(new URL(`../../docs/game-info/${name}.draft.json`, import.meta.url), 'utf8'));
     const wikiDraft = draft('wiki') as { entries: Entry[] }, futureDraft = draft('future-updates') as { entries: Entry[] };
     expect(wikiDraft).not.toHaveProperty('videos');
@@ -269,10 +269,13 @@ describe('Game Info database boundary', () => {
     // Indigo Labs, public since 2026-11-12 (wiki-video-links.json); lengths rounded to the nearest second.
     expect(Object.fromEntries(wikiDraft.entries.filter(entry => 'video' in entry || 'videoLength' in entry)
       .map(entry => [entry.id, [entry.video, entry.videoLength]]))).toEqual({
-      schedule: ['https://youtu.be/n_JSh16FMkY', '0:56'], stamina: ['https://youtu.be/yjRkEQtAgGk', '0:54'],
-      training: ['https://youtu.be/5ddb8dLd4Eo', '1:03'], combat: ['https://youtu.be/VOc0GXqjBQs', '0:47'],
-      attributes: ['https://youtu.be/RcJHwplvJ9Q', '0:57'], arena: ['https://youtu.be/x6nEEiJNgck', '0:58'],
-      dungeons: ['https://youtu.be/EA9JzlguHwI', '0:56'],
+      start: ['https://youtu.be/XMefdNAuKmE', '1:10'], schedule: ['https://youtu.be/33XA-hv1ccQ', '1:02'],
+      stamina: ['https://youtu.be/yjRkEQtAgGk', '0:54'], training: ['https://youtu.be/SoPHhPdNSik', '0:59'],
+      attributes: ['https://youtu.be/gQ1pgAnvMx0', '1:00'], combat: ['https://youtu.be/VOc0GXqjBQs', '0:47'],
+      gear: ['https://youtu.be/TqIACM2ANbM', '1:00'], expeditions: ['https://youtu.be/QJlumCBaxEA', '0:47'],
+      dungeons: ['https://youtu.be/EA9JzlguHwI', '0:56'], arena: ['https://youtu.be/x6nEEiJNgck', '0:58'],
+      tournaments: ['https://youtu.be/E7oSV5-J2oA', '0:39'], economy: ['https://youtu.be/4bONZX-vm-o', '0:44'],
+      titles: ['https://youtu.be/055M38AScrM', '0:42'], results: ['https://youtu.be/YHoyi8G6dTI', '0:45'],
     });
     const checked = await sql.begin('read only', tx => tx`select
       private.valid_game_info_document('wiki', ${tx.json(wikiDraft)}::jsonb) as wiki,

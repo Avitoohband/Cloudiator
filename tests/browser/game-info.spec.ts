@@ -266,16 +266,16 @@ test.describe('Wiki guide cards', () => {
   });
 
   test('only topics with a guide carry a play marker hidden from readers and end their name with video guide', async ({ page }) => {
-    const { panel } = await openGuides(page);
+    const { panel, entries } = await openGuides(page);
     const list = panel.getByRole('listbox', { name: 'Wiki topics' });
     const combat = list.getByRole('option', { name: 'Combat, dodge, and critical hits' });
     await expect(combat).toHaveAccessibleName('Combat, dodge, and critical hits, video guide');
     const marker = combat.locator('[aria-hidden="true"]', { hasText: '▶' });
     await expect(marker).toHaveCount(1);
     await expect(marker).toBeVisible();
-    // Task 31: the topics are paged, so Show 25 puts all 14 on one page, where exactly one carries the marker (as before) and Start in camp has none.
+    // Task 31: the topics are paged, so Show 25 puts all 16 on one page (this fixture gives only Combat a video), where exactly one carries the marker and Start in camp has none.
     await panel.getByRole('combobox', { name: 'Rows per page' }).selectOption('25');
-    await expect(list.getByRole('option')).toHaveCount(14);
+    await expect(list.getByRole('option')).toHaveCount(entries.length);
     await expect(list.getByText('▶')).toHaveCount(1);
     const start = list.getByRole('option', { name: 'Start in camp' });
     await expect(start).toHaveAccessibleName('Start in camp');
@@ -362,11 +362,11 @@ test.describe('Game Info by the page', () => {
     const list = panel.getByRole('listbox', { name: 'Wiki topics' });
     const bar = pagesBar(panel);
     const label = bar.locator('b').first();
-    // Combat (the 6th) is chosen, on page 2: the active option is Combat. PageDown turns to page 3 (topics 11-14): the active option is its first.
-    await expect(label).toHaveText('Page 2 of 3');
+    // Combat (the 6th) is chosen, on page 2: the active option is Combat. PageDown turns to page 3 (topics 11-15): the active option is its first.
+    await expect(label).toHaveText('Page 2 of 4');
     await expect(list).toHaveAttribute('aria-activedescendant', await list.getByRole('option', { selected: true }).getAttribute('id') as string);
     await bar.getByRole('button', { name: 'Next page', exact: true }).click();
-    await expect(label).toHaveText('Page 3 of 3');
+    await expect(label).toHaveText('Page 3 of 4');
     const first = list.getByRole('option').first();
     await expect(list).toHaveAttribute('aria-activedescendant', await first.getAttribute('id') as string);
     await expect(first).toContainText(wiki.entries[10].title);
@@ -374,7 +374,7 @@ test.describe('Game Info by the page', () => {
     // ArrowDown steps from the active option: the second topic of the page is chosen, the page stays, and the active option is on it.
     await list.focus();
     await page.keyboard.press('ArrowDown');
-    await expect(label).toHaveText('Page 3 of 3');
+    await expect(label).toHaveText('Page 3 of 4');
     await expect(panel.getByRole('article', { name: wiki.entries[11].title })).toBeVisible();
     const second = list.getByRole('option').nth(1);
     await expect(second).toHaveAttribute('aria-selected', 'true');
@@ -397,12 +397,12 @@ test.describe('Game Info by the page', () => {
     await bar.getByRole('button', { name: 'Go to page 1', exact: true }).click();
     await expect(list).toBeFocused();
     await bar.getByRole('button', { name: 'Next page', exact: true }).click();
-    await expect(label).toHaveText('Page 2 of 3');
+    await expect(label).toHaveText('Page 2 of 4');
     await expect(list).toBeFocused();
     await activeOnPage();
-    // End goes to the last topic, on page 3: across the boundary, the focus stays on the listbox.
+    // End goes to the last topic, on page 4: across the boundary, the focus stays on the listbox.
     await page.keyboard.press('End');
-    await expect(label).toHaveText('Page 3 of 3');
+    await expect(label).toHaveText('Page 4 of 4');
     await expect(list).toBeFocused();
     await expect(panel.getByRole('article', { name: wiki.entries.at(-1)!.title })).toBeVisible();
     await activeOnPage();
@@ -410,9 +410,10 @@ test.describe('Game Info by the page', () => {
     await expect(panel.getByRole('article', { name: wiki.entries.at(-2)!.title })).toBeVisible();
     await expect(list).toBeFocused();
     await activeOnPage();
-    // PageUp turns back; the focus stays and the active option is on the page.
+    // ArrowUp chose the second-last topic (15), which sits on page 3; PageUp turns back to page 2, the focus stays and the active option is on the page.
+    await expect(label).toHaveText('Page 3 of 4');
     await page.keyboard.press('PageUp');
-    await expect(label).toHaveText('Page 2 of 3');
+    await expect(label).toHaveText('Page 2 of 4');
     await expect(list).toBeFocused();
     await activeOnPage();
   });
@@ -425,9 +426,9 @@ test.describe('Game Info by the page', () => {
     const panel = page.getByRole('dialog', { name: 'Game Info' });
     const list = panel.getByRole('listbox', { name: 'Wiki topics' });
     const bar = pagesBar(panel), label = bar.locator('b').first();
-    await expect(label).toHaveText('Page 2 of 3');
+    await expect(label).toHaveText('Page 2 of 4');
     await bar.getByRole('button', { name: 'Next page', exact: true }).click();
-    await expect(label).toHaveText('Page 3 of 3');
+    await expect(label).toHaveText('Page 3 of 4');
     await expect(list).toBeFocused();
     const first = list.getByRole('option').first();
     await expect(first).toHaveAttribute('aria-selected', 'false');
@@ -437,12 +438,12 @@ test.describe('Game Info by the page', () => {
     await expect(list).toBeFocused();
     // Space does the same on page 1, whose first topic is active after the turn.
     await bar.getByRole('button', { name: 'Go to page 1', exact: true }).click();
-    await expect(label).toHaveText('Page 1 of 3');
+    await expect(label).toHaveText('Page 1 of 4');
     await expect(list).toBeFocused();
     await page.keyboard.press('Space');
     await expect(panel.getByRole('article', { name: wiki.entries[0].title })).toBeVisible();
     await expect(list.getByRole('option').first()).toHaveAttribute('aria-selected', 'true');
-    await expect(label).toHaveText('Page 1 of 3');
+    await expect(label).toHaveText('Page 1 of 4');
   });
 
   // Final review M7 (ruled): reading text keeps its scroll. With the focus in the Wiki's text (its tab panel, the article), PageDown scrolls it;
@@ -454,23 +455,23 @@ test.describe('Game Info by the page', () => {
     const panel = page.getByRole('dialog', { name: 'Game Info' });
     const text = panel.getByRole('tabpanel', { name: 'Wiki' });
     const bar = pagesBar(panel), label = bar.locator('b').first();
-    await expect(label).toHaveText('Page 2 of 3');
+    await expect(label).toHaveText('Page 2 of 4');
     const scroll = () => text.evaluate(element => ({ top: element.scrollTop, room: element.scrollHeight - element.clientHeight }));
     expect((await scroll()).room, 'the article is taller than its panel').toBeGreaterThan(40);
     await text.focus();
     await page.keyboard.press('PageDown');
     await expect.poll(async () => (await scroll()).top).toBeGreaterThan(0);
-    await expect(label).toHaveText('Page 2 of 3');
+    await expect(label).toHaveText('Page 2 of 4');
     await page.keyboard.press('PageUp');
     await expect.poll(async () => (await scroll()).top).toBe(0);
-    await expect(label).toHaveText('Page 2 of 3');
+    await expect(label).toHaveText('Page 2 of 4');
     // The topic list and its bar turn the topics.
     await panel.getByRole('listbox', { name: 'Wiki topics' }).focus();
     await page.keyboard.press('PageDown');
-    await expect(label).toHaveText('Page 3 of 3');
+    await expect(label).toHaveText('Page 3 of 4');
     await bar.getByRole('button', { name: 'Previous page', exact: true }).focus();
     await page.keyboard.press('PageUp');
-    await expect(label).toHaveText('Page 2 of 3');
+    await expect(label).toHaveText('Page 2 of 4');
   });
 
   test('changing the Show size on page 2 keeps the focus on the select and the topic unchanged', async ({ page }) => {
@@ -478,7 +479,7 @@ test.describe('Game Info by the page', () => {
     await page.goto('/game/?mode=fixture&info=draft');
     await cornerChip(page).getByRole('button', { name: 'Game Info', exact: true }).click();
     const panel = page.getByRole('dialog', { name: 'Game Info' });
-    await expect(pagesBar(panel).locator('b').first()).toHaveText('Page 2 of 3');
+    await expect(pagesBar(panel).locator('b').first()).toHaveText('Page 2 of 4');
     const show = panel.getByRole('combobox', { name: 'Rows per page' });
     await show.focus();
     await page.keyboard.press('ArrowDown');
@@ -504,13 +505,14 @@ test.describe('Game Info by the page', () => {
     const panel = page.getByRole('dialog', { name: 'Game Info' });
     await panel.getByRole('tab', { name: 'Future Updates' }).click();
     const bar = pagesBar(panel), label = bar.locator('b').first();
-    await bar.getByRole('button', { name: 'Go to page 4', exact: true }).click();
-    await expect(label).toHaveText('Page 4 of 5');
+    const pages = Math.ceil(draft('future-updates').entries.length / 8);
+    await bar.getByRole('button', { name: `Go to page ${pages}`, exact: true }).click();
+    await expect(label).toHaveText(`Page ${pages} of ${pages}`);
     await bar.getByRole('button', { name: 'Previous page', exact: true }).click();
-    await expect(label).toHaveText('Page 3 of 5');
+    await expect(label).toHaveText(`Page ${pages - 1} of ${pages}`);
     await panel.getByRole('tab', { name: 'Wiki' }).click();
     await panel.getByRole('tab', { name: 'Future Updates' }).click();
-    await expect(label).toHaveText('Page 1 of 5');
+    await expect(label).toHaveText(`Page 1 of ${pages}`);
   });
 
   test('a stalled read shows the built-in text after 4 s, and a published read that lands later replaces it', async ({ page, context }) => {

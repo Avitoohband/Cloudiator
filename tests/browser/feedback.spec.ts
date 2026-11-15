@@ -1,4 +1,5 @@
 import { mkdirSync } from 'node:fs';
+import { PATCH } from '../../src/lib/patch';
 import { randomUUID } from 'node:crypto';
 import { expect, test, type Locator, type Page, type TestInfo } from './fixtures';
 import type { GameCommand } from '../../supabase/functions/_shared/contracts/commands';
@@ -152,7 +153,7 @@ test('Send feedback from Messages: categories, the counter, the minimum, the det
   await expect(dialog).toContainText('Helps the team find the problem.');
   await dialog.getByRole('button', { name: 'What is sent?' }).click();
   const details = dialog.locator('[data-feedback-details]');
-  await expect(details).toContainText(/Patch\s*1\.9\s*·\s*Screen\s*Messages/);
+  await expect(details).toContainText(new RegExp(`Patch\\s*${PATCH.replace(/\./g, '\\.')}\\s*·\\s*Screen\\s*Messages`));
   const phone = info.project.name === 'mobile';
   await expect(details).toContainText(phone ? /Device\s*Chrome \d+ on Android \(phone\)/ : /Device\s*Chrome \d+ on Windows \(desktop\)|Device\s*Chrome \d+ on \w+ \(desktop\)/);
   const size = page.viewportSize()!;
@@ -186,7 +187,7 @@ test('Send feedback from Messages: categories, the counter, the minimum, the det
   expect(command).toMatchObject({ kind: 'send-feedback', category: 'idea', text: IDEA_TEXT });
   const sentDetails = command.details as FeedbackDetails;
   expect(Object.keys(sentDetails)).toEqual(['patch', 'screen', 'device', 'window', 'sentAtMs']);
-  expect(sentDetails).toMatchObject({ patch: '1.9', screen: 'Messages', window: `${size.width} x ${size.height}` });
+  expect(sentDetails).toMatchObject({ patch: PATCH, screen: 'Messages', window: `${size.width} x ${size.height}` });
   for (const key of ['patch', 'screen', 'device', 'window'] as const) expect(sentDetails[key].length).toBeLessThanOrEqual(80);
   expect(Number.isSafeInteger(sentDetails.sentAtMs)).toBe(true);
   await shot(page, info, 'feedback-sent');

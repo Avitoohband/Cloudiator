@@ -17,6 +17,40 @@ test('fixture commands cannot mutate even the local owner preview', async () => 
   expect(await gateway.owner()).toEqual(before);
 });
 
+test('away variants supply a stable bounded owner read and mark only their own sample notifications', async () => {
+  const big = createFixtureGateway({ away: 'big' }), other = createFixtureGateway({ away: 'big' });
+  const owner = await big.owner(), { serverNowMs } = await big.revision();
+  const since = serverNowMs - 1_180 * 60_000;
+  const results = await big.resultsSince!(owner.gladiatorId, since);
+  expect(results).toMatchObject({ serverNowMs, progression: { level: 7, xp: 168 } });
+  expect(results.items).toHaveLength(12);
+  expect(results.items.filter(item => item.levelAfter !== null)).toMatchObject([{ levelAfter: 7, summary: { rewards: { items: [{ catalogId: 'iron-helmet:5:uncommon' }] } } }]);
+  expect(results.items.every(item => item.settledAtMs > since && item.settledAtMs <= serverNowMs)).toBe(true);
+  expect(results.items.map(item => item.settledAtMs)).toEqual(results.items.map(item => item.settledAtMs).sort((a, b) => b - a));
+  expect(await other.resultsSince!(owner.gladiatorId, since)).toEqual(results);
+  expect(await big.resultsSince!(owner.gladiatorId, results.newestSettledMs!)).toMatchObject({ items: [], newestSettledMs: null });
+  const anotherId = '9fce3cd5-e831-4a66-8ca1-16b4576b1499';
+  expect(await big.resultsSince!(anotherId, since)).toMatchObject({ items: [], progression: null });
+  await expect(big.resultsSince!(owner.gladiatorId, Number.NaN)).rejects.toMatchObject({ code: 'unavailable' });
+  const tournament = results.items.find(item => item.kind === 'tournament')!;
+  expect((await big.history!(owner.gladiatorId, 'tournament')).rows).toContainEqual(expect.objectContaining({ activityId: tournament.activityId, league: 'silver', place: 3 }));
+  expect(await big.rested!()).toContainEqual(expect.objectContaining({ planned: 'expedition', destination: 'Ruined Outpost', reason: 'stamina' }));
+  expect(await big.messages()).toContainEqual(expect.objectContaining({ kind: 'team-reply' }));
+  const command = { kind: 'see-notifications' as const, operationId: anotherId, upToMs: results.newestSettledMs! };
+  expect(await big.command(command)).toMatchObject({ ok: true, value: { seenMs: results.newestSettledMs } });
+  expect((await big.owner()).inbox).toMatchObject({ unread: 2, newNotifications: 0, notificationsSeenMs: results.newestSettledMs });
+  expect((await other.owner()).inbox.newNotifications).toBeGreaterThan(0);
+  expect(await createFixtureGateway().command(command)).toEqual({ ok: false, code: 'unavailable' });
+
+  const small = createFixtureGateway({ away: 'small' }), empty = createFixtureGateway({ away: 'empty' });
+  expect(await small.resultsSince!(owner.gladiatorId, serverNowMs - 125 * 60_000)).toMatchObject({ items: [{ kind: 'expedition', destination: 'Ruined Outpost' }], progression: { level: 6, xp: 495 } });
+  expect((await small.owner()).inbox.unread).toBe(0);
+  expect(await empty.resultsSince!(owner.gladiatorId, since)).toMatchObject({ items: [], newestSettledMs: null });
+  expect((await empty.owner()).inbox.unread).toBe(2);
+  expect((await empty.owner()).titles).toEqual([]);
+  expect(await empty.rested!()).toEqual([]);
+});
+
 test('fixture preview: a gladiator resting at home, and with ?as=resting the owner resting until its presence', async () => {
   const { RESTING_ACTOR, RESTING_PROFILE } = await import('../fixtures/resting');
   // Otho rests at home in the default preview's world: public, with no activity (Task 23.8's PublicActor.resting).

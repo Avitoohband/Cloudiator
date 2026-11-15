@@ -1,3 +1,4 @@
+import type { CommandResult, GameCommand } from '@contracts/commands';
 import type { RevealedTimeline } from '@contracts/events';
 import type { HistoryCounts, HistoryEntry, MarketListing, MarketPage, OwnerState, PublicActor, SeasonView } from '@contracts/reads';
 import { validAppearance } from '@domain/appearance';
@@ -5,11 +6,12 @@ import { RULES_V1 } from '@domain/rules-v1';
 import { RULES_V2 } from '@domain/rules-v2';
 import type { GameGateway } from './gateway';
 import {
-  BOUTS_PAGE, GatewayReadError, HISTORY_PAGE, boutOf, historyEntryOf, nextBoutsCursor, ownRewardsOf, parseBoutsRead, parseDungeonFightRef, parseHistoryRead, parseMarketRead,
-  parseOwnRewardsRead, parseResultsCursor, parseRestAfter, parseStandingOf, parseStandingsRead, type LastBout,
+  AWAY_RESULTS_LIMIT, BOUTS_PAGE, GatewayReadError, HISTORY_PAGE, boutOf, historyEntryOf, nextBoutsCursor, ownRewardsOf, parseBoutsRead, parseDungeonFightRef, parseHistoryRead, parseMarketRead,
+  parseOwnRewardsRead, parseResultsCursor, parseResultsSince, parseRestAfter, parseStandingOf, parseStandingsRead, type LastBout,
 } from './reads';
 import { replayKept } from '../replay-retention';
 import { worldFixture } from '../../../tests/fixtures/domain';
+import { AWAY_SAMPLE_REPLY, AWAY_SAMPLE_RESTS, AWAY_SAMPLE_SEEN_MS, AWAY_SAMPLE_TITLES, AWAY_SAMPLE_TOURNAMENT, awaySampleProgression, awaySampleResults, type AwaySample } from '../../../tests/fixtures/away-summary';
 import { DUNGEON_BY_ACTIVITY, DUNGEON_BY_RUN, DUNGEON_SAMPLES } from '../../../tests/fixtures/dungeons';
 import { REPLAY_SAMPLES, REPLAY_TIMELINES } from '../../../tests/fixtures/battles';
 import { EXPEDITION_FIXTURES, EXPEDITION_SAMPLES, EXPEDITION_TIMELINES } from '../../../tests/fixtures/expeditions';
@@ -161,8 +163,8 @@ const FIXTURE_BOUTS = myBoutTimelines(FIXTURE_TIMELINES).map(timeline => {
  * resting at home in the current slot: drawn nowhere in the camp, and with no `restingUntilSlot` until this preview has
  * answered a presence, then the next slot, as the server answers it (Task 23.8).
  */
-export function createFixtureGateway(options: { resting?: boolean; bag?: 'demo' } = {}): GameGateway {
-  const resting = options.resting === true;
+export function createFixtureGateway(options: { resting?: boolean; bag?: 'demo'; away?: AwaySample } = {}): GameGateway {
+  const resting = options.resting === true, away = options.away;
   /** The resting preview: whether a presence has been answered since the gladiator began resting. */
   let signalled = false;
   const world = resting ? { ...FIXTURE_WORLD, actors: FIXTURE_WORLD.actors.map(a => (a.gladiatorId === OWNER_ID ? restingActor(a) : a)) } : FIXTURE_WORLD;
@@ -170,17 +172,33 @@ export function createFixtureGateway(options: { resting?: boolean; bag?: 'demo' 
   const unavailable = async (): Promise<never> => {
     throw Object.assign(new Error('This read is unavailable in the fixture preview.'), { code: 'unavailable' as const });
   };
+  let seenMs = away ? AWAY_SAMPLE_SEEN_MS : FIXTURE_INBOX.notificationsSeenMs;
+  const notifications = away ? awaySampleResults(away) : FIXTURE_NOTIFICATIONS;
+  const sampleMessages = away === 'big' ? [AWAY_SAMPLE_REPLY, FIXTURE_MESSAGES[0]] : FIXTURE_MESSAGES;
+  const summaryProgression = away ? { ...ARENA_OWNER.progression, ...awaySampleProgression(away) } : ARENA_OWNER.progression;
+  const sampleTitles = away === 'big' ? AWAY_SAMPLE_TITLES : away ? [] : ASTER_TITLES;
   return {
-    command: async () => ({ ok: false, code: 'unavailable' }),
+    command: async <T,>(input: GameCommand): Promise<CommandResult<T>> => {
+      if (!away || input.kind !== 'see-notifications') return { ok: false, code: 'unavailable' };
+      if (!Number.isSafeInteger(input.upToMs) || input.upToMs < 0) return { ok: false, code: 'invalid' };
+      seenMs = Math.max(seenMs, Math.min(input.upToMs, worldFixture.serverNowMs));
+      return { ok: true, receiptId: '', value: { seenMs } as T };
+    },
     sendPresence: async () => { signalled = true; return { ok: true }; },
     // The owner fixture with the rating and renown of its credited Arena samples (resting, in the resting preview), and the inbox
     // the sample messages make (tests/fixtures/messages.ts). Patch 1.7: Aster's 8 titles and the mockup's progress, wearing Founder
     // (tests/fixtures/titles.ts); her history notice counts as new in the inbox, as the server counts it (Task 11).
-    owner: async () => withAsterTitles({ ...(resting ? { ...structuredClone(RESTING_OWNER), restingUntilSlot: signalled ? RESTING_OWNER.processedSlotIndex + 1 : null }
-      : (options.bag === 'demo' ? withDemoBag : (o: OwnerState) => o)(structuredClone(ARENA_OWNER))), inbox: { ...structuredClone(FIXTURE_INBOX),
-      newNotifications: FIXTURE_INBOX.newNotifications + titleNoticeCount(ASTER_TITLES, FIXTURE_INBOX.notificationsSeenMs) }, ownedCosmetics: structuredClone(OWNER_COSMETICS) }),
+    owner: async () => {
+      const owner = withAsterTitles({ ...(resting ? { ...structuredClone(RESTING_OWNER), restingUntilSlot: signalled ? RESTING_OWNER.processedSlotIndex + 1 : null }
+        : (options.bag === 'demo' ? withDemoBag : (o: OwnerState) => o)(structuredClone(ARENA_OWNER))), inbox: { ...structuredClone(FIXTURE_INBOX),
+        ...(away === 'small' ? { unread: 0, readIds: sampleMessages.map(message => message.id).sort((a, b) => a - b) } : {}),
+        ...(away === 'big' ? { readIds: [] } : {}),
+        newNotifications: notifications.filter(note => note.settledAtMs > seenMs).length + titleNoticeCount(sampleTitles, seenMs), notificationsSeenMs: seenMs },
+        ownedCosmetics: structuredClone(OWNER_COSMETICS) });
+      return away ? { ...owner, wornTitle: null, titles: structuredClone([...sampleTitles]), progression: { ...summaryProgression } } : owner;
+    },
     // The sample messages, newest first (a copy each time), each patch note with the number of the patch that links it; no network.
-    messages: async () => FIXTURE_MESSAGES.map(m => ({ ...structuredClone(m),
+    messages: async () => sampleMessages.map(m => ({ ...structuredClone(m),
       patch: m.kind === 'patch-notes' ? FIXTURE_PATCHES.find(p => p.messageId === m.id)?.number ?? null : null })),
     // The preview's history, 20 at a time as the live read pages it (a copy each time); no network.
     patches: async beforeSortKey => {
@@ -188,7 +206,15 @@ export function createFixtureGateway(options: { resting?: boolean; bag?: 'demo' 
       return { items: structuredClone(older.slice(0, 20)), more: older.length > 20 };
     },
     // The sample notifications, newest first (a copy each time); no network.
-    notifications: async () => ({ items: structuredClone([...FIXTURE_NOTIFICATIONS]), newestSettledMs: FIXTURE_NOTIFICATIONS.length ? Math.max(...FIXTURE_NOTIFICATIONS.map(n => n.settledAtMs)) : null }),
+    notifications: async () => ({ items: structuredClone([...notifications]), newestSettledMs: notifications.length ? Math.max(...notifications.map(n => n.settledAtMs)) : null }),
+    resultsSince: async (gladiatorId, sinceMs) => {
+      const id = parseResultsSince(gladiatorId, sinceMs), serverNowMs = worldFixture.serverNowMs;
+      const items = id === OWNER_ID ? notifications.filter(note => note.settledAtMs > sinceMs && note.settledAtMs <= serverNowMs).slice(0, AWAY_RESULTS_LIMIT) : [];
+      const progression = items.length && items.length < AWAY_RESULTS_LIMIT ? { level: summaryProgression.level, xp: summaryProgression.xp } : null;
+      return { items: structuredClone(items), newestSettledMs: items[0]?.settledAtMs ?? null, serverNowMs, progression };
+    },
+    ...(away ? { rested: async (ids?: readonly string[]) => away === 'big'
+      ? structuredClone(AWAY_SAMPLE_RESTS.filter(rest => !ids || ids.includes(rest.activityId))) : [] } : {}),
     // The owner's own Arena and tournament bouts, newest first, paged and filtered as the live read does (a copy each time; no network):
     // a malformed cursor or filter is `unavailable`, the cursor is the last fetched row's slot, and a well-formed one below every bout
     // ends the list.
@@ -273,7 +299,9 @@ export function createFixtureGateway(options: { resting?: boolean; bag?: 'demo' 
     // cursor is `unavailable`; the cursor is the last row's `foughtAtMs:entryId`; a short page ends the list), and its counts.
     history: async (gladiatorId, kind, cursor) => {
       const read = parseHistoryRead(gladiatorId, kind, cursor);
-      const list = HISTORY_ENTRIES.get(`${read.gladiatorId}|${read.kind}`) ?? [];
+      const list = away && read.gladiatorId === OWNER_ID && read.kind === 'tournament'
+        ? away === 'big' ? [AWAY_SAMPLE_TOURNAMENT] : []
+        : HISTORY_ENTRIES.get(`${read.gladiatorId}|${read.kind}`) ?? [];
       const after = read.after;
       const rows = (after ? list.filter(row => row.foughtAtMs < after.time || (row.foughtAtMs === after.time && row.entryId > after.id)) : list).slice(0, HISTORY_PAGE);
       return structuredClone({ rows, nextCursor: rows.length === HISTORY_PAGE ? `${rows[HISTORY_PAGE - 1].foughtAtMs}:${rows[HISTORY_PAGE - 1].entryId}` : null });

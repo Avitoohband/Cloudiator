@@ -6,10 +6,11 @@ import type { PatchEntry } from '../patch';
 import { getBrowserClient } from './client';
 import {
   GatewayReadError, parseDungeonFightRef, readBouts, readDungeonFight, readHistory, readHistoryCounts, readOwnRewards, readLooks, readMarket, readMessages, readNotifications, readOwnFeedback, readOwner, readPatchNumbers, readPatches, readWorld, readRevision, readTimeline, readProfile,
-  readRecent, readRestAfter, readRested, readSeasons, readStandingOf, readStandings, readTournament, readTournamentLog, type BoutFilter, type BoutsPage, type NotificationsRead, type OwnRewards,
+  readRecent, readRestAfter, readRested, readResultsSince, readSeasons, readStandingOf, readStandings, readTournament, readTournamentLog, type BoutFilter, type BoutsPage, type NotificationsRead, type OwnRewards,
+  type ResultsSinceRead,
   type ProfileRead, type RestedActivity, type RevisionRead, type ShownMessage,
 } from './reads';
-export { GatewayReadError, type NotificationsRead, type ProfileRead, type RestedActivity, type RevisionRead, type ShownMessage } from './reads';
+export { GatewayReadError, type NotificationsRead, type ProfileRead, type RestedActivity, type ResultsSinceRead, type RevisionRead, type ShownMessage } from './reads';
 
 /**
  * Public projections (world, revision, timeline, profile, market offers, seasons, standings and one gladiator's standing,
@@ -102,6 +103,8 @@ export interface GameGateway {
    * was none): the mark is sent up to it, so a result this client cannot show never keeps the badge on.
    */
   notifications(): Promise<NotificationsRead>;
+  /** The owner's completed results since a visit, up to 150, with the server's cutoff and verified progression for the away summary. */
+  resultsSince?(gladiatorId: GladiatorId, sinceMs: number): Promise<ResultsSinceRead>;
   /**
    * One page (20) of the owner's own settled Arena and tournament bouts, newest first, for My bouts: each with its opponent (read only while
    * its replay is kept), result, renown and rating change. `filter` asks the server for All, Won or Lost; `cursor` is a page's `nextCursor`
@@ -298,6 +301,7 @@ export function createLiveGateway(): GameGateway {
     },
     owner: () => read(readOwner),
     notifications: () => read(readNotifications),
+    resultsSince: (gladiatorId, sinceMs) => read(client => readResultsSince(client, gladiatorId, sinceMs)),
     feedback: () => read(readOwnFeedback),
     bouts: (filter, cursor) => read(client => readBouts(client, filter, cursor)),
     world: () => publicRead(readWorld), revision: () => publicRead(readRevision),

@@ -23,6 +23,8 @@ export type SyncController = {
    * world, Task 23.4) waits for a refresh in flight and then reads again, so the revision read starts after the change.
    */
   refresh(options?: { fresh?: boolean }): Promise<void>;
+  /** Joins the current refresh without starting a revision read. */
+  waitForRefresh(): Promise<void>;
 };
 
 /**
@@ -101,5 +103,6 @@ export function createSync(gateway: GameGateway, listener: (state: SyncState) =>
       if (typeof document !== 'undefined') document.removeEventListener('visibilitychange', visibility);
     },
     refresh: options => (options?.fresh && pending ? pending.then(() => refresh()) : refresh()),
+    waitForRefresh: () => pending ?? Promise.resolve(),
   };
 }

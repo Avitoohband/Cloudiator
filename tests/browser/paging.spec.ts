@@ -135,6 +135,27 @@ test.describe('menus with Back and Next: the Gladiators list', () => {
     await expect(tip).toHaveCount(0, { timeout: 3_000 });
   });
 
+  test('a mouse press released outside the dots row cancels its hold', async ({ page, hasTouch }) => {
+    test.skip(hasTouch, 'The mouse leaves the dots row before the active hold captures it.');
+    await page.clock.install();
+    await openCamp(page);
+    const menu = await gladiators(page);
+    const bar = pager(menu);
+    const dot = await centre(bar.getByRole('button', { name: 'Go to page 3', exact: true }));
+    const dots = bar.locator('[data-page-dots]');
+    const box = (await dots.boundingBox())!;
+    await page.clock.pauseAt(await page.evaluate(() => Date.now() + 100));
+    await page.mouse.move(dot.x, dot.y);
+    await page.mouse.down();
+    // One pointer move leaves the row without sending it an in-row move beyond the swipe threshold.
+    await page.mouse.move(dot.x, box.y - 16);
+    await page.mouse.up();
+    await page.clock.runFor(350);
+    await expect(label(menu)).toHaveText('Page 1 of 8');
+    await expect(dots).not.toHaveAttribute('data-scrubbing');
+    await expect(bar.getByRole('tooltip')).toHaveCount(0);
+  });
+
   test('press, hold and slide across the circles; a quick swipe does nothing (phone)', async ({ page }) => {
     test.skip(!(await touchLayout(page)), 'The touch layout only.');
     await openCamp(page);

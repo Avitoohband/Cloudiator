@@ -12,7 +12,7 @@ export type { ShownMessage } from '../../lib/api/reads';
 type RequestIdentity = string | null | undefined;
 /** `feedback` opens the panel on My feedback (Settings → Help's "See my feedback", patch 1.9). */
 /** `row` (Task 31): the result a Watch left from (its activity id); Notifications opens on the page that holds it. */
-export type MessagesRequest = { tab: 'notifications' | 'feedback'; n: number; account: RequestIdentity; owner: RequestIdentity; row?: string };
+export type MessagesRequest = { tab: 'messages' | 'notifications' | 'feedback'; n: number; account: RequestIdentity; owner: RequestIdentity; row?: string };
 
 /**
  * The request this account/owner may consume now. Bootstrap may adopt its first authenticated account, then its first owner;

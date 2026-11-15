@@ -87,16 +87,21 @@ export function runningRestNotice({ phase, planned, reason, ends, next }: { phas
     + ` A change to the ${phase} starts with the next ${phase}${next ? `, ${at(next)}` : ''}.`;
 }
 
+/** The planned activity's name as it appears after “rested instead of”. */
+export function restedActivityName({ planned, destination }: { planned: PlannedKind; destination: string | null }): string {
+  return planned === 'expedition' || planned === 'dungeon'
+    ? destination ? `the ${destination} ${planned}` : planned === 'expedition' ? 'an expedition' : 'a dungeon'
+    : KIND[planned];
+}
+
 /**
  * The owner's notification of a rest that replaced a planned activity: "Aster rested instead of the Ruined Outpost expedition" (a dungeon
  * likewise, "instead of Arena", "instead of Training"), with its reason as the one line. Owner only: other players never see a reason.
  */
-export function restedNoteLines({ planned, destination, reason }: { planned: PlannedKind; destination: string | null; reason: RestReason }, name: string | null,
+export function restedNoteLines(rest: { planned: PlannedKind; destination: string | null; reason: RestReason }, name: string | null,
   rules: Rules): { title: string; lines: string[] } {
-  const what = planned === 'expedition' || planned === 'dungeon'
-    ? destination ? `the ${destination} ${planned}` : planned === 'expedition' ? 'an expedition' : 'a dungeon'
-    : KIND[planned];
-  return { title: `${name ?? 'Your gladiator'} rested instead of ${what}`, lines: [reason === 'stamina' ? 'Not enough stamina' : `Training limit: ${limitOf(rules)} a game day`] };
+  return { title: `${name ?? 'Your gladiator'} rested instead of ${restedActivityName(rest)}`,
+    lines: [rest.reason === 'stamina' ? 'Not enough stamina' : `Training limit: ${limitOf(rules)} a game day`] };
 }
 
 /** The owner's own Results line for such a rest: "Aster rested instead of Expedition: not enough stamina" (others still read "finished resting"). */

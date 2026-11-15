@@ -16,12 +16,15 @@ export const levelUpLine = (level: number): string => `Level up! Now level ${lev
  * Light boots (tier 1) ×2"); salvage is only its name and quantity. A catalog entry this client does not know is named from its id
  * ("iron-sword:5:rare" is "Rare Iron sword (tier 5)"), so a future item is still listed.
  */
-function itemLine(item: ItemReward): string {
-  const quantity = item.quantity > 1 ? ` ×${item.quantity}` : '';
+export function rewardItemName(item: ItemReward, includeTier = true): string {
   const template = item.catalogId.split(':')[0];
-  if (template === CATALOG_V1.salvage.id) return `${CATALOG_V1.salvage.name}${quantity}`;
+  if (template === CATALOG_V1.salvage.id) return CATALOG_V1.salvage.name;
   const name = CATALOG_V1.items[item.catalogId]?.name ?? capital(template.replace(/-/g, ' '));
-  return `${capital(item.rarity)} ${name} (tier ${item.tier})${quantity}`;
+  return `${capital(item.rarity)} ${name}${includeTier ? ` (tier ${item.tier})` : ''}`;
+}
+
+function itemLine(item: ItemReward): string {
+  return `${rewardItemName(item)}${item.quantity > 1 ? ` ×${item.quantity}` : ''}`;
 }
 
 const KIND_NAME = { expedition: 'Expedition', arena: 'Arena', tournament: 'Tournament', dungeon: 'Dungeon' } as const;

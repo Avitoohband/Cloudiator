@@ -501,6 +501,7 @@ export type NotificationsRead = {
 };
 type NotificationRow = { id: unknown; settled_at_ms: unknown; summary: unknown; destination: unknown; gladiators?: unknown };
 const NOTIFICATION_KINDS: readonly string[] = ['training', 'expedition', 'arena', 'tournament', 'dungeon'];
+const NOTIFICATION_SELECT = 'id,slot_index,settled_at_ms,summary,destination:requested->>expeditionId,gladiators(level,xp,newer:activities(count))';
 const whole = (value: unknown): value is number => typeof value === 'number' && Number.isSafeInteger(value) && value >= 0;
 /**
  * The owner's own credited summary as the notification text needs it, or null for one it cannot show faithfully: a kind that earns
@@ -546,6 +547,31 @@ function levelsReached(awards: readonly (number | null)[], now: { level: number;
     return raised ? reached : null;
   });
 }
+
+function notificationRowOf(row: NotificationRow) {
+  const summary = notifiableSummary(row.summary), settledAtMs = Number(row.settled_at_ms);
+  return typeof row.id === 'string' && summary !== null && Number.isSafeInteger(settledAtMs) ? { id: row.id, summary, settledAtMs, destination: row.destination } : null;
+}
+
+function notificationProgress(value: unknown) {
+  const gladiator = value as { level?: unknown; xp?: unknown; newer?: unknown } | null | undefined;
+  const later = gladiator?.newer;
+  const noneLater = Array.isArray(later) && later.length === 1 && (later[0] as { count?: unknown } | null)?.count === 0;
+  return typeof gladiator === 'object' && gladiator !== null && noneLater ? { level: Number(gladiator.level), xp: Number(gladiator.xp) } : null;
+}
+
+function gameNotifications(shown: readonly ReturnType<typeof notificationRowOf>[], progress: ReturnType<typeof notificationProgress>): GameNotification[] {
+  const levels = levelsReached(shown.map(row => row ? row.summary.rewards.xp : null), progress);
+  return shown.flatMap((row, i) => {
+    if (!row) return [];
+    const kind = row.summary.resolvedKind as GameNotification['kind'];
+    const dungeon = kind === 'dungeon' ? dungeonOutcome(row.summary.dungeon) : null;
+    const destination = dungeon ? CATALOG_V1.dungeons[dungeon.id].name
+      : kind === 'expedition' && typeof row.destination === 'string' && Object.hasOwn(CATALOG_V1.expeditions, row.destination)
+        ? CATALOG_V1.expeditions[row.destination as keyof typeof CATALOG_V1.expeditions].name : null;
+    return [{ activityId: row.id, kind, settledAtMs: row.settledAtMs, summary: row.summary, destination, levelAfter: levels[i] }];
+  });
+}
 /**
  * The owner's newest 20 settled results as notifications, newest first: completed activities (never a rest) with a summary that
  * settled at or before the server's now (the timeline's own reveal rule, so an Arena or tournament result is not listed before it
@@ -563,32 +589,73 @@ function levelsReached(awards: readonly (number | null)[], now: { level: number;
  */
 export async function readNotifications(client: SupabaseClient): Promise<NotificationsRead> {
   const clock = await readRevision(client);
-  const rows = checked(await client.from('activities').select('id,slot_index,settled_at_ms,summary,destination:requested->>expeditionId,gladiators(level,xp,newer:activities(count))')
+  const rows = checked(await client.from('activities').select(NOTIFICATION_SELECT)
     .eq('status', 'completed').in('resolved_kind', NOTIFICATION_KINDS).not('summary', 'is', null).lte('settled_at_ms', clock.serverNowMs)
     .eq('gladiators.newer.status', 'completed').gt('gladiators.newer.settled_at_ms', clock.serverNowMs)
     .order('settled_at_ms', { ascending: false }).order('slot_index', { ascending: false }).limit(NOTIFICATIONS_PAGE)) as unknown as NotificationRow[];
   const page = rows.slice(0, NOTIFICATIONS_PAGE);
   const fetchedAt = page.map(row => Number(row.settled_at_ms)).filter(Number.isSafeInteger);
   const newestSettledMs = fetchedAt.length ? Math.max(...fetchedAt) : null;
-  const shown = page.map(row => {
-    const summary = notifiableSummary(row.summary), settledAtMs = Number(row.settled_at_ms);
-    return typeof row.id === 'string' && summary !== null && Number.isSafeInteger(settledAtMs) ? { id: row.id, summary, settledAtMs, destination: row.destination } : null;
-  });
-  const gladiator = page.map(row => row.gladiators).find(value => value !== null && value !== undefined) as { level?: unknown; xp?: unknown; newer?: unknown } | undefined;
-  const later = gladiator?.newer, noneLater = Array.isArray(later) && later.length === 1 && (later[0] as { count?: unknown } | null)?.count === 0;
-  const now = typeof gladiator === 'object' && gladiator !== null && noneLater ? { level: Number(gladiator.level), xp: Number(gladiator.xp) } : null;
-  const levels = levelsReached(shown.map(row => (row ? row.summary.rewards.xp : null)), now);
-  const list: GameNotification[] = [];
-  shown.forEach((row, i) => {
-    if (!row) return;
-    const kind = row.summary.resolvedKind as GameNotification['kind'];
-    const dungeon = kind === 'dungeon' ? dungeonOutcome(row.summary.dungeon) : null;
-    const destination = dungeon ? CATALOG_V1.dungeons[dungeon.id].name
-      : kind === 'expedition' && typeof row.destination === 'string' && Object.hasOwn(CATALOG_V1.expeditions, row.destination)
-        ? CATALOG_V1.expeditions[row.destination as keyof typeof CATALOG_V1.expeditions].name : null;
-    list.push({ activityId: row.id, kind, settledAtMs: row.settledAtMs, summary: row.summary, destination, levelAfter: levels[i] });
-  });
-  return { items: list, newestSettledMs };
+  const progress = notificationProgress(page.map(row => row.gladiators).find(value => value !== null && value !== undefined));
+  return { items: gameNotifications(page.map(notificationRowOf), progress), newestSettledMs };
+}
+
+const AWAY_RESULTS_PAGE = 50;
+export const AWAY_RESULTS_LIMIT = 150;
+export type ResultsSinceRead = Pick<NotificationsRead, 'items' | 'newestSettledMs'> & {
+  serverNowMs: number;
+  /** Null if the read cannot prove complete XP history through the cutoff. */
+  progression: { level: number; xp: number } | null;
+};
+
+export function parseResultsSince(gladiatorId: string, sinceMs: number): string {
+  if (typeof gladiatorId !== 'string' || !GLADIATOR_ID.test(gladiatorId) || !whole(sinceMs)) throw new GatewayReadError('unavailable');
+  return gladiatorId.toLowerCase();
+}
+
+/**
+ * Three pages of the reader's own completed activities at most. A single server-time cutoff applies to every page. The owner's
+ * unique slot index separates rows settled at the same time, including rows this client cannot present. Like Notifications, an
+ * embedded count of newer settlements detects XP outside that cutoff. Withhold the level change if any page leaves a gap.
+ */
+export async function readResultsSince(client: SupabaseClient, gladiatorId: GladiatorId, sinceMs: number): Promise<ResultsSinceRead> {
+  const id = parseResultsSince(gladiatorId, sinceMs);
+  const { serverNowMs } = await readRevision(client);
+  if (!whole(serverNowMs)) throw new GatewayReadError('unavailable');
+
+  const rows: (NotificationRow & { slot_index: unknown })[] = [];
+  let cursor: { time: number; slot: number } | null = null;
+  if (sinceMs < serverNowMs) {
+    while (rows.length < AWAY_RESULTS_LIMIT) {
+      let query = client.from('activities').select(NOTIFICATION_SELECT)
+        .eq('gladiator_id', id).eq('status', 'completed').in('resolved_kind', NOTIFICATION_KINDS).not('summary', 'is', null)
+        .gt('settled_at_ms', sinceMs).lte('settled_at_ms', serverNowMs)
+        .eq('gladiators.newer.status', 'completed').gt('gladiators.newer.settled_at_ms', serverNowMs);
+      if (cursor) query = query.or(`settled_at_ms.lt.${cursor.time},and(settled_at_ms.eq.${cursor.time},slot_index.lt.${cursor.slot})`);
+      const page = (checked(await query.order('settled_at_ms', { ascending: false }).order('slot_index', { ascending: false })
+        .limit(AWAY_RESULTS_PAGE)) as unknown as typeof rows).slice(0, AWAY_RESULTS_PAGE);
+      rows.push(...page);
+      if (page.length < AWAY_RESULTS_PAGE || rows.length >= AWAY_RESULTS_LIMIT) break;
+      const last = page[AWAY_RESULTS_PAGE - 1];
+      const time = wholeOf(last.settled_at_ms), slot = wholeOf(last.slot_index);
+      if (time === null || slot === null || time <= sinceMs || time > serverNowMs
+        || (cursor && (time > cursor.time || (time === cursor.time && slot >= cursor.slot)))) throw new GatewayReadError('unavailable');
+      cursor = { time, slot };
+    }
+  }
+  const within = rows.map(row => wholeOf(row.settled_at_ms)).map(time => time !== null && time > sinceMs && time <= serverNowMs ? time : null);
+  const shown = rows.map((row, index) => within[index] === null ? null : notificationRowOf(row));
+  const settled = within.filter((time): time is number => time !== null);
+  const now = notificationProgress(rows[0]?.gladiators);
+  const totalXp = shown.reduce((sum, row) => sum + (row?.summary.rewards.xp ?? 0), 0);
+  const earned = now && whole(now.level) && now.level >= 1 && whole(now.xp) && now.xp < now.level * RULES_V1.progression.xpPerCurrentLevel
+    ? xpEarned(now.level, now.xp) : null;
+  const progression = earned !== null && Number.isSafeInteger(totalXp) && totalXp <= earned && rows.length < AWAY_RESULTS_LIMIT
+    && shown.every(row => row !== null) && rows.every(row => {
+      const progress = notificationProgress(row.gladiators);
+      return progress !== null && progress.level === now?.level && progress.xp === now.xp;
+    }) ? now : null;
+  return { items: gameNotifications(shown, progression), newestSettledMs: settled.length ? Math.max(...settled) : null, serverNowMs, progression };
 }
 /**
  * Patch 1.9 Task 29: one of the owner's own rests that replaced a planned activity (the boundary's "Resting (not enough stamina)", or a v2

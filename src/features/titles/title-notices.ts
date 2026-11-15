@@ -50,9 +50,14 @@ export function titleNotices(titles: readonly EarnedTitle[]): TitleNotice[] {
   }).sort((p, q) => q.atMs - p.atMs || (p.key < q.key ? -1 : p.key > q.key ? 1 : 0));
 }
 
+/** The known titles in a selection, in catalog order. */
+export function earnedTitleRows(titles: readonly EarnedTitle[]): TitleRow[] {
+  return titles.map(rowOf).filter((row): row is TitleRow => row !== null).sort(byCatalog);
+}
+
 /** The rows a result's notification gains: the titles whose activityId is that result's, in catalog order. */
 export function resultTitleRows(titles: readonly EarnedTitle[], activityId: string): TitleRow[] {
-  return titles.filter(title => title.activityId === activityId).map(rowOf).filter((row): row is TitleRow => row !== null).sort(byCatalog);
+  return earnedTitleRows(titles.filter(title => title.activityId === activityId));
 }
 
 /** The history notice's chips: the worn title first and marked (when history earned it), then the others in their order. */

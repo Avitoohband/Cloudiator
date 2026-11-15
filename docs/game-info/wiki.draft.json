@@ -3,7 +3,9 @@
     {
       "id": "start",
       "title": "Start in camp",
-      "body": "Sign in with Google to create one gladiator. Choose a name, a look, a class, and starting attributes. You can move the camp camera and open a gladiator’s profile by selecting their character or name. Visitors can explore the camp without signing in."
+      "body": "Sign in with Google to create one gladiator. Choose a name, a look, a class, and starting attributes. You can move the camp camera and open a gladiator’s profile by selecting their character or name. Visitors can explore the camp without signing in.",
+      "video": "https://youtu.be/XMefdNAuKmE",
+      "videoLength": "1:10"
     },
     {
       "id": "schedule",
@@ -43,12 +45,16 @@
     {
       "id": "gear",
       "title": "Gear and builds",
-      "body": "Equip a weapon, off-hand item, headgear, body armor, and footwear. A two-handed weapon uses both hands. Open Inventory and shops and select an item tile to check its details or use Wear. In My gladiator, hover, focus, or tap equipment to check its stats and weight, or use Plan a build to inspect replacement gear. The pending build shows when changes take effect. Raise Endurance or wear lighter gear if you are over capacity.\n\nIdentical items you are not using show as one tile with a count, such as x3. Each item is still its own copy: Wear and Discard work on one at a time. Type in the search box to find an item by name, and use Sort to order items, for example by level or name."
+      "body": "Equip a weapon, off-hand item, headgear, body armor, and footwear. A two-handed weapon uses both hands. Open Inventory and shops and select an item tile to check its details or use Wear. In My gladiator, hover, focus, or tap equipment to check its stats and weight, or use Plan a build to inspect replacement gear. The pending build shows when changes take effect. Raise Endurance or wear lighter gear if you are over capacity.\n\nIdentical items you are not using show as one tile with a count, such as x3. Each item is still its own copy: Wear and Discard work on one at a time. Type in the search box to find an item by name, and use Sort to order items, for example by level or name.",
+      "video": "https://youtu.be/TqIACM2ANbM",
+      "videoLength": "1:00"
     },
     {
       "id": "expeditions",
       "title": "Expeditions and rewards",
-      "body": "Pick an Expedition in Schedule. A successful Woodland Path run (level 1) pays 30 XP and 4 gold. Ruined Outpost (level 5) pays 75 XP and 10 gold. Mountain Pass (level 10) pays 150 XP and 18 gold. A successful run can also bring back salvage and gear. A defeat ends the trip without expedition rewards. Use the camp button to watch a trip live or replay it from the start."
+      "body": "Pick an Expedition in Schedule. A successful Woodland Path run (level 1) pays 30 XP and 4 gold. Ruined Outpost (level 5) pays 75 XP and 10 gold. Mountain Pass (level 10) pays 150 XP and 18 gold. A successful run can also bring back salvage and gear. A defeat ends the trip without expedition rewards. Use the camp button to watch a trip live or replay it from the start.",
+      "video": "https://youtu.be/QJlumCBaxEA",
+      "videoLength": "0:46"
     },
     {
       "id": "dungeons",

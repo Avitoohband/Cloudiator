@@ -16,10 +16,9 @@
       "body": "Build a home, show off your trophies, and invite friends over as guests."
     },
     {
-      "id": "menus",
-      "title": "More room in menus",
-      "body": "A new Settings menu lets you pin the menu and place it on the left, bottom, or right of the screen on desktop, remembered in this browser. Long menus turn into pages with Back and Next instead of long scrolling: jump to a page with the circles and choose how many rows a page shows. My gladiator and Inventory open as named sections. Wider menus are still planned. Controls stay usable on phones.",
-      "patch": "1.9"
+      "id": "wider-menus",
+      "title": "Wider menus",
+      "body": "Menus can grow wider on large screens, so more rows and bigger cards fit on a page."
     },
     {
       "id": "progression-cap",
@@ -90,72 +89,6 @@
       "body": "Special events made together with other games, YouTube creators or brands: skins in their style and a title you can earn during the event. Skins change looks only, with no combat bonuses. This comes after 2.0, once skins are in the game."
     },
     {
-      "id": "inventory-shops",
-      "title": "Inventory, shops and gladiator help",
-      "body": "Shops show goods as icons with the inventory card, and you can search and sort. Identical items stack and you choose how many to sell. Choose gear from your Worn equipment slots. Renown gets a gold laurel. Mark messages and notifications as read. See your XP bar and level-up hint, and hover or tap any stat or attribute for help.",
-      "patch": "1.9"
-    },
-    {
-      "id": "name-toggles",
-      "title": "Names and titles",
-      "body": "In Settings, choose when names and titles show above gladiators in camp: Off, When zoomed in, or Always. Newly earned titles carry a small New mark in the titles menu until you have seen them.",
-      "patch": "1.9"
-    },
-    {
-      "id": "talking-npcs",
-      "title": "Talking NPCs",
-      "body": "Click an NPC in camp to hear a line about themselves. The Weaponsmith's and Armorer's stalls open their shops.",
-      "patch": "1.9"
-    },
-    {
-      "id": "sleeping",
-      "title": "Sleeping on beds",
-      "body": "Resting gladiators lie straight on their beds without their armor, with an eye cover and a floating ZzZ.",
-      "patch": "1.9"
-    },
-    {
-      "id": "wiki-guides",
-      "title": "Video guides in the Wiki",
-      "body": "Each Wiki topic gets its own short YouTube guide, shown as a card under the topic title.",
-      "patch": "1.9"
-    },
-    {
-      "id": "practice-fights",
-      "title": "Practice fights",
-      "body": "Test your build against a training dummy with stats you choose, or spar a copy of any gladiator from their profile. Free: no stamina, no schedule slot, no rating.",
-      "patch": "1.9"
-    },
-    {
-      "id": "buy-back",
-      "title": "Buy back sold items",
-      "body": "Changed your mind? Buy back your last 10 gear sales until the next game day, for the price you sold them at.",
-      "patch": "1.9"
-    },
-    {
-      "id": "compare-stats",
-      "title": "Compare stats with mine",
-      "body": "Press Compare with mine on another gladiator's card to see you and them side by side, with arrows for every difference and the attributes.",
-      "patch": "1.9"
-    },
-    {
-      "id": "market-list",
-      "title": "A bigger, clearer Marketplace",
-      "body": "The Marketplace is still a list, now with big item icons and every detail on the row. The seller comes first, with their class, league and level.",
-      "patch": "1.9"
-    },
-    {
-      "id": "gladiator-history",
-      "title": "Gladiator history on every card",
-      "body": "Open any gladiator's card to see their Arena, tournament and expedition history. Every kept replay can be watched by anyone. Rewards and loot of other gladiators stay private.",
-      "patch": "1.9"
-    },
-    {
-      "id": "tournament-look",
-      "title": "Tournaments look different",
-      "body": "Tournament fights get a gold header band, their own rows in history, and a fancier arena called League Stands, with stands in the four league colours and league banners. You can also open any league's tournament and watch its bouts, even when your gladiator is not in it.",
-      "patch": "1.9"
-    },
-    {
       "id": "daily-reward",
       "title": "Daily login reward",
       "body": "Claim a reward once per game day. Seven days in a row ends with a bigger prize, and a missed day starts the streak again.",
@@ -186,28 +119,16 @@
       "patch": "2.0"
     },
     {
+      "id": "earlier-tournaments",
+      "title": "Earlier tournaments",
+      "body": "Open any league’s tournaments from the past seven days, while their replays are kept, and watch their bouts.",
+      "patch": "2.0"
+    },
+    {
       "id": "payments",
       "title": "Bag slots and real-money shop",
       "body": "Buy extra bag slots with real money, coupons, or renown. Bag slots add space only, never combat power. Optional ads are being looked at too, such as watching a short ad for a small stamina refill; nothing is decided yet.",
       "patch": "2.0"
-    },
-    {
-      "id": "feedback",
-      "title": "Send feedback",
-      "body": "Send bug reports and ideas from inside the game. The team reads and answers them.",
-      "patch": "1.9"
-    },
-    {
-      "id": "stamina-notices",
-      "title": "Stamina warnings",
-      "body": "The Schedule will warn when your gladiator will not have the stamina for a planned activity, or when a third Training in a game day becomes a Rest, and show the stamina left after each part. A notice in camp warns before the next part. If your gladiator rests instead of its plan, the Schedule, your notifications and your own results will say so and why.",
-      "patch": "1.9"
-    },
-    {
-      "id": "away-summary",
-      "title": "While you were away",
-      "body": "When you come back to the game, a summary pops up with everything your gladiators gained since your last visit: XP and levels, gold and renown, new items, and their fight, tournament and expedition results.",
-      "patch": "1.9"
     },
     {
       "id": "more-content",

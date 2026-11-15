@@ -12,7 +12,7 @@
       "title": "Your daily schedule",
       "body": "Open Schedule, choose one activity for morning, afternoon, and evening, and save the whole day. Each slot lasts 80 minutes in real time, so a game day takes four hours. Your schedule repeats while you’re away. Edits apply to slots that haven’t started. Dungeons run in the afternoon and Arena bouts run in the evening.",
       "video": "https://youtu.be/33XA-hv1ccQ",
-      "videoLength": "1:01"
+      "videoLength": "1:02"
     },
     {
       "id": "stamina",
@@ -26,14 +26,14 @@
       "title": "Training and leveling",
       "body": "Training earns attribute points up to your current level’s Training limit. You can complete two Training sessions per game day. A third becomes Rest. Expeditions and dungeons award XP, which raises your level and unlocks harder content and more gear. Spend earned points in My gladiator → Plan a build.\n\nThe XP bar sits under Stamina in My gladiator, and a thin XP line shows in the corner chip. A lighter segment shows what your next expedition could add, as an upper estimate (“up to”). If it says the expedition can level you up, finishing it may take you to the next level. The hint uses your scheduled expedition, or the best one available if none is scheduled.",
       "video": "https://youtu.be/SoPHhPdNSik",
-      "videoLength": "0:58"
+      "videoLength": "0:59"
     },
     {
       "id": "attributes",
       "title": "Classes and attributes",
       "body": "Berserkers favor Strength, Guardians favor Vitality and Endurance, and Duelists favor Agility and Precision. Any class can use any weapon it meets the requirements for.\n\nStrength increases damage. Agility shortens the time between attacks and makes you harder to hit. Vitality raises maximum health. Endurance increases maximum stamina and gear capacity. Precision increases your chances to hit and to land a critical hit. Your class and the points in an active build are fixed.\n\nMy gladiator has Attributes and Stats blocks. Hover, focus, or tap an attribute or stat to read what it means and what changes it.",
       "video": "https://youtu.be/gQ1pgAnvMx0",
-      "videoLength": "0:59"
+      "videoLength": "1:00"
     },
     {
       "id": "combat",
@@ -54,7 +54,7 @@
       "title": "Expeditions and rewards",
       "body": "Pick an Expedition in Schedule. A successful Woodland Path run (level 1) pays 30 XP and 4 gold. Ruined Outpost (level 5) pays 75 XP and 10 gold. Mountain Pass (level 10) pays 150 XP and 18 gold. A successful run can also bring back salvage and gear. A defeat ends the trip without expedition rewards. Use the camp button to watch a trip live or replay it from the start.",
       "video": "https://youtu.be/QJlumCBaxEA",
-      "videoLength": "0:46"
+      "videoLength": "0:47"
     },
     {
       "id": "dungeons",
@@ -89,7 +89,7 @@
       "title": "Titles and profiles",
       "body": "My gladiator shows earned titles and progress toward locked titles. You can wear one title at a time or remove it for free. New titles can also appear in Notifications or with a result. Other players see your worn title with your name in camp, profiles, and fights.\n\nA new title shows a small New mark until you have seen it.\n\nOn another gladiator’s card, press ⇄ Compare with mine to set your gladiator’s stats beside theirs: Level, Health, Damage, Attack speed, Armor, Critical and Critical damage, then the five attributes. ▲ green on your side is better for you, ▼ red is worse, and the number is your value minus theirs. For Attack speed a shorter time is better. It is not on your own card.\n\nPress 📜 History on any card to see that gladiator’s Arena bouts, tournament fights and expeditions, newest first, 20 at a time (Show more for older ones). Chips switch between the three lists. Press ▶ Watch to replay any bout, tournament fight or expedition still kept; replays last 7 days (tournament replays 7 days after the tournament ends), then the row stays, dimmed, with its result. Rewards stay private: on another card you see results only, and on your own you also see renown, rating change, prize and loot. A replay never shows loot.",
       "video": "https://youtu.be/055M38AScrM",
-      "videoLength": "0:41"
+      "videoLength": "0:42"
     },
     {
       "id": "results",

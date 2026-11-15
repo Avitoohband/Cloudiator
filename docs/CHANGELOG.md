@@ -26,9 +26,7 @@ Project folders under `D:\Avi\Projects\Animation\Cloudiator\`.
 
 **Last video's patch: 1.6.** The 5 Nov film covers all ten 1.6 bullets. Patches 1.7, 1.7.1 and 1.8 are new since.
 
-## 1.9 — Game Info and pixel-art inventory (in progress, not yet released)
-
-### Built
+## 1.9 — Game Info, a pixel-art inventory and paged menus (2026-11-15)
 
 - Open Game Info from camp to read the Wiki and the Future Updates plans. Wiki topics cover combat, attributes, stamina, Training, the Arena, dungeons and more, with their own YouTube video guide, and more guides on the way.
 - Open Inventory and shops to browse your inventory in a square grid of pixel-art items. Select a tile to check its details, wear it, or manage it.
@@ -43,7 +41,7 @@ Project folders under `D:\Avi\Projects\Animation\Cloudiator\`.
 - My gladiator and gladiator cards show the extra damage of a critical hit, and how much renown armor and weapons add in the Arena.
 - Compare your gladiator's stats with any other gladiator's from their card. Practice fights: test your build against a dummy with stats you choose, or spar a copy of any gladiator. No stamina, no slot, no rating, nothing saved.
 - See any gladiator's Arena, tournament and expedition history from their card and watch kept replays. Tournament fights look different: gold rows, a gold header and their own arena.
-- Phones scroll a tapped item's card into view, plus small fixes to the inventory, shops, messages, Settings and the Wiki list.
+- Phones open a tapped item's card over the grid, plus small fixes to the inventory, shops, messages, Settings and the Wiki list.
 - A Feedback button: send a bug report or an idea from the game, and read the team's answer.
 - The schedule warns when your gladiator will not have the stamina for a planned activity, and says when he rested instead.
 - Long menus turn into pages with Back and Next. Jump with the circles, and choose how many rows a page shows with Show. My gladiator opens as five named sections; Inventory and shops as two.

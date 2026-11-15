@@ -17,7 +17,7 @@ Project folders under `D:\Avi\Projects\Animation\Cloudiator\`.
 
 | Video | Made | Covers |
 | --- | --- | --- |
-| [patch-1-9-game-info](https://youtu.be/r3eVcm6lC6s) | 2026-11-14 (276.4 s, rehearsal v3; scheduled 15 Nov, 10:00 Israel) | 1.9 before its release: all 20 bullets of the in-progress section at codex/game-info 9c0e2e7, two as stand-ins (the away pop-up from the approved mockup; any league's tournament shown with the own league), plus 1.8.1's stat help. |
+| [patch-1-9-game-info](https://youtu.be/TUc5PSPIr98) | 2026-11-15 (272.7 s, rehearsal v4 = v3 without the Showoff card; scheduled 15 Nov, 10:00 Israel) | 1.9 before its release: all 20 bullets of the in-progress section at codex/game-info 9c0e2e7, two as stand-ins (the away pop-up from the approved mockup; any league's tournament shown with the own league), plus 1.8.1's stat help. |
 | [patch-1-7-titles](https://youtu.be/rzyGTxaGbrI) | 2026-11-06 (68.7 s; published about 21:50 Israel) | 1.7: all seven released bullets ("Wearable titles: show what your gladiator has done"). |
 | [patch-1-6-economy](https://youtu.be/WrzLvSFmEpQ) | 2026-11-05 (82.4 s; published about 16:35 Israel) | 1.6: all ten released bullets ("A new economy: slower levels and prizes by league"). |
 | [patch-1-5-1-update-and-roadmap](https://youtu.be/vjJBTTAEjww) | 2026-11-02 (133 s; scheduled 3 Nov, 10:00 Israel) | 1.3.1, 1.4, 1.5 and original 1.5.1: 30 released feature bullets. Brief 1.6–1.8 preview is explicitly planned. |

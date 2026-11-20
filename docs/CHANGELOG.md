@@ -26,7 +26,7 @@ Project folders under `D:\Avi\Projects\Animation\Cloudiator\`.
 
 **Last video's patch: 1.6.** The 5 Nov film covers all ten 1.6 bullets. Patches 1.7, 1.7.1 and 1.8 are new since.
 
-## 1.9.2 — Spending attribute points (in progress, not yet released)
+## 1.9.2 — Spending attribute points (2026-11-20)
 
 - On a computer, the build planner works again while a Worn equipment slot’s list is open: +1, +5 and Queue build respond, and a click or Tab outside the list closes it.
 - My gladiator’s Attributes and stats says how many points you have to spend, and Spend points takes you straight to Plan a build. While you were away opens there too when Training left points to spend.

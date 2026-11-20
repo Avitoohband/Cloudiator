@@ -24,7 +24,7 @@
     {
       "id": "training",
       "title": "Training and leveling",
-      "body": "Training earns attribute points up to your current level’s Training limit. You can complete two Training sessions per game day. A third becomes Rest. Expeditions and dungeons award XP, which raises your level and unlocks harder content and more gear. Spend earned points in My gladiator → Plan a build.\n\nThe XP bar sits under Stamina in My gladiator, and a thin XP line shows in the corner chip. A lighter segment shows what your next expedition could add, as an upper estimate (“up to”). If it says the expedition can level you up, finishing it may take you to the next level. The hint uses your scheduled expedition, or the best one available if none is scheduled.",
+      "body": "Training earns attribute points up to your current level’s Training limit. You can complete two Training sessions per game day. A third becomes Rest. Expeditions and dungeons award XP, which raises your level and unlocks harder content and more gear. Spend earned points in My gladiator → Worn equipment → Plan a build, or use Spend points in Attributes and stats.\n\nThe XP bar sits under Stamina in My gladiator, and a thin XP line shows in the corner chip. A lighter segment shows what your next expedition could add, as an upper estimate (“up to”). If it says the expedition can level you up, finishing it may take you to the next level. The hint uses your scheduled expedition, or the best one available if none is scheduled.",
       "video": "https://youtu.be/SoPHhPdNSik",
       "videoLength": "0:59"
     },

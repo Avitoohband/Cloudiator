@@ -788,10 +788,22 @@ test.describe('equip from My gladiator (live)', () => {
     } else {
       // The popover lies over the top of the planner; the planner below it looks normal and is not inert, so the first click counts.
       expect(await plusOne.evaluate(element => !!element.closest('[inert]'))).toBe(false);
+      const shots = process.env.HOTFIX_SHOTS;
+      if (shots) {
+        // The popover over the top of the planner, then the planner's points further down, the popover still open.
+        await dialog.evaluate(element => element.scrollIntoView({ block: 'start' }));
+        await page.screenshot({ path: `${shots}/desktop-1280x720-weapon-picker-open.png` });
+        await plusOne.evaluate(element => element.scrollIntoView({ block: 'end' }));
+        await page.screenshot({ path: `${shots}/desktop-1280x720-weapon-picker-open-planner-below.png` });
+      }
       await plusOne.click();
       await expect(dialog).toHaveCount(0);
       // Closed by a click outside it, the picker leaves the focus where the player put it, never back on the slot.
       await expect(plusOne).toBeFocused();
+      if (shots) {
+        await expect(counter).toHaveText('47 of 58 left');
+        await page.screenshot({ path: `${shots}/desktop-1280x720-plus-one-pressed-picker-closed.png` });
+      }
     }
     await expect(counter).toHaveText('47 of 58 left');
     await form.getByRole('button', { name: 'Queue build', exact: true }).click();

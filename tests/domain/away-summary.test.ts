@@ -146,6 +146,23 @@ describe('While you were away model', () => {
     ]);
   });
 
+  // Patch 1.9.2: when the Training line says points wait ("to spend"), Open My gladiator opens Worn equipment at Plan a build, where they are
+  // spent; otherwise the Overview, as before.
+  it('says when its Training line has points to spend, for Open My gladiator', () => {
+    const data = input({ results: [result('1', 'training', { rewards: { attributePoints: 2 } }), result('2', 'expedition')] });
+    data.owner.progression.unspentAttributePoints = 3;
+    expect(buildAwaySummary(data)?.pointsToSpend).toBe(true);
+    data.owner.progression.unspentAttributePoints = 0;
+    expect(buildAwaySummary(data)?.pointsToSpend).toBe(false);
+    // Points waiting from before, but none from this absence's Training (full for the level, or no Training): the line says none.
+    const full = input({ results: [result('1', 'training')] });
+    full.owner.progression.unspentAttributePoints = 5;
+    expect(buildAwaySummary(full)?.pointsToSpend).toBe(false);
+    const away = input({ results: [result('1', 'expedition')] });
+    away.owner.progression.unspentAttributePoints = 5;
+    expect(buildAwaySummary(away)?.pointsToSpend).toBe(false);
+  });
+
   it('orders known titles by catalog and names a season place, leaving out old or unknown titles', () => {
     const data = input();
     data.owner.titles = [title('rare-find'), title('not-real'), title('wanderer'), title('champion', nowMs - 1,

@@ -1,6 +1,6 @@
 'use client';
 
-// One menu's floating panel (a bottom sheet on touch): a labelled, non-modal dialog that takes the focus when it opens,
+// One menu's floating panel (a bottom sheet on touch): a labelled, non-modal dialog that takes the focus when it opens (unless something in it took it),
 // scrolls internally and closes with its × button or, on touch, a swipe down on its handle. It renders outside the camp
 // view's element, so the camp's key handlers never see keystrokes typed here.
 // Patch 1.9 Task 30: a slot at the panel's own bottom edge, outside the part that scrolls, for a paged list's bar (`PanelFooter`);
@@ -27,7 +27,11 @@ export function MenuSurface({ menu, open, covered = false, paged = false, onClos
   const holdPanel = useCallback((element: HTMLElement | null) => { surface.current = element; setPanel(element); }, []);
   const scope = useMemo(() => ({ slot, panel }), [slot, panel]);
   const [swipe, setSwipe] = useState<{ pointer: number; y: number } | null>(null);
-  useEffect(() => { if (open) surface.current?.focus({ preventScroll: true }); }, [open]);
+  // Patch 1.9.2: a focus something in the menu took as it opened (My gladiator's Plan a build heading, from the away summary) is kept.
+  useEffect(() => {
+    const element = surface.current;
+    if (open && element && !element.contains(document.activeElement)) element.focus({ preventScroll: true });
+  }, [open]);
   return (
     <section ref={holdPanel} id={`menu-${menu.id}`} className={styles.surface} role="dialog" aria-label={menu.label} tabIndex={-1} hidden={!open}
       data-menu-surface={menu.id} data-paged={paged ? '' : undefined} data-covered={covered ? '' : undefined} inert={covered || undefined}>

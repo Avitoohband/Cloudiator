@@ -509,6 +509,37 @@ test('My gladiator opens Overview when the previous visit left a different secti
   await expect(menu.getByRole('button', { name: 'Go to section: Overview' })).toHaveAttribute('aria-current', 'step');
 });
 
+// Patch 1.9.2: when the Training line says points wait ("to spend"), Open My gladiator opens Worn equipment at Plan a build, where they are spent:
+// the heading at the top of the menu, with the focus. Without points waiting it opens the Overview, as above.
+test('Open My gladiator opens Worn equipment at Plan a build when Training left points to spend (1.9.2)', async ({ page, context }) => {
+  const user = await seedSession(context);
+  const owner = structuredClone(ownerFixture);
+  owner.inbox.notificationsSeenMs = now - 2 * minute;
+  owner.progression = { ...owner.progression, earnedAttributePoints: 12, unspentAttributePoints: 2 };
+  let serverNow = now;
+  const live = await routeLiveReads(context, { world: emptyWorld(now), owner, ownerAccountId: user.id, serverNowMs: () => serverNow });
+  await seedVisit(page, now - 2 * minute);
+  await visit(page, '/game/');
+  serverNow += 45 * minute;
+  const trained = result('training', now + 30 * minute);
+  trained.summary.rewards.attributePoints = 2;
+  live.setNotifications([trained]);
+  await page.evaluate(end => window.__cloudiatorShell!.clock.freeze(end), serverNow);
+  await expect(away(page)).toContainText(/Training: \+2 attribute points to spend/);
+  await away(page).getByRole('button', { name: /^(Open )?My gladiator$/ }).click();
+  await expect(away(page)).toBeHidden();
+  const menu = menuDialog(page, 'My gladiator');
+  await expect(menu.getByRole('button', { name: 'Go to section: Worn equipment' })).toHaveAttribute('aria-current', 'step');
+  const heading = menu.getByRole('heading', { name: 'Plan a build', exact: true });
+  await expect(heading).toBeFocused();
+  // (Read once the phone sheet has risen: boxes measured during its rise move between two reads.)
+  await menu.evaluate(element => Promise.all(element.getAnimations({ subtree: true }).map(animation => animation.finished)));
+  const body = (await menu.getByTestId('menu-body').boundingBox())!, top = (await heading.boundingBox())!;
+  expect(top.y).toBeGreaterThanOrEqual(body.y - 1);
+  expect(top.y).toBeLessThan(body.y + 40);
+  await expect(menu.locator('.build-counter')).toHaveText('2 of 12 left');
+});
+
 test('uses the shared return read for a newly earned title', async ({ page, context }) => {
   let serverNowMs = now;
   const user = await seedSession(context);

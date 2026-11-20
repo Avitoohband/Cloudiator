@@ -1,7 +1,7 @@
 import { expect, it } from 'vitest';
 import type { BuildView } from '@contracts/reads';
 import type { BuildInput } from '@domain/types';
-import { fixedClassAndPoints, fixedKey, refloored } from '../../src/features/build/fixed-build';
+import { fixedClassAndPoints, fixedKey, pointsToSpend, refloored } from '../../src/features/build/fixed-build';
 
 // The build form's floor (Avi, 2026-10-28): the class and every attribute are fixed at the CURRENT build's. The current build can move
 // under an open form without the build version moving (the boundary applies a pending build), so a draft is raised to the new floor.
@@ -43,4 +43,23 @@ it('leaves a draft that already holds the floor as it was, and does not change t
   // It is the form's own starting rule applied to the draft: the class and points `fixedClassAndPoints` gives the same build.
   const fixed = fixedClassAndPoints(build({ allocations: held.allocation }), build());
   expect(refloored(held, build())).toEqual({ ...held, classId: fixed.classId, allocation: fixed.allocations });
+});
+
+// Patch 1.9.2 (Avi, 2026-11-20): My gladiator's Attributes and stats says "N points to spend" with a Spend points button. The number is what
+// the build planner opens with as left: the points earned less those its draft holds (the pending build's, else the current build's, at the
+// fixed floor), so a pending build that spends them leaves none to spend, though the server's unspent count waits for the boundary.
+it('counts the points to spend as the build planner opens with them', () => {
+  const owner = (earned: number, pending: BuildView | null = null) => ({ currentBuild: build(), pendingBuild: pending && { build: pending,
+    effectiveSlotIndex: 2, reservedMoney: 0, reservedItemIds: [], operationId: 'pending' }, progression: { earnedAttributePoints: earned } });
+  // The current build holds 9 points.
+  expect(pointsToSpend(owner(58))).toBe(49);
+  expect(pointsToSpend(owner(10))).toBe(1);
+  expect(pointsToSpend(owner(9))).toBe(0);
+  // Never negative: an old build that holds more than is earned has none.
+  expect(pointsToSpend(owner(5))).toBe(0);
+  // A pending build that spends 7 more leaves 42; one that spends them all leaves none.
+  expect(pointsToSpend(owner(58, build({ version: 2, allocations: { strength: 11, agility: 2, vitality: 1, endurance: 1, precision: 1 } })))).toBe(42);
+  expect(pointsToSpend(owner(58, build({ version: 2, allocations: { strength: 53, agility: 2, vitality: 1, endurance: 1, precision: 1 } })))).toBe(0);
+  // A pending build from before the release below the current floor counts at the floor, as the planner's draft does.
+  expect(pointsToSpend(owner(58, build({ version: 2, allocations: { strength: 0, agility: 0, vitality: 0, endurance: 0, precision: 0 } })))).toBe(49);
 });

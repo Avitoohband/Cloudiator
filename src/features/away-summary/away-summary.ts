@@ -70,6 +70,8 @@ export type AwaySummary = {
   messageCount: number;
   teamReply: boolean;
   seenUpToMs: number | null;
+  /** The Training line says points wait ("to spend"): Open My gladiator opens Worn equipment at Plan a build (Patch 1.9.2). */
+  pointsToSpend: boolean;
 };
 
 const capital = (text: string) => text.charAt(0).toUpperCase() + text.slice(1);
@@ -146,12 +148,17 @@ function dungeonLines(dungeons: readonly GameNotification[]): AwayLine[] {
   return lines;
 }
 
+/** The attribute points the absence's Training gave. */
+const trainingPoints = (training: readonly GameNotification[]) => training.reduce((total, result) => total + result.summary.rewards.attributePoints, 0);
+/** Whether the Training line says its points wait to be spent ("to spend"). */
+const pointsWait = (training: readonly GameNotification[], unspent: number) => trainingPoints(training) > 0 && unspent > 0;
+
 function trainingLine(training: readonly GameNotification[], unspent: number): AwayLine | null {
   if (!training.length) return null;
-  const points = training.reduce((total, result) => total + result.summary.rewards.attributePoints, 0);
+  const points = trainingPoints(training);
   const label = training.length === 1 ? 'Training' : `Training ×${count(training.length)}`;
   const main = points > 0 ? `+${counted(points, 'attribute point')}` : 'no point (Training was full for your level)';
-  return { kind: 'training', label, main, ...(points > 0 && unspent > 0 ? { detail: ' to spend' } : {}) };
+  return { kind: 'training', label, main, ...(pointsWait(training, unspent) ? { detail: ' to spend' } : {}) };
 }
 
 function restText(rests: readonly RestedActivity[], rules: Rules): string | null {
@@ -259,5 +266,6 @@ export function buildAwaySummary({ owner, rules, sinceMs, nowMs, results, rests,
     duration: awayTimeText(nowMs - sinceMs), resultCount: recent.length, level: owner.progression.level, ...after, xpGained, gold, renown,
     lines, titles, rested, items: newItems(recent), messageCount, seenUpToMs,
     teamReply: messageCount > 0 && messages.some(message => message.kind === 'team-reply' && isUnread(message, owner.inbox)),
+    pointsToSpend: pointsWait(byKind.training, owner.progression.unspentAttributePoints),
   };
 }

@@ -51,7 +51,7 @@ import type { PublicActivitySummary } from '@contracts/events';
 import type { OwnerState } from '@contracts/reads';
 import { createLiveGateway, type GameGateway } from '../../lib/api/gateway';
 import { useGameState } from '../character/useGameState';
-import { CharacterPanel } from '../character/CharacterPanel';
+import { CharacterPanel, PLAN_SECTION } from '../character/CharacterPanel';
 import { ownRestingText } from '../character/activity-status';
 import { campViewReason } from '../character/actor-text';
 import { CreateCharacter } from '../character/CreateCharacter';
@@ -570,6 +570,9 @@ export function CampShell({ fixture, previewAs, previewResting = false, previewA
   // Patch 1.9 Task 33: My gladiator's section, kept while the page lives, so the menu reopens on the last section seen in this visit (a reload
   // starts at the Overview, as does another gladiator). The Title button is on the Overview: the picker opens over it, and its close focuses it.
   const [gladiatorSection, setGladiatorSection] = useState(0);
+  /** Patch 1.9.2: My gladiator is asked to show Plan a build (`CharacterPanel`'s `planRequested`) until it says it has. */
+  const [planRequested, setPlanRequested] = useState(false);
+  const planShown = useCallback(() => setPlanRequested(false), []);
   const openTitlePicker = useCallback(() => { setTitleStatus(null); setGladiatorSection(0); show('gladiator'); setTitleOpen(true); }, [show]);
   // An accepted wear, from the picker or a notice's Wear (each names the gladiator it wore for), told the moment it arrives, also after
   // the picker or the messages panel has closed.
@@ -586,7 +589,7 @@ export function CampShell({ fixture, previewAs, previewResting = false, previewA
     if (status && current) setTitleStatus({ gladiatorId: current.gladiatorId, text: status });
     focusTitleButton();
   }, []);
-  useEffect(() => { setTitleOpen(false); setGladiatorSection(0); }, [lookOwner]);
+  useEffect(() => { setTitleOpen(false); setGladiatorSection(0); setPlanRequested(false); }, [lookOwner]);
   const shownTitleStatus = titleStatus && titleStatus.gladiatorId === lookOwner ? titleStatus.text : null;
   // The Notifications tab's titles (Task 11): the owner's, the title shown as worn (the same answered-wear rule as the Title button), Wear
   // (the picker's command, through the gateway the shell reads with: the fixture preview refuses it) and "Choose a title".
@@ -607,11 +610,13 @@ export function CampShell({ fixture, previewAs, previewResting = false, previewA
   });
   const summaryOpen = returned.summary !== null;
   function closeAwaySummary(action: AwaySummaryAction) {
-    const mark = returned.summary?.seenUpToMs;
+    const mark = returned.summary?.seenUpToMs, spend = returned.summary?.pointsToSpend === true;
     returned.dismiss();
     if (action === 'acknowledge' && mark && messaging) void messaging.seeNotifications(mark).catch(() => undefined);
     if (action === 'gladiator' || action === 'schedule') {
-      if (action === 'gladiator') setGladiatorSection(0);
+      // Open My gladiator: the Overview, or (Patch 1.9.2) Worn equipment at Plan a build when the Training line says points wait.
+      if (action === 'gladiator' && spend) { setGladiatorSection(PLAN_SECTION); setPlanRequested(true); }
+      else if (action === 'gladiator') setGladiatorSection(0);
       show(action);
     } else if (action === 'messages' || action === 'results') {
       send('escape');
@@ -730,6 +735,7 @@ export function CampShell({ fixture, previewAs, previewResting = false, previewA
         clock={clock} gateway={gateway} fixture={fixture} previewAs={previewAs} previewFailed={previewError} refreshOwner={game.refreshOwner}
         onCreate={joining.offer} resting={game.ownResting} rules={game.rules} location={ownLocation} titles={owner ? { worn: wornTitle, status: shownTitleStatus, onOpen: openTitlePicker } : undefined}
         onPractice={viewer === 'player' && owner ? practice.open : undefined} section={gladiatorSection} onSection={setGladiatorSection}
+        planRequested={planRequested} onPlanShown={planShown}
         history={owner && reads ? { reads, nowMs, onWatch: (view, kind) => {
           // ▶ Watch in My gladiator's History: the scene's origin is the owner's own History, and Back comes back to this section.
           historyNames.current.set(owner.gladiatorId, owner.name);

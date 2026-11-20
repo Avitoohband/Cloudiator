@@ -16,7 +16,7 @@
 // under the menu's title moves between them, and the bottom bar too where a section has no paged list of its own. The shell keeps the
 // section (`section`, `onSection`), so the menu reopens on the last section seen in this visit. Every section stays mounted while another
 // shows, so a draft build or an open picker is kept; only History reads when it is first shown.
-import { useEffect, useId, useMemo, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import type { HistoryKind, OwnerState } from '@contracts/reads';
 import { RULES_V2 } from '@domain/rules-v2';
 import type { Rules } from '@domain/types';
@@ -25,12 +25,14 @@ import type { SessionState } from '../../lib/api/session';
 import type { DisplayClock } from '../../game/display-clock';
 import { SignIn } from '../auth/SignIn';
 import { BuildPanel } from '../build/BuildPanel';
+import { pointsToSpend } from '../build/fixed-build';
 import { useClockMode } from '../../lib/clock-setting';
 import { RestGainText } from '../schedule/RestGainText';
 import { restingGain, restingGainText } from '../schedule/rest-stamina';
 import { slotTimeText } from '../schedule/slot-time';
 import { TitleButton } from '../titles/TitlePicker';
 import { PanelFooter } from '../paging/PanelFooter';
+import { scroller } from '../paging/scroller';
 import { SectionPager, SectionStrip, type Section } from '../paging/SectionPager';
 import { useSectionChange } from '../shell/section-change';
 import type { SceneView } from '../shell/scene-url';
@@ -57,6 +59,8 @@ export const GLADIATOR_SECTIONS: readonly Section[] = [
   { id: 'worn', name: 'Worn equipment' }, { id: 'history', name: 'History' },
 ];
 const HISTORY = GLADIATOR_SECTIONS.length - 1;
+/** The Worn equipment section, which holds the build planner (Plan a build) under the slots: where Spend points goes (Patch 1.9.2). */
+export const PLAN_SECTION = GLADIATOR_SECTIONS.findIndex(entry => entry.id === 'worn');
 
 /** The History section's reads and actions: the shell's history reads, its minute clock, and ▶ Watch (the scene and the chip it came from). */
 export type OwnHistory = { reads: HistoryReads; nowMs: number | null; onWatch(view: Exclude<SceneView, { kind: 'bout' }>, kind: HistoryKind): void };
@@ -107,14 +111,15 @@ function XpBar({ owner, rules, nowMs, location }: { owner: OwnerState; rules: Ru
 /**
  * Attributes (the build's points and the class's bonus) beside Stats (what a fight uses), each label with its help (Patch 1.9 Task 10).
  * Under them, Patch 1.9 Task 18: ⚔ Practice fight, which tests this build against a training dummy (only for a build the rules can fight).
+ * Patch 1.9.2: under the attributes, "N points to spend" with Spend points ›, while points wait (`toSpend`) and the planner can take them.
  */
-function BuildFacts({ owner, hints, onPractice }: { owner: OwnerState; hints: Hints; onPractice?: () => void }) {
+function BuildFacts({ owner, hints, onPractice, toSpend, onSpend }: { owner: OwnerState; hints: Hints; onPractice?: () => void; toSpend: number; onSpend?: () => void }) {
   const build = ownBuild(owner);
   const classId = owner.currentBuild.classId;
   const stats = cardStats(classId, build);
   // Patch 1.9 Task 13: what Damage and Armor are in each context, in the tooltip (only where they differ).
   const contexts = stats ? contextLines(stats) : {};
-  const practiceId = useId();
+  const practiceId = useId(), spendId = useId();
   return <>
     <div className={styles.facts}>
       <section aria-label="Attributes">
@@ -126,6 +131,11 @@ function BuildFacts({ owner, hints, onPractice }: { owner: OwnerState; hints: Hi
             <span className={styles.factValue}>{row.points}{row.bonus && <span className={styles.bonus}> {row.bonus}</span>}</span>
           </li>)}
         </ul>
+        {/* The line describes the button, so a screen reader hears how many points wait with it. */}
+        {onSpend && toSpend > 0 && <div className={styles.spend}>
+          <p id={spendId} data-testid="points-to-spend"><strong>{toSpend}</strong> {toSpend === 1 ? 'point' : 'points'} to spend</p>
+          <button type="button" className={styles.spendButton} aria-describedby={spendId} onClick={onSpend}>Spend points <span aria-hidden="true">›</span></button>
+        </div>}
       </section>
       {stats && <section aria-label="Stats">
         <h3 className={styles.factsHead}>Stats</h3>
@@ -152,7 +162,7 @@ function SectionBox({ id, at, children }: { id: string; at: string; children: Re
 }
 
 function OwnerSections({ owner, slotIndex, clock, fixture, stale, resting, onRetry, titles, picking, setPicking, rules, location, hints, onPractice, gateway,
-  refreshOwner, section, onSection, history }: {
+  refreshOwner, section, onSection, history, planRequested, onPlanShown }: {
   owner: OwnerState; slotIndex: number | null; clock: DisplayClock; fixture: boolean; stale: boolean; resting: boolean; onRetry(): void;
   titles?: TitleControls;
   rules: Rules;
@@ -170,6 +180,9 @@ function OwnerSections({ owner, slotIndex, clock, fixture, stale, resting, onRet
   section: number;
   onSection(index: number): void;
   history?: OwnHistory;
+  /** The shell asks to show Plan a build (`CharacterPanel`'s `planRequested`), and hears when it is shown. */
+  planRequested: boolean;
+  onPlanShown?(): void;
 }) {
   const now = useNow(clock);
   const clockMode = useClockMode();
@@ -179,6 +192,26 @@ function OwnerSections({ owner, slotIndex, clock, fixture, stale, resting, onRet
   const index = GLADIATOR_SECTIONS.findIndex(entry => entry.id === at);
   const holder = useRef<HTMLDivElement>(null);
   useSectionChange(index, holder);
+  /**
+   * Patch 1.9.2: Spend points (`ask`, this panel's own button) or the shell (`planRequested`, the away summary's Open My gladiator, which may
+   * mount this panel as it opens the menu) shows Plan a build: Worn equipment, scrolled so the planner's heading is at the top of the part of
+   * the menu that scrolls, and the heading takes the focus (as a heading a menu opens on does), so Tab goes on into the form. It runs after
+   * the section change's scroll to the top. In the fixture preview, which has no planner, its notice is shown. The focus stays where it is
+   * when the heading cannot take it (a phone's open picker sheet covers the planner).
+   */
+  const [ask, setAsk] = useState(0);
+  const asked = useRef(ask);
+  useLayoutEffect(() => {
+    if ((asked.current === ask && !planRequested) || at !== 'worn') return;
+    asked.current = ask;
+    if (planRequested) onPlanShown?.();
+    const planner = holder.current?.querySelector<HTMLElement>('[data-section="worn"] [data-planner]');
+    if (!planner) return;
+    const heading = planner.querySelector<HTMLElement>('[data-plan-heading]'), target = heading ?? planner, body = scroller(target);
+    if (body) body.scrollTop += target.getBoundingClientRect().top - body.getBoundingClientRect().top - 8;
+    if (heading && !heading.closest('[inert]')) heading.focus({ preventScroll: true });
+  }, [ask, planRequested, onPlanShown, at]);
+  const spend = () => { onSection(PLAN_SECTION); setAsk(n => n + 1); };
   /**
    * Patch 1.9.2: the build planner is inert only while a phone's picker sheet covers it (and hides it). On the desktop the popover lies over
    * its top only, and the planner below looks normal, so it stays usable: a click or the focus there closes the popover (`WornEquipment`).
@@ -250,12 +283,12 @@ function OwnerSections({ owner, slotIndex, clock, fixture, stale, resting, onRet
         <XpBar owner={owner} rules={rules} nowMs={now} location={location} />
       </SectionBox>
       <SectionBox id="attributes" at={at}>
-        <BuildFacts owner={owner} hints={hints} onPractice={onPractice} />
+        <BuildFacts owner={owner} hints={hints} onPractice={onPractice} toSpend={pointsToSpend(owner)} onSpend={fixture ? undefined : spend} />
       </SectionBox>
       <SectionBox id="worn" at={at}>
         <WornEquipment key={`worn-${owner.gladiatorId}`} owner={owner} gateway={gateway} refresh={refreshOwner} clock={clock} preview={fixture} onPicking={setPicking}
           loadHelp={{ row: hints.hintRow('Load'), label: hints.hintLabel('Load', loadHelp, statNumbers.Load), className: styles.loadRow }} />
-        <div className={styles.planner} data-covered={plannerCovered || undefined} inert={plannerCovered}>
+        <div className={styles.planner} data-planner="" data-covered={plannerCovered || undefined} inert={plannerCovered}>
           {fixture ? <p className="panel-notice">This preview cannot change the build.</p>
             : <BuildPanel key={owner.gladiatorId} owner={owner} gateway={gateway} refresh={refreshOwner} clock={clock} />}
         </div>
@@ -275,7 +308,7 @@ function OwnerSections({ owner, slotIndex, clock, fixture, stale, resting, onRet
 }
 
 export function CharacterPanel({ viewer, session, owner, ownerError, slotIndex, clock, gateway, fixture, previewAs, previewFailed, refreshOwner, onCreate,
-  resting = false, titles, rules = RULES_V2, location = null, onPractice, section, onSection, history }: {
+  resting = false, titles, rules = RULES_V2, location = null, onPractice, section, onSection, history, planRequested = false, onPlanShown }: {
   viewer: Viewer;
   session: SessionState;
   owner: OwnerState | null;
@@ -306,6 +339,12 @@ export function CharacterPanel({ viewer, session, owner, ownerError, slotIndex, 
   onSection?(index: number): void;
   /** The History section's reads (the shell's); without them the section says the history is loading. */
   history?: OwnHistory;
+  /**
+   * The shell asks to show Plan a build (Patch 1.9.2: the away summary's Open My gladiator when Training left points to spend), with `section`
+   * at `PLAN_SECTION`: the planner's heading is scrolled into view and takes the focus, then `onPlanShown` says so (the shell drops the ask).
+   */
+  planRequested?: boolean;
+  onPlanShown?(): void;
 }) {
   const retry = () => { void refreshOwner().catch(() => undefined); };
   // Patch 1.9: a Worn equipment slot opens the equip picker. On a phone the picker is a sheet over the panel body, and what it covers is hidden
@@ -317,7 +356,8 @@ export function CharacterPanel({ viewer, session, owner, ownerError, slotIndex, 
   if (owner) {
     return <OwnerSections owner={owner} slotIndex={slotIndex} clock={clock} fixture={fixture} stale={ownerError !== null} resting={resting} onRetry={retry}
       titles={titles} picking={picking} setPicking={setPicking} rules={rules} location={location} hints={hints} onPractice={onPractice} gateway={gateway}
-      refreshOwner={refreshOwner} section={section ?? ownSection} onSection={onSection ?? setOwnSection} history={history} />;
+      refreshOwner={refreshOwner} section={section ?? ownSection} onSection={onSection ?? setOwnSection} history={history}
+      planRequested={planRequested} onPlanShown={onPlanShown} />;
   }
   let joining: ReactNode;
   if (fixture) {

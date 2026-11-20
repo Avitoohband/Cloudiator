@@ -4,8 +4,9 @@
 // below the current build's. Only a build queued before the release can differ (a class change or a respec); its old change is
 // dropped the next time the player changes the build or the gear. The Build form and the gear view both use it.
 import type { Attributes, ClassId } from '@contracts/commands';
-import type { BuildView } from '@contracts/reads';
+import type { BuildView, OwnerState } from '@contracts/reads';
 import type { BuildInput } from '@domain/types';
+import { pointsLeft } from '../character/creation-points';
 
 const ATTRIBUTES = ['strength', 'agility', 'vitality', 'endurance', 'precision'] as const;
 
@@ -31,4 +32,15 @@ export const fixedKey = (current: BuildView): string => JSON.stringify([current.
 export function refloored(draft: BuildInput, current: BuildView): BuildInput {
   const { classId, allocations } = fixedClassAndPoints({ ...current, allocations: draft.allocation }, current);
   return { ...draft, classId, allocation: allocations };
+}
+
+/**
+ * The points a player has to spend (Patch 1.9.2, "N points to spend" in My gladiator's Attributes and stats): what the build planner opens
+ * with as left, the points earned less those its draft holds (the pending build's, else the current build's, at the fixed floor). A pending
+ * build that spends them leaves none, though the server's unspent count only follows at the boundary that applies it.
+ */
+export function pointsToSpend(owner: { currentBuild: BuildView; pendingBuild: Pick<NonNullable<OwnerState['pendingBuild']>, 'build'> | null;
+  progression: Pick<OwnerState['progression'], 'earnedAttributePoints'> }): number {
+  const { allocations } = fixedClassAndPoints(owner.pendingBuild?.build ?? owner.currentBuild, owner.currentBuild);
+  return pointsLeft(allocations, owner.progression.earnedAttributePoints);
 }

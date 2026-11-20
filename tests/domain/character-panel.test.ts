@@ -229,6 +229,43 @@ describe('My gladiator', () => {
     });
   });
 
+  // Patch 1.9.2 (Avi, 2026-11-20): points are spent at the foot of Worn equipment, and nothing said so where the attributes are. Attributes and
+  // stats now says how many points wait, with Spend points ›, which opens Worn equipment at Plan a build (the browser spec checks the move).
+  describe('points to spend', () => {
+    const nowMs = SLOT * SLOT_MS + 40 * 60_000;
+    /** The Attributes and stats section of a player's panel (the fixture preview with `fixture`) whose gladiator earned `earned` points. */
+    const attributes = (earned: number, change: (owner: OwnerState) => void = () => {}, fixture = false) => {
+      const owner = structuredClone(ownerFixture); // 10 points spent
+      owner.progression = { ...owner.progression, earnedAttributePoints: earned, unspentAttributePoints: Math.max(0, earned - 10) };
+      change(owner);
+      const html = panel(owner, nowMs, SLOT, false, fixture);
+      return html.slice(html.indexOf('data-section="attributes"'), html.indexOf('data-section="worn"'));
+    };
+    const spend = /<button[^>]*type="button"[^>]*>Spend points <span aria-hidden="true">›<\/span><\/button>/;
+
+    it('says how many points wait, with Spend points ›', () => {
+      const html = attributes(58);
+      expect(text(html)).toContain('48 points to spend Spend points ›');
+      expect(html).toMatch(spend);
+      // The line describes the button, so a screen reader hears how many with it.
+      const line = /<p[^>]*id="([^"]+)"[^>]*data-testid="points-to-spend"/.exec(html);
+      expect(line).not.toBeNull();
+      expect(html).toContain(`aria-describedby="${line![1]}"`);
+      expect(text(attributes(11))).toContain('1 point to spend Spend points ›');
+    });
+
+    it('says nothing with no points left, in the fixture preview, or when a pending build spends them', () => {
+      expect(text(attributes(10))).not.toContain('to spend');
+      expect(attributes(10)).not.toMatch(spend);
+      expect(text(attributes(58, () => {}, true))).not.toContain('to spend');
+      const spent = attributes(13, owner => {
+        owner.pendingBuild = { build: { ...owner.currentBuild, version: 2, allocations: { ...owner.currentBuild.allocations, vitality: owner.currentBuild.allocations.vitality + 3 } },
+          effectiveSlotIndex: SLOT + 1, reservedMoney: 0, reservedItemIds: [], operationId: 'pending-op' };
+      });
+      expect(text(spent)).not.toContain('to spend');
+    });
+  });
+
   // Fix round 1 (review Minor 1): resting in the world before the presence is answered.
   it('shows "Resting at home." while its gladiator rests and its return is not known yet', () => {
     const owner: OwnerState = { ...structuredClone(ownerFixture), currentActivity: null, processedSlotIndex: SLOT, restingUntilSlot: null };

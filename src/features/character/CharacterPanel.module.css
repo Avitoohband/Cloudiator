@@ -430,6 +430,48 @@
   font-weight: 700;
 }
 
+/* Patch 1.9.2: under the attributes while points wait, "N points to spend" and Spend points ›, which opens Plan a build (the gold look of
+   the bottom bar's Next, `paging.module.css`). The button wraps under the line when the row is too narrow. */
+.spend {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px 10px;
+  margin-top: 8px;
+}
+
+.spend p {
+  margin: 0;
+  color: var(--gold);
+  font-size: 0.88rem;
+}
+
+.spendButton {
+  flex: none;
+  min-height: 32px;
+  padding: 0 12px;
+  font: 600 13px system-ui, sans-serif;
+  color: var(--gold);
+  white-space: nowrap;
+  background: rgba(230, 180, 80, 0.16);
+  border: 1px solid rgba(230, 180, 80, 0.55);
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.spendButton:focus-visible {
+  outline: 2px solid var(--gold);
+  outline-offset: 2px;
+}
+
+@media (hover: none), (max-width: 480px) {
+  .spendButton {
+    min-height: 44px;
+    font-size: 14px;
+  }
+}
+
 .bar {
   appearance: none;
   width: 100%;

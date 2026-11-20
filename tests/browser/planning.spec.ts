@@ -10,7 +10,7 @@ import { SLOT_MS, emptyWorld, isPresence, routeLiveReads } from './live-routes';
 import { reviewShot, reviewShot360 } from './review-shots';
 import { openMenu } from './shell-helpers';
 // Patch 1.9 Task 33: the build planner is in My gladiator's Worn equipment section, under the slots.
-import { openSection } from './section-helpers';
+import { openSection, shownSection } from './section-helpers';
 import { expectTimeOnOneLine, slotTime, storeClock } from './slot-time';
 import { contrastIssues, expectPointsFit, focusDrops, focusedElement, noHorizontalScroll, watchFocus } from './a11y-helpers';
 
@@ -1758,4 +1758,72 @@ test.describe('the running part of the day', () => {
     await reviewShot360(page, testInfo, 'planning-schedule-saved-running', saved);
     expect(flow.commands).toHaveLength(1);
   });
+});
+
+// ---- Patch 1.9.2: Spend points (Avi, 2026-11-20, "Hotfix 1.9.2 + shortcut") -------------------------------------------------------
+// Points are spent in Plan a build, at the foot of Worn equipment, and Attributes and stats said nothing of them (logs/p191-attr-check-20261120).
+// Now it says how many wait, with Spend points ›, which opens Worn equipment at Plan a build: the heading at the top of the menu, with the focus.
+
+/** A level-12 Berserker as production has them: 58 points earned, 10 spent, 48 waiting. */
+const waiting = (state: OwnerState) => {
+  state.currentBuild = { ...state.currentBuild, classId: 'berserker', allocations: { strength: 5, agility: 1, vitality: 2, endurance: 1, precision: 1 } };
+  state.progression = { ...state.progression, level: 12, earnedAttributePoints: 58, unspentAttributePoints: 48 };
+};
+const hotfixShots = process.env.HOTFIX_SHOTS;
+
+test('Attributes and stats says the points waiting; Spend points › opens Worn equipment at Plan a build, which takes the focus (1.9.2)', async ({ page, context }, testInfo) => {
+  const phone = testInfo.project.name === 'mobile';
+  await page.setViewportSize(phone ? { width: 360, height: 780 } : { width: 1280, height: 720 });
+  const flow = await planningFlow(context, waiting);
+  await page.goto('/game/');
+  const menu = await openSection(await openMenu(page, 'My gladiator'), 'Attributes and stats');
+  const spend = menu.getByRole('button', { name: 'Spend points', exact: true });
+  await expect(menu.getByTestId('points-to-spend')).toHaveText('48 points to spend');
+  await expect(spend).toHaveText('Spend points ›');
+  await expect(spend).toHaveAccessibleDescription('48 points to spend');
+  await expect(spend).toBeInViewport();
+  // A phone's 44 px target; nothing clipped or sideways at 360 px.
+  if (phone) expect((await spend.boundingBox())!.height).toBeGreaterThanOrEqual(44);
+  expect(await noHorizontalScroll(page)).toBe(true);
+  expect(await contrastIssues(menu.getByTestId('points-to-spend').locator('..'))).toEqual([]);
+  if (hotfixShots) await page.screenshot({ path: `${hotfixShots}/${phone ? 'phone-360x780' : 'desktop-1280x720'}-attributes-points-to-spend.png` });
+  await spend.click();
+  await expect(shownSection(menu)).toHaveText('Worn equipment');
+  const heading = menu.getByRole('heading', { name: 'Plan a build', exact: true });
+  await expect(heading).toBeFocused();
+  // The heading sits at the top of the part of the menu that scrolls, in view; the points under it.
+  const body = (await menu.getByTestId('menu-body').boundingBox())!, top = (await heading.boundingBox())!;
+  expect(top.y).toBeGreaterThanOrEqual(body.y - 1);
+  expect(top.y).toBeLessThan(body.y + 40);
+  await expect(menu.locator('.build-counter')).toHaveText('48 of 58 left');
+  if (hotfixShots) await page.screenshot({ path: `${hotfixShots}/${phone ? 'phone-360x780' : 'desktop-1280x720'}-spend-points-plan-a-build.png` });
+  // Tab goes on into the form (the stance), as from any heading.
+  await page.keyboard.press('Tab');
+  await expect(page.getByLabel('Stance', { exact: true })).toBeFocused();
+  // Spending them all (Suggested, Queue build) leaves none to spend: the line goes, though the server's count waits for the boundary.
+  await menu.getByRole('button', { name: 'Suggested for Berserker', exact: true }).click();
+  await menu.getByRole('button', { name: 'Queue build', exact: true }).click();
+  await expect(menu.getByRole('heading', { name: 'Pending build', exact: true })).toBeVisible();
+  expect(flow.commands).toEqual([expect.objectContaining({ kind: 'queue-build' })]);
+  await openSection(menu, 'Attributes and stats');
+  await expect(menu.getByTestId('points-to-spend')).toHaveCount(0);
+  await expect(menu.getByRole('button', { name: 'Spend points', exact: true })).toHaveCount(0);
+});
+
+test('Spend points by keyboard: Enter opens Plan a build and its heading shows the keyboard focus (1.9.2)', async ({ page, context }) => {
+  await planningFlow(context, state => { waiting(state); state.progression.earnedAttributePoints = 11; state.progression.unspentAttributePoints = 1; });
+  await page.goto('/game/');
+  const menu = await openSection(await openMenu(page, 'My gladiator'), 'Attributes and stats');
+  await expect(menu.getByTestId('points-to-spend')).toHaveText('1 point to spend');
+  const spend = menu.getByRole('button', { name: 'Spend points', exact: true });
+  // The keyboard's own focus on it (away and back by keyboard), then Enter.
+  await spend.focus();
+  await page.keyboard.press('Shift+Tab');
+  await page.keyboard.press('Tab');
+  await expect(spend).toBeFocused();
+  await page.keyboard.press('Enter');
+  const heading = menu.getByRole('heading', { name: 'Plan a build', exact: true });
+  await expect(heading).toBeFocused();
+  expect(await heading.evaluate(element => element.matches(':focus-visible'))).toBe(true);
+  await expect(menu.locator('.build-counter')).toHaveText('1 of 11 left');
 });

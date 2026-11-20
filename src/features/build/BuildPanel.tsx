@@ -175,7 +175,8 @@ export function BuildPanel({ owner, gateway, refresh, clock }: { owner: OwnerSta
       </section>}
     </div>
     <form onSubmit={submit}>
-      <h3>{owner.pendingBuild ? 'Revise pending build' : 'Plan a build'}</h3>
+      {/* Patch 1.9.2: Spend points (My gladiator's Attributes and stats, the away summary) brings this heading into view and gives it the focus. */}
+      <h3 data-plan-heading="" tabIndex={-1}>{owner.pendingBuild ? 'Revise pending build' : 'Plan a build'}</h3>
       <fieldset disabled={busy}><legend>Class and stance</legend>
         <div className="build-class"><p>Class: {title(draft.classId)}</p><ClassChips classId={draft.classId} /></div>
         <label htmlFor="build-stance">Stance</label><select id="build-stance" value={draft.stance} onChange={e => update({ ...draft, stance: e.target.value as Stance })}>{Object.keys(RULES_V1.stances).map(value => <option key={value}>{value}</option>)}</select>

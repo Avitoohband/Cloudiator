@@ -11,9 +11,12 @@
 // sent always agree (the AGENTS.md detail-card rule). The pointer never takes a keyboard action away: while Wear has the focus, hovering
 // changes nothing; leaving a tile brings back the chosen tile's card.
 // Desktop: a popover laid over the panel under the slot row (nothing below it moves), with a caret at the slot, the grid on the left and
-// the card with Wear on the right (two columns from 560 px); what follows it ("At the next slot", the outcome, Retry and the panel's build
-// planner) is inert while it is open, so Tab from Wear never lands under it. Touch (the shell's compact query): a sheet over the panel body
-// with Back and a Wear bar at its foot; what it covers is hidden. A keyboard command whose control leaves (Retry, Cancel changes) gives the focus to its
+// the card with Wear on the right (two columns from 560 px); what follows it in this section ("At the next slot", the outcome, Retry) is
+// inert while it is open, so Tab from Wear never lands under it. Patch 1.9.2: a click or the focus outside the popover (and outside the slot
+// row and the Load heading above it) closes it, leaving the focus where the player put it; so Tab from Wear goes on to the panel's build
+// planner, which stays usable (on 1.9 and 1.9.1 it was inert and dead while it looked normal). ✕, Back and Escape still close it and give
+// the focus back to the slot. Touch (the shell's compact query): a sheet over the panel body with Back and a Wear bar at its foot; what it
+// covers is hidden. A keyboard command whose control leaves (Retry, Cancel changes) gives the focus to its
 // outcome line (`useOutcomeFocus`, as the Inventory does); Wear, Undo and Remove give it back to the slot.
 import { useEffect, useId, useLayoutEffect, useRef, useState, type FocusEvent, type KeyboardEvent, type PointerEvent, type ReactNode } from 'react';
 import type { EquipmentSlot } from '@contracts/commands';
@@ -37,6 +40,7 @@ import {
   SLOT_NAMES, compareChoice, equipmentLoad, isTwoHanded, itemLabel, itemName, lockText, nextBuildDiffers, nextLabel, slotTiles, statText, tileMark,
 } from './equip-picker';
 import type { HintRowProps } from './stat-hints';
+import { useCompactLayout } from './useCompactLayout';
 import styles from './WornEquipment.module.css';
 
 /** The Remove tile's key (a tile's key is otherwise its first piece's id). */
@@ -76,6 +80,9 @@ export function WornEquipment({ owner, gateway, refresh, clock, preview = false,
   const pieceOf = (id: string | null) => (id === null ? undefined : inventory.find(item => item.id === id));
   const headingId = useId(), pendingId = useId(), pickerId = useId(), blockedId = useId(), previewId = useId();
   const detail = useRef<HTMLDivElement>(null), picker = useRef<HTMLDivElement>(null);
+  /** What counts as the popover's own on the desktop (Patch 1.9.2): the popover, the slot row that opens and switches it, the Load heading. */
+  const frame = useRef<HTMLDivElement>(null), slotRow = useRef<HTMLDivElement>(null), heading = useRef<HTMLDivElement>(null);
+  const compact = useCompactLayout();
   const triggers = useRef<Partial<Record<EquipmentSlot, HTMLButtonElement | null>>>({});
   const [inspected, setInspected] = useState<EquipmentSlot>();
   const [open, setOpen] = useState<EquipmentSlot | null>(null);
@@ -150,6 +157,23 @@ export function WornEquipment({ owner, gateway, refresh, clock, preview = false,
     const below = box.bottom - view.bottom + 8, room = box.top - view.top - 8;
     if (below > 0 && room > 0) scroller.scrollTop += Math.min(below, room);
   }, [open, chosen]);
+  // Patch 1.9.2: the desktop popover closes when a press or the focus lands outside it (and outside the slot row and the Load heading, which
+  // are its own: a slot opens, switches or closes it, and Load's help opens beside it). The focus stays where the player put it (the +1 they
+  // pressed, the control Tab reached). A phone's sheet covers the panel body; it closes with Back or Escape only, as before.
+  useEffect(() => {
+    if (open === null || compact) return;
+    const away = (event: Event) => {
+      const target = event.target;
+      if (target instanceof Node && [frame.current, slotRow.current, heading.current].some(own => own?.contains(target))) return;
+      setOpen(null); setChosen(null); setStop(null); setPeek(null);
+    };
+    document.addEventListener('pointerdown', away, true);
+    document.addEventListener('focusin', away, true);
+    return () => {
+      document.removeEventListener('pointerdown', away, true);
+      document.removeEventListener('focusin', away, true);
+    };
+  }, [open, compact]);
 
   /** Sends a gear command as the Inventory does: an identical retry keeps its operation id; a refusal reloads what it must. */
   async function send(intent: GearCommand, done: string) {
@@ -291,7 +315,7 @@ export function WornEquipment({ owner, gateway, refresh, clock, preview = false,
       action = <button type="button" className={styles.wear} disabled={preview || chosenBlocked !== null} {...busyProps} aria-describedby={describedBy}
         aria-label={`Wear ${itemLabel(chosenItem)}${chosenCount > 1 ? ` (one of ${chosenCount})` : ''}`} onClick={() => wear(tile)}>Wear {itemName(chosenItem)}</button>;
     }
-    return <div className={styles.frame}>
+    return <div ref={frame} className={styles.frame}>
       {/* The arrow keys inside the picker are its own (its grid moves with them): they never move My gladiator's section (Task 33). */}
       <div ref={picker} id={pickerId} className={styles.picker} role="dialog" aria-label={`Change ${name}`} tabIndex={-1} data-arrow-keys="">
         <div className={styles.head}>
@@ -370,11 +394,11 @@ export function WornEquipment({ owner, gateway, refresh, clock, preview = false,
       event.preventDefault();
       closePicker(open);
     }}>
-    <div className={inspection.heading}>
+    <div ref={heading} className={inspection.heading}>
       <h3 id={headingId}>Worn equipment</h3>
       {load && <p className={[load.load > load.capacity ? styles.over : '', loadHelp?.className ?? ''].join(' ').trim() || undefined} {...loadHelp?.row}>{loadHelp?.label ?? 'Load'} <strong>{statText(load.load)} / {statText(load.capacity)}</strong>{loadIsNext ? ' (next slot)' : ''}</p>}
     </div>
-    <div className={inspection.slots} data-slot-row="">
+    <div ref={slotRow} className={inspection.slots} data-slot-row="">
       {equipmentSlots.map(slot => {
         const item = pieceOf(worn[slot]), then = pieceOf(next[slot]), changing = worn[slot] !== next[slot];
         const name = item ? itemName(item) : worn[slot] ? 'Unavailable' : 'Empty';

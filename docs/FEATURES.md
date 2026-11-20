@@ -121,6 +121,7 @@ them, don't promise them on an end card, and expect details to change). Avi's vi
 | Points that stay | A build has no minus: points that took effect are permanent, and a gray Respec button says a paid respec comes later. | 1.3.1 | Live | Plan a build (test player) | — |
 | Class bonuses | My gladiator shows your class's bonuses and its suggested split of every 10 points. | 1.4 | Live | Fixture camp → My gladiator (Aster is a Guardian) | — |
 | Suggested build | "Suggested for Guardian" (or your class) spends the points left your class's way, with Undo. | 1.4 | Live | My gladiator → Plan a build with points left (test player) | — |
+| Points with a gear list open | On a computer, the build planner under Worn equipment works while a slot's list of gear is open: +1, +5 and Queue build respond, and a click or Tab outside the list closes it (on 1.9 and 1.9.1 the planner did nothing then). | 1.9.2 | Built | Test player with points to spend → My gladiator → Worn equipment → the Weapon slot → +1 Strength → Queue build | — |
 
 ### Schedule and stamina
 

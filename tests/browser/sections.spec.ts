@@ -245,7 +245,8 @@ test.describe('named sections and paged grids (fixture preview)', () => {
 
   // Final review I1: Notifications' "Choose a title" moves My gladiator to the Overview while a Worn equipment picker is still open in the hidden
   // Worn section. Only the Worn section's own picker locks the section navigation, so the strip, ← → and the bottom bar move the section again,
-  // and the picker is still open when the player comes back to Worn equipment.
+  // and the picker is still open when the player comes back to Worn equipment. Patch 1.9.2: a desktop popover closes on a click outside it, so
+  // there the click on Messages closes it, and Worn equipment comes back with no picker and its navigation free; a phone's sheet stays open.
   test('a Worn equipment picker left open under "Choose a title" from Notifications does not lock the sections elsewhere', async ({ page }, info) => {
     const phone = info.project.name === 'mobile';
     if (phone) await page.setViewportSize({ width: 360, height: 780 });
@@ -272,11 +273,16 @@ test.describe('named sections and paged grids (fixture preview)', () => {
     await expect(shownSection(menu)).toHaveText('Attributes and stats');
     await sectionBar(menu).getByRole('button', { name: 'Previous section: Level and stamina', exact: true }).click();
     await expect(shownSection(menu)).toHaveText('Level and stamina');
-    // Back on Worn equipment the picker is still open, and the section navigation waits for it again.
+    // Back on Worn equipment a phone's picker is still open, and the section navigation waits for it again; the desktop's closed on the click.
     await circles(menu).nth(3).click();
     await expect(shownSection(menu)).toHaveText('Worn equipment');
-    await expect(feet).toBeVisible();
-    await expect(sectionStrip(menu).locator('xpath=..')).toHaveAttribute('inert', '');
+    if (phone) {
+      await expect(feet).toBeVisible();
+      await expect(sectionStrip(menu).locator('xpath=..')).toHaveAttribute('inert', '');
+    } else {
+      await expect(feet).toHaveCount(0);
+      await expect(sectionStrip(menu).locator('xpath=..')).not.toHaveAttribute('inert', /.*/);
+    }
   });
 
   test('the Shops section: the shop grid pages whole rows, a currency goes back to page 1, and the arrow keys stay in the grid', async ({ page }, info) => {

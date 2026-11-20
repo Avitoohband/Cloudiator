@@ -370,8 +370,11 @@ test.describe('equip from My gladiator (live)', () => {
     await page.goto('/game/');
     const menu = await openMenuSection(page, 'My gladiator', 'Worn equipment');
     const weapon = slotButton(menu, 'Weapon'), worn = wornRegion(menu), dialog = picker(menu, 'Weapon');
-    /** Puts the keyboard focus on `button` the way the Inventory's spec does (Tab away and back), so its press is a keyboard one. */
-    const reach = async (button: Locator) => { await button.focus(); await page.keyboard.press('Tab'); await page.keyboard.press('Shift+Tab'); await expect(button).toBeFocused(); };
+    /**
+     * Puts the keyboard focus on `button` the way the Inventory's spec does (away and back by keyboard), so its press is a keyboard one. Back
+     * then forward (Patch 1.9.2): Tab from the picker's last control leaves the desktop popover, which closes it.
+     */
+    const reach = async (button: Locator) => { await button.focus(); await page.keyboard.press('Shift+Tab'); await page.keyboard.press('Tab'); await expect(button).toBeFocused(); };
     await weapon.click();
     await pick(dialog, spare1).click();
     await wearButton(dialog).click();
@@ -422,7 +425,10 @@ test.describe('equip from My gladiator (live)', () => {
   test('an open picker leaves nothing it covers reachable: Tab from Wear never lands under it, and closing it restores the Tab order', async ({ page, context }, info) => {
     // Final review (Important 1): on the desktop the popover lies over "At the next slot" (Undo, Cancel changes), the outcome line, Retry
     // and the top of the build planner; Tab from Wear reached them unseen and Enter fired them blind. On a phone the sheet hides them.
-    if (info.project.name === 'mobile') await page.setViewportSize({ width: 360, height: 740 });
+    // Patch 1.9.2: on the desktop the build planner is no longer inert (it was dead while it looked normal), so Tab from Wear goes on to the
+    // planner, and the popover closes as the focus leaves it: the focus never sits under an open popover.
+    const phone = info.project.name === 'mobile';
+    if (phone) await page.setViewportSize({ width: 360, height: 740 });
     const sword = piece('sword:1:common'), spare = piece('sword:1:common'), uncommon = piece('sword:1:uncommon');
     const flow = await gearFlow(context, state => {
       state.inventory = [sword, spare, uncommon];
@@ -467,7 +473,15 @@ test.describe('equip from My gladiator (live)', () => {
     }
     expect(steps.filter(step => step.at === 'covered'), JSON.stringify(steps)).toEqual([]);
     expect(steps.filter(step => COVERED.test(step.name)), JSON.stringify(steps)).toEqual([]);
-    expect(steps.at(-1)?.at, JSON.stringify(steps)).toBe('outside');
+    if (phone) expect(steps.at(-1)?.at, JSON.stringify(steps)).toBe('outside');
+    else {
+      // The desktop: the focus went on to the build planner's first control, and the popover closed as it left, so nothing covers it.
+      expect(steps.at(-1)?.at, JSON.stringify(steps)).toBe('gone');
+      await expect(dialog).toHaveCount(0);
+      await expect(menu.locator('.planning-form').getByRole('button', { name: 'Cancel pending build', exact: true })).toBeFocused();
+      await weapon.click();
+      await pick(dialog, uncommon).click();
+    }
     // Escape closes the picker: the slot has the focus, and Tab reaches Undo and Cancel changes again. The Retry is gone: opening
     // the picker cleared the last outcome and its Retry (Task 21 item 6).
     await wearButton(dialog).focus();
@@ -735,6 +749,66 @@ test.describe('equip from My gladiator (live)', () => {
     await expect(dialog).toHaveCount(0);
     await expect(weapon).toBeFocused();
     await expect(menu.getByRole('heading', { name: 'Worn equipment', exact: true })).toBeVisible();
+  });
+
+  // Patch 1.9.2 (Avi, 2026-11-20; the diagnosis is logs/p191-attr-check-20261120/findings.md): on 1.9 and 1.9.1 a desktop player who left a
+  // slot's picker open found the build planner under it dead. It was inert, as under a phone's sheet, while it looked normal: +1 and Queue
+  // build did nothing and sent nothing. The desktop popover now closes when the player clicks or moves the focus outside it, and the planner
+  // under it works with the first click; the focus stays where the player put it. A phone's sheet still covers the planner until Back.
+  test('with the Weapon picker open, +1 Strength works on a desktop (the picker closes) and Queue build sends; a phone\'s sheet covers the planner until Back (1.9.2)', async ({ page, context, hasTouch }, info) => {
+    const phone = info.project.name === 'mobile';
+    await page.setViewportSize(phone ? { width: 360, height: 780 } : { width: 1280, height: 720 });
+    // A level-12 Berserker as production has them: 58 points earned, 10 spent, 48 waiting, the starter sword and armor worn.
+    const sword = piece('sword:1:common'), spare = piece('sword:1:uncommon'), armor = piece('light-armor:1:common');
+    const flow = await gearFlow(context, state => {
+      state.inventory = [sword, spare, armor];
+      state.currentBuild = { ...state.currentBuild, classId: 'berserker', allocations: { strength: 5, agility: 1, vitality: 2, endurance: 1, precision: 1 },
+        equipment: { weapon: sword.id, offHand: null, head: null, body: armor.id, feet: null } };
+      state.progression = { ...state.progression, level: 12, earnedAttributePoints: 58, unspentAttributePoints: 48 };
+    });
+    await page.goto('/game/');
+    const menu = await openMenuSection(page, 'My gladiator', 'Worn equipment');
+    const weapon = slotButton(menu, 'Weapon'), dialog = picker(menu, 'Weapon');
+    const form = menu.locator('.planning-form'), counter = form.locator('.build-counter');
+    const plusOne = form.getByRole('button', { name: 'Add a point to Strength', exact: true });
+    await expect(counter).toHaveText('48 of 58 left');
+    await weapon.click();
+    if (hasTouch) await page.mouse.move(0, 0);
+    await expect(dialog).toBeVisible();
+    if (phone) {
+      // The sheet covers the panel body: the planner is hidden and out of reach until Back, which gives the focus back to the slot. (A CSS
+      // locator: the hidden planner is out of the accessibility tree meanwhile.)
+      const covered = form.locator('button[aria-label="Add a point to Strength"]');
+      await expect(covered).toBeHidden();
+      expect(await covered.evaluate(element => !!element.closest('[inert]'))).toBe(true);
+      await dialog.getByRole('button', { name: 'Back', exact: true }).tap();
+      await expect(dialog).toHaveCount(0);
+      await expect(weapon).toBeFocused();
+      await plusOne.tap();
+    } else {
+      // The popover lies over the top of the planner; the planner below it looks normal and is not inert, so the first click counts.
+      expect(await plusOne.evaluate(element => !!element.closest('[inert]'))).toBe(false);
+      await plusOne.click();
+      await expect(dialog).toHaveCount(0);
+      // Closed by a click outside it, the picker leaves the focus where the player put it, never back on the slot.
+      await expect(plusOne).toBeFocused();
+    }
+    await expect(counter).toHaveText('47 of 58 left');
+    await form.getByRole('button', { name: 'Queue build', exact: true }).click();
+    await expect(menu.getByRole('heading', { name: 'Pending build', exact: true })).toBeVisible();
+    expect(flow.commands).toEqual([expect.objectContaining({ kind: 'queue-build', expectedVersion: 1,
+      allocation: { strength: 6, agility: 1, vitality: 2, endurance: 1, precision: 1 }, equipment: { weapon: sword.id, offHand: null, head: null, body: armor.id, feet: null } })]);
+    if (!phone) {
+      // A click inside it (a tile) leaves it open; a click on something outside that is no control (the menu's title) closes it too.
+      await weapon.click();
+      await expect(dialog).toBeVisible();
+      await pick(dialog, spare).click();
+      await expect(dialog).toBeVisible();
+      await menu.getByTestId('menu-title').click();
+      await expect(dialog).toHaveCount(0);
+      await expect(weapon).toHaveAttribute('aria-expanded', 'false');
+      expect(flow.commands).toHaveLength(1);
+    }
   });
 });
 

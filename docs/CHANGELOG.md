@@ -26,7 +26,11 @@ Project folders under `D:\Avi\Projects\Animation\Cloudiator\`.
 
 **Last video's patch: 1.6.** The 5 Nov film covers all ten 1.6 bullets. Patches 1.7, 1.7.1 and 1.8 are new since.
 
-## 1.9.1 — Section names on phones (in progress, not yet released)
+## 1.9.2 — Spending attribute points (in progress, not yet released)
+
+- On a computer, the build planner works again while a Worn equipment slot’s list is open: +1, +5 and Queue build respond, and a click or Tab outside the list closes it.
+
+## 1.9.1 — Section names on phones (2026-11-15)
 
 - The section name that shows when you touch a circle in My gladiator or Inventory and shops is no longer cut off by the top of the menu.
 

@@ -8,7 +8,7 @@
 // dialog over the camp; and the session and owner-load states. Names render as React text.
 // Patch 1.9 Task 10: the XP bar under Stamina, the Attributes and Stats blocks, and help on their labels (and on Stamina and Load).
 // Patch 1.9: Worn equipment's slots open the equip picker (`WornEquipment`); a phone's picker is a sheet over the panel body, and the
-// summary and the build planner it covers are hidden meanwhile.
+// summary and the build planner it covers are hidden meanwhile. Patch 1.9.2: on the desktop the planner stays usable under an open picker.
 // Patch 1.9 Task 18: ⚔ Practice fight under Stats opens the shell's practice dialog (a fight against a training dummy; nothing is saved).
 // Patch 1.9 Task 33 (menus with Back and Next, the approved paged-menus mockup): a player's My gladiator is five named sections, one shown at
 // a time: Overview (name, Title, class, activity, gold and renown), Level and stamina, Attributes and stats (with ⚔ Practice fight), Worn
@@ -44,6 +44,7 @@ import { useStatHints } from './stat-hints';
 import { attributeNumbers, loadHelp, staminaHelp, statNumbers } from './stat-numbers';
 import { xpView } from './xp-progress';
 import { WornEquipment } from './WornEquipment';
+import { useCompactLayout } from './useCompactLayout';
 import type { Viewer } from './useGameState';
 import styles from './CharacterPanel.module.css';
 
@@ -159,7 +160,7 @@ function OwnerSections({ owner, slotIndex, clock, fixture, stale, resting, onRet
   location: string | null;
   /** The panel's one set of help tooltips (shared with the Worn equipment's Load). */
   hints: Hints;
-  /** A Worn equipment picker is open (on a phone a sheet over the panel body): what it covers is inert. */
+  /** A Worn equipment picker is open (on a phone a sheet over the panel body, which makes what it covers inert). */
   picking: boolean;
   setPicking(open: boolean): void;
   /** Opens the practice dialog (Patch 1.9 Task 18). */
@@ -178,6 +179,13 @@ function OwnerSections({ owner, slotIndex, clock, fixture, stale, resting, onRet
   const index = GLADIATOR_SECTIONS.findIndex(entry => entry.id === at);
   const holder = useRef<HTMLDivElement>(null);
   useSectionChange(index, holder);
+  /**
+   * Patch 1.9.2: the build planner is inert only while a phone's picker sheet covers it (and hides it). On the desktop the popover lies over
+   * its top only, and the planner below looks normal, so it stays usable: a click or the focus there closes the popover (`WornEquipment`).
+   * On 1.9 and 1.9.1 it was inert there too, and +1 and Queue build did nothing while a picker was left open.
+   */
+  const compact = useCompactLayout();
+  const plannerCovered = picking && compact;
   /**
    * The section navigation waits only while the Worn equipment section shows its open picker. A picker left open there while the shell moved
    * to another section (Notifications' "Choose a title" shows the Overview) stays open, hidden, until the player comes back (final review I1).
@@ -247,7 +255,7 @@ function OwnerSections({ owner, slotIndex, clock, fixture, stale, resting, onRet
       <SectionBox id="worn" at={at}>
         <WornEquipment key={`worn-${owner.gladiatorId}`} owner={owner} gateway={gateway} refresh={refreshOwner} clock={clock} preview={fixture} onPicking={setPicking}
           loadHelp={{ row: hints.hintRow('Load'), label: hints.hintLabel('Load', loadHelp, statNumbers.Load), className: styles.loadRow }} />
-        <div className={styles.planner} data-covered={picking || undefined} inert={picking}>
+        <div className={styles.planner} data-covered={plannerCovered || undefined} inert={plannerCovered}>
           {fixture ? <p className="panel-notice">This preview cannot change the build.</p>
             : <BuildPanel key={owner.gladiatorId} owner={owner} gateway={gateway} refresh={refreshOwner} clock={clock} />}
         </div>
@@ -300,8 +308,8 @@ export function CharacterPanel({ viewer, session, owner, ownerError, slotIndex, 
   history?: OwnHistory;
 }) {
   const retry = () => { void refreshOwner().catch(() => undefined); };
-  // Patch 1.9: a Worn equipment slot opens the equip picker. The build planner is inert while it is open (the desktop popover lies over its
-  // top, so Tab from the picker must not land there); on a phone the picker is a sheet over the panel body, and what it covers is hidden.
+  // Patch 1.9: a Worn equipment slot opens the equip picker. On a phone the picker is a sheet over the panel body, and what it covers is hidden
+  // and inert. Patch 1.9.2: on the desktop the popover closes when the click or the focus goes outside it, and the build planner stays usable.
   const [picking, setPicking] = useState(false);
   // One set of help tooltips for the whole panel (the stamina, attribute and stat labels and the Worn equipment's Load): one is open at a time.
   const hints = useStatHints({ buttonClass: styles.hintButton, tipClass: styles.hint, aboveClass: styles.hintAbove, numbersClass: styles.hintNumbers });

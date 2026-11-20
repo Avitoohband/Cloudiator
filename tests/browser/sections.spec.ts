@@ -2,6 +2,8 @@ import { expect, test, type Locator, type Page } from './fixtures';
 import { noHorizontalScroll } from './a11y-helpers';
 import { closeMenu, cornerChip, openMenu, quietArrivals } from './shell-helpers';
 import { openSection, sectionBar, sectionStrip, shownSection } from './section-helpers';
+import { emptyWorld, routeLiveReads, seedSession } from './live-routes';
+import { ownerFixture } from '../fixtures/domain';
 
 // Patch 1.9 Task 33 (menus with Back and Next, the approved paged-menus mockup): My gladiator opens as five named sections and Inventory and
 // shops as two; the strip under the title is the section navigation (its name, the circles, previous and next, ← and →), and a section with
@@ -364,6 +366,58 @@ test.describe('named sections and paged grids (fixture preview)', () => {
       }
     });
   }
+});
+
+// 1.9.2 review (Minor): on a desktop the Worn equipment popover lies over the section's own content only, and a press outside it closes it, so the
+// section strip, the bottom bar and the stale notice's Retry are no longer inert while it is open: one click both closes it and acts. ← and →
+// still leave the section alone while the picker shows (above). A phone's sheet covers them and they stay inert, as before.
+test.describe('a desktop picker leaves the section navigation and Retry usable (1.9.2 review)', () => {
+  /** The Feet slot of Worn equipment (the planner's own Feet button is another). */
+  const feetSlot = (menu: Locator) => menu.getByRole('region', { name: 'Worn equipment', exact: true }).getByRole('button', { name: /^Feet:/ });
+  test.beforeEach(({}, info) => { test.skip(info.project.name === 'mobile', 'A phone’s sheet covers the strip, the bar and the notice.'); });
+
+  test('one click on the bottom bar or a strip circle closes the picker and moves the section', async ({ page }) => {
+    test.skip(production, 'The camp harness runs on the fixture preview only.');
+    await openCamp(page);
+    const menu = await openSection(await openMenu(page, 'My gladiator'), 'Worn equipment');
+    const feet = menu.getByRole('dialog', { name: 'Change Feet', exact: true });
+    await feetSlot(menu).click();
+    await expect(feet).toBeVisible();
+    await expect(sectionStrip(menu).locator('xpath=..')).not.toHaveAttribute('inert', /.*/);
+    await expect(sectionBar(menu).locator('xpath=..')).not.toHaveAttribute('inert', /.*/);
+    await sectionBar(menu).getByRole('button', { name: 'Next section: History', exact: true }).click();
+    await expect(shownSection(menu)).toHaveText('History');
+    await expect(feet).toHaveCount(0);
+    await circles(menu).nth(3).click();
+    await expect(shownSection(menu)).toHaveText('Worn equipment');
+    await feetSlot(menu).click();
+    await expect(feet).toBeVisible();
+    await circles(menu).nth(0).click();
+    await expect(shownSection(menu)).toHaveText('Overview');
+    await expect(feet).toHaveCount(0);
+  });
+
+  test('one click on the stale notice’s Retry closes the picker and reads the gladiator again', async ({ page, context }) => {
+    test.skip(production, 'Live UI uses development-only intercepted identity transport.');
+    await seedSession(context);
+    const live = await routeLiveReads(context, { world: emptyWorld(), owner: ownerFixture });
+    await page.goto('/game/');
+    const menu = await openSection(await openMenu(page, 'My gladiator'), 'Worn equipment');
+    const feet = menu.getByRole('dialog', { name: 'Change Feet', exact: true });
+    await feetSlot(menu).click();
+    await expect(feet).toBeVisible();
+    // A refresh that fails (a tab return reads the owner 2 s or more after the last read) keeps the last gladiator and says so.
+    const stale = menu.getByRole('status').filter({ hasText: 'could not be refreshed' });
+    live.fail('owner_state');
+    await page.waitForTimeout(2_100);
+    await page.evaluate(() => window.dispatchEvent(new Event('focus')));
+    await expect(stale).toBeVisible();
+    await expect(feet).toBeVisible();
+    live.fail('owner_state', false);
+    await menu.getByRole('button', { name: 'Retry', exact: true }).click();
+    await expect(stale).toHaveCount(0);
+    await expect(feet).toHaveCount(0);
+  });
 });
 
 /** A box in page pixels. */

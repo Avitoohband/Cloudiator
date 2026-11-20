@@ -822,6 +822,46 @@ test.describe('equip from My gladiator (live)', () => {
       expect(flow.commands).toHaveLength(1);
     }
   });
+
+  // 1.9.2 review (Important): after a gear command its outcome line stays under the slots; opening another picker hides it, keeping its room
+  // (Task 21), and the picker's close removes it. When a press on the planner closed the picker, the line went before the press ended, the
+  // planner moved up under the pointer, and the click was lost (it landed on their common parent). A window tall enough that the menu does not
+  // scroll shows it (scroll anchoring hides it when the menu is scrolled, as at 1280 x 720 and 1280 x 1200).
+  test('after a gear outcome, the first click on the planner under another open picker still counts (1.9.2 review)', async ({ page, context }, info) => {
+    test.skip(info.project.name === 'mobile', 'A phone\'s sheet covers the planner: it closes with Back before a tap can reach the planner.');
+    await page.setViewportSize({ width: 1280, height: 1800 });
+    const sword = piece('sword:1:common'), spare = piece('sword:1:uncommon'), armor = piece('light-armor:1:common');
+    const flow = await gearFlow(context, state => {
+      state.inventory = [sword, spare, armor];
+      state.currentBuild = { ...state.currentBuild, classId: 'berserker', allocations: { strength: 5, agility: 1, vitality: 2, endurance: 1, precision: 1 },
+        equipment: { weapon: sword.id, offHand: null, head: null, body: armor.id, feet: null } };
+      state.progression = { ...state.progression, level: 12, earnedAttributePoints: 58, unspentAttributePoints: 48 };
+    });
+    await page.goto('/game/');
+    const menu = await openMenuSection(page, 'My gladiator', 'Worn equipment');
+    const worn = wornRegion(menu), weapon = slotButton(menu, 'Weapon'), dialog = picker(menu, 'Weapon');
+    const form = menu.locator('.planning-form'), counter = form.locator('.build-counter');
+    // A Wear: its outcome line stays under the slots.
+    await weapon.click();
+    await pick(dialog, spare).click();
+    await wearButton(dialog).click();
+    const outcome = worn.getByRole('status');
+    await expect(outcome).toHaveText('Sword will be worn from the next slot.');
+    await expect(counter).toHaveText('48 of 58 left');
+    // Another slot's picker hides the outcome (keeping its room); a click on +1 Strength in the planner closes the picker and counts. (A press
+    // as a hand makes it, 120 ms from down to up: the line went in that time. Playwright's own click lets it go only after the click.)
+    await slotButton(menu, 'Body').click();
+    await expect(picker(menu, 'Body')).toBeVisible();
+    await expect(outcome).toBeHidden();
+    const plusOne = form.getByRole('button', { name: 'Add a point to Strength', exact: true });
+    await plusOne.click({ delay: 120 });
+    await expect(picker(menu, 'Body')).toHaveCount(0);
+    await expect(counter).toHaveText('47 of 58 left');
+    await expect(plusOne).toBeFocused();
+    // The old outcome is gone once the press is over, as when the picker closes any other way.
+    await expect(worn.getByText('Sword will be worn from the next slot.')).toHaveCount(0);
+    expect(flow.commands).toHaveLength(1);
+  });
 });
 
 test('the fixture preview opens the picker with stacked duplicates and says gear changes are unavailable', async ({ page }, info) => {

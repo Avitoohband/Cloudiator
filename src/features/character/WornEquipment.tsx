@@ -70,7 +70,10 @@ export function WornEquipment({ owner, gateway, refresh, clock, preview = false,
   clock: DisplayClock;
   /** The fixture preview: the picker opens to compare, and its commands are unavailable. */
   preview?: boolean;
-  /** Whether a picker is open, for the panel to make inert what the picker covers (and hide what a phone's sheet covers). */
+  /**
+   * Whether a picker is open: the panel's section navigation waits meanwhile, and what a phone's sheet covers (the planner, the strip, the bar,
+   * the stale notice) is hidden and inert. On the desktop the panel stays usable (Patch 1.9.2): a press there closes the popover first.
+   */
   onPicking?(open: boolean): void;
   /** The panel's help on the Load heading (Patch 1.9 Task 10): the row's props, the label (a button with its tooltip) and a class for the row. */
   loadHelp?: { row: HintRowProps; label: ReactNode; className: string };
@@ -98,6 +101,12 @@ export function WornEquipment({ owner, gateway, refresh, clock, preview = false,
   const [busy, setBusy] = useState(false), [outcome, setOutcome] = useState<Outcome | null>(null), [retry, setRetry] = useState(false);
   /** The outcome line and Retry are from before the open picker (Task 21): hidden while it is open, gone once it closes. */
   const [stale, setStale] = useState(false);
+  /**
+   * 1.9.2 review: a press outside closed the desktop popover and is not over yet. The stale outcome and Retry keep their room (hidden) until it
+   * is, so nothing under the pointer moves between the press and its release; removed at once, they let the planner slide up under the
+   * pointer and the click was lost (it landed on their common parent).
+   */
+  const [pressing, setPressing] = useState(false);
   const attempt = useRef<GearCommand | null>(null), success = useRef(''), sending = useRef(false), mounted = useRef(false);
   const nowMs = useMinuteNow(clock), clockMode = useClockMode();
   const effective = owner.pendingBuild ? slotTimeText(owner.pendingBuild.effectiveSlotIndex * RULES_V1.clock.slotMs, nowMs, clockMode) : '';
@@ -111,7 +120,7 @@ export function WornEquipment({ owner, gateway, refresh, clock, preview = false,
 
   useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
   useEffect(() => { onPicking?.(open !== null); }, [open, onPicking]);
-  useEffect(() => { if (open === null && stale) { setStale(false); setOutcome(null); setRetry(false); } }, [open, stale]);
+  useEffect(() => { if (open === null && stale && !pressing) { setStale(false); setOutcome(null); setRetry(false); } }, [open, stale, pressing]);
   useEffect(() => () => onPicking?.(false), [onPicking]);
   useLayoutEffect(() => {
     if (!focusTo || open) return;
@@ -160,12 +169,25 @@ export function WornEquipment({ owner, gateway, refresh, clock, preview = false,
   // Patch 1.9.2: the desktop popover closes when a press or the focus lands outside it (and outside the slot row and the Load heading, which
   // are its own: a slot opens, switches or closes it, and Load's help opens beside it). The focus stays where the player put it (the +1 they
   // pressed, the control Tab reached). A phone's sheet covers the panel body; it closes with Back or Escape only, as before.
+  // A press holds the stale outcome in place until its release: a task after the pointerup, so the click it makes has landed first.
   useEffect(() => {
     if (open === null || compact) return;
+    const released = () => {
+      window.removeEventListener('pointerup', released, true);
+      window.removeEventListener('pointercancel', released, true);
+      window.setTimeout(() => { if (mounted.current) setPressing(false); }, 0);
+    };
     const away = (event: Event) => {
       const target = event.target;
       if (target instanceof Node && [frame.current, slotRow.current, heading.current].some(own => own?.contains(target))) return;
+      if (event.type === 'pointerdown') {
+        setPressing(true);
+        window.addEventListener('pointerup', released, true);
+        window.addEventListener('pointercancel', released, true);
+      }
       setOpen(null); setChosen(null); setStop(null); setPeek(null);
+      // Said with the close (one render), so the panel's section navigation is free before this press's click lands on it.
+      onPicking?.(false);
     };
     document.addEventListener('pointerdown', away, true);
     document.addEventListener('focusin', away, true);
@@ -173,7 +195,7 @@ export function WornEquipment({ owner, gateway, refresh, clock, preview = false,
       document.removeEventListener('pointerdown', away, true);
       document.removeEventListener('focusin', away, true);
     };
-  }, [open, compact]);
+  }, [open, compact, onPicking]);
 
   /** Sends a gear command as the Inventory does: an identical retry keeps its operation id; a refusal reloads what it must. */
   async function send(intent: GearCommand, done: string) {
@@ -419,7 +441,8 @@ export function WornEquipment({ owner, gateway, refresh, clock, preview = false,
       })}
     </div>
     {/* The picker is laid over what follows (its place in the order keeps Tab from the slot row into it); the details stay in place under it,
-        and what follows is inert meanwhile, so neither Tab nor a click reaches a control under it. */}
+        and what follows in this section ("At the next slot", the outcome, Retry) is inert meanwhile, so neither Tab nor a click reaches a
+        control under it. Past the section (the planner) a press or the focus closes a desktop popover first (Patch 1.9.2). */}
     {open && renderPicker(open)}
     <div className={styles.details} data-covered={open ? '' : undefined}>
       <EquipmentDetails label="Worn equipment details" item={inspectedItem} detailsRef={detail}

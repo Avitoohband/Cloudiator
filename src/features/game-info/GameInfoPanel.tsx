@@ -14,6 +14,7 @@ import { usePagedList } from '../paging/usePagedList';
 import styles from './game-info.module.css';
 
 const tabs = [{ id: 'wiki', label: 'Wiki' }, { id: 'future', label: 'Future Updates' }] as const;
+const CAMP_LIFE_PLAYLIST_URL = 'https://www.youtube.com/playlist?list=PLZ7qxLlpXTaY';
 /** Patch 1.9: the owner's third tab, shown only when the editor read succeeds (a Game Info editor), with its count of New feedback. */
 const FEEDBACK_TAB = { id: 'feedback', label: 'Feedback' } as const;
 type ShownTab = typeof tabs[number] | typeof FEEDBACK_TAB;
@@ -244,6 +245,9 @@ export function GameInfoPanel({ id, onClose, update, fixture, editorAccount, onD
         </button>;
       })}
     </div>
+    {editTab && editing === null && <a className={styles.playlist} href={CAMP_LIFE_PLAYLIST_URL} target="_blank" rel="noopener noreferrer">
+      Watch Camp Life on YouTube
+    </a>}
     <PagingScope className={styles.paged} bodyClassName={styles.pagedBody}>
     {/* Reading text keeps its scroll (final review M7): in the Wiki's and Future Updates' tab panels PageDown and PageUp scroll the text (`data-reading`);
         they turn the topics from the topic list (`data-page-keys`) and from a bar. */}

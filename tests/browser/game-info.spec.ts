@@ -37,6 +37,43 @@ test('visitors can read Game Info and switch tabs with the keyboard', async ({ p
   await expect(trigger).toBeFocused();
 });
 
+test('both Game Info tabs show the Camp Life playlist link', async ({ page, isMobile }) => {
+  // The anonymous route works in development and in the production export.
+  if (isMobile) await page.setViewportSize({ width: 360, height: 700 });
+  await page.goto('/game/');
+  await cornerChip(page).getByRole('button', { name: 'Game Info', exact: true }).click();
+
+  const panel = page.getByRole('dialog', { name: 'Game Info' });
+  const link = panel.getByRole('link', { name: 'Watch Camp Life on YouTube', exact: true });
+
+  for (const name of ['Wiki', 'Future Updates']) {
+    const tab = panel.getByRole('tab', { name });
+    const content = panel.getByRole('tabpanel', { name });
+    await expect(tab).toBeFocused();
+    await expect(tab).toHaveAttribute('aria-selected', 'true');
+    await expect(link).toHaveCount(1);
+    await expect(link).toBeInViewport({ ratio: 1 });
+    await expect(link).toHaveAttribute('href', 'https://www.youtube.com/playlist?list=PLZ7qxLlpXTaY');
+    await expect(link).toHaveAttribute('target', '_blank');
+    await expect(link).toHaveAttribute('rel', 'noopener noreferrer');
+
+    await page.keyboard.press('Tab');
+    await expect(link).toBeFocused();
+    await expect(link).toHaveCSS('outline-style', 'solid');
+    await expect(link).not.toHaveCSS('outline-width', '0px');
+
+    const [linkBox, contentBox] = await Promise.all([link.boundingBox(), content.boundingBox()]);
+    expect(linkBox!.y + linkBox!.height).toBeLessThanOrEqual(contentBox!.y + 1);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+    expect(await panel.evaluate(element => element.scrollWidth <= element.clientWidth)).toBe(true);
+
+    if (name === 'Wiki') {
+      await page.keyboard.press('Shift+Tab');
+      await page.keyboard.press('ArrowRight');
+    }
+  }
+});
+
 test('signed-in fixture players can open Game Info beside their account controls', async ({ page }) => {
   test.skip(process.env.PLAYWRIGHT_STATIC === 'true', 'The signed-in fixture is only used for this development check.');
   await page.goto('/game/?mode=fixture');

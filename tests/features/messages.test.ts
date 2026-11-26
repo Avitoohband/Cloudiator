@@ -9,6 +9,7 @@ import {
   sentToday, textProblem, unseenAnswers,
 } from '../../src/features/messages/feedback';
 import { nextGameDayMs, waitText } from '../../src/lib/game-day';
+import { PATCH } from '../../src/lib/patch';
 
 // The pure rules behind the messages button and panel (spec "Decisions": badge, unread, tags, dates), and when a list the panel holds no
 // longer agrees with the owner's inbox (the world revision does not carry the list, so the panel reloads it when the inbox says so).
@@ -228,7 +229,7 @@ it('names the browser, the system and phone or desktop, and builds exactly the f
   expect(deviceText(edge, false)).toBe('Edge 131 on Windows (desktop)');
   expect(deviceText('', false)).toBe('A browser (desktop)');
   const details = feedbackDetails({ screen: 'Messages', userAgent: chrome, phone: false, width: 1280, height: 720, sentAtMs: 1_791_592_800_000 });
-  expect(details).toEqual({ patch: '1.9.2', screen: 'Messages', device: 'Chrome 131 on Windows (desktop)', window: '1280 x 720', sentAtMs: 1_791_592_800_000 });
+  expect(details).toEqual({ patch: PATCH, screen: 'Messages', device: 'Chrome 131 on Windows (desktop)', window: '1280 x 720', sentAtMs: 1_791_592_800_000 });
   expect(Object.keys(details)).toEqual(['patch', 'screen', 'device', 'window', 'sentAtMs']);
   const long = feedbackDetails({ screen: 'S'.repeat(200), userAgent: `${'x'.repeat(300)} Chrome/1`, phone: true, width: 360.4, height: 780.6, sentAtMs: 5 });
   for (const key of ['patch', 'screen', 'device', 'window'] as const) expect([...long[key]].length).toBeLessThanOrEqual(80);

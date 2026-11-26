@@ -26,6 +26,12 @@ Project folders under `D:\Avi\Projects\Animation\Cloudiator\`.
 
 **Last video's patch: 1.6.** The 5 Nov film covers all ten 1.6 bullets. Patches 1.7, 1.7.1 and 1.8 are new since.
 
+## 1.9.3 — Camp Life on YouTube (in progress, not yet released)
+
+### Built
+
+- Game Info links to the Camp Life series on YouTube.
+
 ## 1.9.2 — Spending attribute points (2026-11-20)
 
 - On a computer, the build planner works again while a Worn equipment slot’s list is open: +1, +5 and Queue build respond, and a click or Tab outside the list closes it.

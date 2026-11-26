@@ -29,6 +29,9 @@ Project folders under `D:\Avi\Projects\Animation\Cloudiator\`.
 ## 1.9.4 — A welcome for new visitors
 
 - Campaign links open the camp with a welcome designed for phones. Choose Play free in your browser to sign in with Google, or Explore the camp to keep watching. Already signed in? Go straight to camp.
+
+## 1.9.3 — Camp Life on YouTube (2026-11-26)
+
 - Game Info links to the Camp Life series on YouTube.
 
 ## 1.9.2 — Spending attribute points (2026-11-20)

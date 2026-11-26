@@ -14,7 +14,7 @@ Use these links after the 1.9.4 client is live and the campaign placement has Av
 | IndieDB game page | `indiedb-page` | [Open Cloudiator](https://cloudiator-arena.pages.dev/game/p/indiedb-page/) |
 | First Reddit paid creative | `reddit-ad-01` | [Open Cloudiator](https://cloudiator-arena.pages.dev/game/p/reddit-ad-01/) |
 
-Keep the trailing slash. Add a code to the [client registry](../../src/features/promo/source.ts) and deploy its export before using the new link. Use a different code per linkable creative. Never recycle a code for a different placement, put user data in a code, or make up a `?ref=` link. Share the registry with the 2.0 signup implementation before accepting its attribution.
+Keep the trailing slash. Add each new code to the [client registry](../../src/features/promo/source.ts) and add its static page under `src/app/game/p/<code>/` before deploying the export. Use a different code per linkable creative. Never recycle a code for a different placement, put user data in a code, or make up a `?ref=` link. Share the registry with the 2.0 signup implementation before accepting its attribution.
 
 **Decided 2026-11-26.** The trailer and channel profile have separate codes. Shorts that point to a shared trailer credit their game arrivals to the trailer link. Give a Short its own linked destination and game URL if a campaign specifically needs to measure that Short.
 

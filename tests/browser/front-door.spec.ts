@@ -12,6 +12,7 @@ const campaignPaths = [
 ];
 const PROFILE = '/game/p/yt-profile/';
 const TRAILER = '/game/p/yt-trailer/';
+const missingCampaignPaths = ['/game/p/yt%2Fprofile/', '/game/p/not-an-issued-placement/'];
 const TAB_SOURCE = 'cloudiator.promo.source.v1';
 const SIGNUP_SOURCE = 'cloudiator.signup-source.v1';
 
@@ -49,8 +50,9 @@ test.describe('the exported campaign pages', () => {
       expect(response.headers()['referrer-policy'], path).toBe('strict-origin-when-cross-origin');
       expect(response.headers()['x-content-type-options'], path).toBe('nosniff');
     }
-    const unknown = '/game/p/not-an-issued-placement/';
-    expect((await request.get(unknown, { maxRedirects: 0 })).status()).toBe(404);
+    for (const path of missingCampaignPaths) {
+      expect((await request.get(path, { maxRedirects: 0 })).status(), path).toBe(404);
+    }
   });
 
   test('loads the exported camp and Camp Life link with the welcome suppressed without Auth', async ({ page, request }) => {
@@ -220,12 +222,13 @@ test.describe('the live campaign welcome', () => {
   test('never opens the welcome or captures a source for a noncanonical pathname', async ({ page, context }) => {
     await routeLiveReads(context, { world: emptyWorld() });
     const invalidPaths = [
-      '/game/p/YT-profile/', '/game/p/%79t-profile/', '/game/p/yt%2Fprofile/', '/game/p/yt-profile/extra/',
-      `/game/p/${'a'.repeat(41)}/`, '/game/p/not-an-issued-placement/',
+      '/game/p/YT-profile/', '/game/p/%79t-profile/', '/game/p/yt-profile/extra/',
+      `/game/p/${'a'.repeat(41)}/`, ...missingCampaignPaths,
     ];
     for (const path of invalidPaths) {
       const response = await page.goto(path);
-      expect([200, 400, 404], path).toContain(response?.status());
+      if (missingCampaignPaths.includes(path)) expect(response?.status(), path).toBe(404);
+      else expect([200, 400, 404], path).toContain(response?.status());
       if (response?.ok()) await expect(joinButton(page)).toBeVisible();
       await expect(welcome(page)).toHaveCount(0);
       expect(await sourceRecords(page)).toEqual({ tab: null, signup: null });

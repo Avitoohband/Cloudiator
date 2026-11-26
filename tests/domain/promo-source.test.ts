@@ -1,3 +1,4 @@
+import { existsSync, readdirSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { PROMO_SOURCES, promoSourceForPath, rememberPromoSource, type PromoSource } from '@/features/promo/source';
 
@@ -24,6 +25,13 @@ function expectSources(storage: { session: ReturnType<typeof memoryStorage>; loc
 }
 
 describe('campaign paths', () => {
+  it('ships one concrete route per campaign code without a dynamic route matching unknown codes', () => {
+    const routes = readdirSync('src/app/game/p', { withFileTypes: true })
+      .filter(entry => entry.isDirectory() && existsSync(`src/app/game/p/${entry.name}/page.tsx`))
+      .map(entry => entry.name);
+    expect(routes.sort()).toEqual([...PROMO_SOURCES].sort());
+  });
+
   it('issues exactly the nine approved codes and resolves their canonical paths', () => {
     expect([...PROMO_SOURCES].sort()).toEqual([...APPROVED].sort());
     for (const code of APPROVED) expect(promoSourceForPath(`/game/p/${code}/`)).toBe(code);

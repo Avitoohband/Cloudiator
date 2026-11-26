@@ -9,6 +9,7 @@
   max-width: calc(100% - 84px);
   max-height: calc(100% - 90px);
   overflow: auto;
+  scroll-padding-block: 4px;
   padding: 16px;
   border: 1px solid #927247;
   border-radius: 14px;

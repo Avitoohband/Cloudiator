@@ -26,7 +26,7 @@ Project folders under `D:\Avi\Projects\Animation\Cloudiator\`.
 
 **Last video's patch: 1.6.** The 5 Nov film covers all ten 1.6 bullets. Patches 1.7, 1.7.1 and 1.8 are new since.
 
-## 1.9.3 — Camp Life on YouTube (in progress, not yet released)
+## 1.9.3 — Camp Life on YouTube (2026-11-26)
 
 ### Built
 

@@ -8,8 +8,11 @@ export type SessionState = {
   status: 'loading' | 'unavailable' | 'signed-out' | 'signed-in';
   userId: string | null;
   expiresAtMs: number | null;
+  /** The visitor shell can still open after a failed Auth lookup. Campaign capture requires a confirmed result. */
+  confirmedSignedOut?: false;
 };
 const signedOut: SessionState = { status: 'signed-out', userId: null, expiresAtMs: null };
+const uncertainSession: SessionState = { ...signedOut, confirmedSignedOut: false };
 function view(session: Session | null): SessionState {
   const expiresAtMs = (session?.expires_at ?? 0) * 1000;
   // This is presentation state only. Every backend command independently verifies identity.
@@ -23,14 +26,17 @@ export function useSession(): SessionState {
     if (!client) { setState({ status: 'unavailable', userId: null, expiresAtMs: null }); return; }
     let active = true;
     let authRevision = 0;
-    const { data: { subscription } } = client.auth.onAuthStateChange((_event, session) => {
+    const { data: { subscription } } = client.auth.onAuthStateChange((event, session) => {
+      // Auth emits INITIAL_SESSION with null for both an empty session and some lookup failures.
+      // Let getSession distinguish those cases before confirming an anonymous visit.
+      if (event === 'INITIAL_SESSION' && !session) return;
       authRevision++;
       if (active) setState(view(session));
     });
     const initialRevision = authRevision;
     void client.auth.getSession().then(({ data, error }) => {
-      if (active && authRevision === initialRevision) setState(error ? signedOut : view(data.session));
-    }).catch(() => { if (active) setState(signedOut); });
+      if (active && authRevision === initialRevision) setState(error ? uncertainSession : view(data.session));
+    }).catch(() => { if (active && authRevision === initialRevision) setState(uncertainSession); });
     return () => { active = false; subscription.unsubscribe(); };
   }, []);
   useEffect(() => {

@@ -8,7 +8,7 @@
 // Google sign-in: the "G" mark and "Sign in with Google to join" ("Sign in to join" on touch). Signed in without a
 // gladiator, it offers "Create your gladiator" beside the account button (Task 13.6). Names render as React text. A player also has the
 // messages button left of the pill (Task 6): the chip shows one popover at a time, the account menu or the messages panel.
-import { useEffect, useId, useRef, useState } from 'react';
+import { useEffect, useId, useRef, useState, type Ref } from 'react';
 import type { OwnerState } from '@contracts/reads';
 import { RULES_V1 } from '@domain/rules-v1';
 import { RULES_V2 } from '@domain/rules-v2';
@@ -72,7 +72,8 @@ function Countdown({ seconds, testId = 'chip-countdown' }: { seconds: number; te
   </span>;
 }
 
-export function CornerChip({ viewer, session, owner, fixture, previewAs, clock, messaging, messagesRequest, latestPatch = null, onChangeLook, onOpenMenu, onCreate, titles, rules = RULES_V2, location = null }: {
+export function CornerChip({ viewer, session, owner, fixture, previewAs, clock, messaging, messagesRequest, latestPatch = null, onChangeLook, onOpenMenu, onCreate, titles, rules = RULES_V2, location = null,
+  hideVisitorJoin = false, visitorJoinRef, onOpenGameInfo }: {
   viewer: Viewer;
   session: SessionState;
   owner: OwnerState | null;
@@ -88,6 +89,9 @@ export function CornerChip({ viewer, session, owner, fixture, previewAs, clock, 
   /** Opens the change-look dialog from the look note's Change look button (the messages panel closes first; the shell owns the dialog). */
   onChangeLook(): void;
   onOpenMenu(id: MenuId): void;
+  hideVisitorJoin?: boolean;
+  visitorJoinRef?: Ref<HTMLButtonElement>;
+  onOpenGameInfo?(): void;
   /** Opens the "Create your gladiator" dialog (signed in without a gladiator). */
   onCreate(): void;
   /** The owner's titles and the Wear and "Choose a title" actions for the Notifications tab (patch 1.7; the shell's). */
@@ -178,7 +182,10 @@ export function CornerChip({ viewer, session, owner, fixture, previewAs, clock, 
     aria-expanded={popover === 'game-info'} aria-controls={popover === 'game-info' ? infoId : undefined} aria-haspopup="dialog"
     aria-label={infoBadge ? `Game Info, ${newFeedback.count} new feedback` : undefined}
     tabIndex={open ? -1 : undefined}
-    onClick={() => { if (popover === 'game-info') closeInfo(); else setPopover('game-info'); }}>
+    onClick={() => {
+      if (popover === 'game-info') closeInfo();
+      else { onOpenGameInfo?.(); setPopover('game-info'); }
+    }}>
     Game Info{infoBadge && <span className={styles.infoCount} data-testid="info-feedback-badge" aria-hidden="true">{infoBadge}</span>}
   </button>;
   const infoPanel = popover === 'game-info' && <GameInfoPanel key={editorAccount ?? 'reader'} id={infoId} onClose={closeInfo} fixture={fixture} editorAccount={editorAccount}
@@ -192,12 +199,12 @@ export function CornerChip({ viewer, session, owner, fixture, previewAs, clock, 
     const live = !fixture && session.status === 'signed-out';
     return <div ref={chip} className={styles.chip} data-testid="corner-chip" data-popover={popover ?? undefined}>
       <div className={styles.chipRow}>{note ? <p className={styles.chipNote} role="status">{note}</p>
-        : <button type="button" className={styles.join} disabled={google.busy} onClick={() => (live ? void google.begin() : onOpenMenu('gladiator'))}>
+        : !hideVisitorJoin && <button ref={visitorJoinRef} type="button" className={styles.join} disabled={google.busy} onClick={() => (live ? void google.begin() : onOpenMenu('gladiator'))}>
           <GoogleMark />
           {google.busy ? <span>Opening Google…</span>
             : <><span className={styles.wide}>Sign in with Google to join</span><span className={styles.narrow}>Sign in to join</span></>}
         </button>}{infoToggle}</div>
-      {google.failed && <p className={styles.chipAlert} role="alert">{SIGN_IN_NOT_STARTED}</p>}
+      {google.failed && !hideVisitorJoin && <p className={styles.chipAlert} role="alert">{SIGN_IN_NOT_STARTED}</p>}
       {infoPanel}
     </div>;
   }

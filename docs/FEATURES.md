@@ -8,6 +8,10 @@ screen, and which video already showed it. Updated 2026-11-01: patch 1.5 is live
 
 The last video, `messages-look-and-beds-update` (2026-10-29), covered patch 1.3. Since then:
 
+**In progress: 1.9.4**
+
+- 1.9.4 · Open a campaign link on a phone as a visitor. Show the welcome, choose Explore the camp, then show how to sign in from the camp. The Camp Life link is in Game Info.
+
 **Out now**
 
 - 1.3.1 · Each attribute has +1 and +5 buttons at creation and in a build, on their own line on a phone.

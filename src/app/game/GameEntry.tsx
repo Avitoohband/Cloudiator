@@ -1,0 +1,39 @@
+'use client';
+
+import { Suspense, useMemo } from 'react';
+import { useSearchParams } from 'next/navigation';
+import { CampShell, type SignInResult } from '../../features/shell/CampShell';
+import { sceneOf } from '../../features/shell/scene-url';
+import type { PromoSource } from '../../features/promo/source';
+
+/**
+ * Reads the preview options from the URL: `?mode=fixture` (fixture-enabled builds only) and, with it, `?as=visitor` or
+ * `?as=resting` (the player's gladiator resting at home, Task 23.9), `?bag=demo` (18 extra items in Aster's bag), and
+ * `?info=draft` (Game Info shows the Wiki and Future Updates drafts in docs/game-info; read by GameInfoPanel);
+ * `?signin=cancelled|failed`, a Google sign-in that returned without completing (plan Decision 6); and
+ * `?view=replay|expedition&activity=…`, a scene over the camp (plan Decision 4), which the shell opens and closes with
+ * `history.pushState` and Back (the App Router keeps `useSearchParams` in step with them); and `?perf=1`, the opt-in
+ * frame-rate overlay (plan Decision 2, Task 23.4).
+ */
+function GameRoute({ source }: { source: PromoSource | null }) {
+  const search = useSearchParams();
+  const requested = search.get('mode') === 'fixture';
+  const fixture = requested && process.env.NEXT_PUBLIC_FIXTURE_ENABLED === 'true';
+  // `?as=visitor` previews the visitor view, and `?as=resting` a player whose gladiator rests at home, in fixture mode only.
+  const previewAs = fixture && search.get('as') === 'visitor' ? 'visitor' : undefined;
+  const previewResting = fixture && search.get('as') === 'resting';
+  const day = search.get('day');
+  const previewAway = fixture && search.get('as') === 'away' ? day === 'small' || day === 'empty' ? day : 'big' : undefined;
+  const previewBag = fixture && search.get('bag') === 'demo' ? 'demo' : undefined;
+  const signin = search.get('signin');
+  const signInResult: SignInResult | null = signin === 'cancelled' || signin === 'failed' ? signin : null;
+  const scene = useMemo(() => sceneOf(search), [search]);
+  // `?perf=1` shows the frame-rate overlay (plan Decision 2), in every build; nothing samples frames without it.
+  const perf = search.get('perf') === '1';
+  return <CampShell fixture={fixture} previewAs={previewAs} previewResting={previewResting} previewAway={previewAway} previewBag={previewBag} fixtureRefused={requested && !fixture} signInResult={signInResult}
+    scene={scene} perf={perf} promoSource={source} />;
+}
+
+export function GameEntry({ source = null }: { source?: PromoSource | null }) {
+  return <Suspense fallback={<main id="main" className="loading" role="status" tabIndex={-1}>Opening the camp…</main>}><GameRoute source={source} /></Suspense>;
+}

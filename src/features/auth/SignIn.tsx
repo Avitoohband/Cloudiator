@@ -3,7 +3,7 @@
 // Google sign-in, the existing Task 5 flow (`startGoogleSignIn` leaves for Google and returns through /auth/callback/).
 // Task 13.6: the approved mockup's "G" mark, the hook the corner chip and My gladiator start it with, and a visitor's
 // prompt in My gladiator. Watching needs no account; joining needs Google sign-in.
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { startGoogleSignIn } from '../../lib/api/client';
 import styles from './SignIn.module.css';
 
@@ -11,6 +11,9 @@ import styles from './SignIn.module.css';
 export function GoogleMark() {
   return <span className={styles.mark} aria-hidden="true" data-testid="google-mark">G</span>;
 }
+
+// Every sign-in surface uses the same PKCE verifier. Share an attempt even if opening a menu unmounts its first button.
+let openingGoogle: Promise<void> | null = null;
 
 /**
  * Starts Google sign-in: `busy` while the browser leaves for Google, `failed` when it could not be started. A page the
@@ -20,14 +23,25 @@ export function GoogleMark() {
 export function useGoogleSignIn() {
   const [busy, setBusy] = useState(false);
   const [failed, setFailed] = useState(false);
+  const starting = useRef(false);
   useEffect(() => {
-    const restored = (event: PageTransitionEvent) => { if (event.persisted) setBusy(false); };
+    const restored = (event: PageTransitionEvent) => {
+      if (!event.persisted) return;
+      starting.current = false;
+      openingGoogle = null;
+      setBusy(false);
+    };
     window.addEventListener('pageshow', restored);
     return () => window.removeEventListener('pageshow', restored);
   }, []);
   async function begin() {
+    if (starting.current) return;
+    starting.current = true;
     setBusy(true); setFailed(false);
-    try { await startGoogleSignIn(); } catch { setFailed(true); setBusy(false); }
+    try {
+      openingGoogle ??= startGoogleSignIn().catch(error => { openingGoogle = null; throw error; });
+      await openingGoogle;
+    } catch { starting.current = false; setFailed(true); setBusy(false); }
   }
   return { busy, failed, begin };
 }

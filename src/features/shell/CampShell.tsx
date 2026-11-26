@@ -94,6 +94,9 @@ import type { Rules } from '@domain/types';
 import { createSceneBridge, type ArenaFightSummary } from '../../game/bridge';
 import { isClick } from '../../game/camera';
 import { CornerChip } from './CornerChip';
+import { PromoWelcome } from '../promo/PromoWelcome';
+import { usePromoWelcome } from '../promo/usePromoWelcome';
+import type { PromoSource } from '../promo/source';
 import { MenuRail } from './MenuRail';
 import { SettingsPanel } from './SettingsPanel';
 import type { FeedbackActions } from '../messages/feedback';
@@ -240,7 +243,7 @@ function ResultsMenu({ fixture, samples, previewFailed, reads, viewerId, clock, 
   </>;
 }
 
-export function CampShell({ fixture, previewAs, previewResting = false, previewAway, previewBag, fixtureRefused = false, signInResult = null, scene = null, perf = false }: {
+export function CampShell({ fixture, previewAs, previewResting = false, previewAway, previewBag, fixtureRefused = false, signInResult = null, scene = null, perf = false, promoSource = null }: {
   fixture: boolean;
   previewAs?: 'visitor' | 'player';
   /** `?as=resting` (fixture mode only): the player's gladiator rests at home (Task 23.9). */
@@ -256,7 +259,9 @@ export function CampShell({ fixture, previewAs, previewResting = false, previewA
   scene?: SceneAddress | null;
   /** `?perf=1`: the opt-in frame-rate overlay (plan Decision 2, Task 23.4); never shown without it. */
   perf?: boolean;
+  promoSource?: PromoSource | null;
 }) {
+  const [initialScene] = useState(scene);
   const [bridge] = useState(createSceneBridge);
   const [gateway] = useState(createLiveGateway);
   const [previewError, setPreviewError] = useState(false);
@@ -708,6 +713,19 @@ export function CampShell({ fixture, previewAs, previewResting = false, previewA
 
   const press = useRef<{ x: number; y: number } | null>(null);
   const sceneUnavailable = game.sceneStatus === 'unavailable';
+  const openedSurface = open !== null || card !== null || (scene !== null && scene !== initialScene);
+  const promo = usePromoWelcome(fixture || fixtureRefused ? null : promoSource, game.session,
+    openedSurface || scene !== null || game.sceneStatus !== 'ready' || modal || patchNotice !== null || signInNotice !== null,
+    openedSurface);
+  const visitorJoin = useRef<HTMLButtonElement>(null);
+  const restoreVisitorFocus = useRef(false);
+  const dismissWelcome = () => { restoreVisitorFocus.current = true; promo.dismiss(); };
+  useEffect(() => {
+    if (promo.visible || !restoreVisitorFocus.current) return;
+    restoreVisitorFocus.current = false;
+    const target = visitorJoin.current ?? shellRef.current?.querySelector<HTMLElement>('[data-camp-view]');
+    target?.focus({ preventScroll: true });
+  }, [promo.visible]);
   // `?perf=1` measures per phase: a new one when the camp gets ready and at each scene open or close (Task 24.1b).
   const perfPhase = perfPhaseOf(game.sceneStatus, scene);
   const ownerId = owner?.gladiatorId ?? null;
@@ -715,7 +733,7 @@ export function CampShell({ fixture, previewAs, previewResting = false, previewA
   // not while a scene covers the camp. Find is the Gladiators list's Find: the camp view's centre, the menu closed, the camp keyboard.
   const arrivals = useArrivals(world, ownerId);
   const place = useBannerPlace(shellRef, game.viewer, open, prefs.place);
-  const arrival = arrivals.banner !== null && scene === null && !practising && !summaryOpen && game.viewer !== 'loading' && !(place.coversPanel && open !== null) ? arrivals.banner : null;
+  const arrival = arrivals.banner !== null && scene === null && !promo.visible && !practising && !summaryOpen && game.viewer !== 'loading' && !(place.coversPanel && open !== null) ? arrivals.banner : null;
   const { dismiss: dismissArrival } = arrivals;
   const arrivalSlot = (
     <ArrivalSlot stacked={place.stacked}>
@@ -776,7 +794,9 @@ export function CampShell({ fixture, previewAs, previewResting = false, previewA
       <MenuRail menus={menus} state={{ revealed: railShown, open }} place={prefs.place} send={send} onToggle={id => send({ toggle: id })}
         zoom={sceneUnavailable ? null : direction => bridge.emit('camera-zoom', { direction })} />
       <CornerChip viewer={viewer} session={game.session} owner={owner} fixture={fixture} previewAs={previewAs} clock={clock} messaging={messaging} messagesRequest={currentMessagesRequest}
-        latestPatch={game.latestPatch} onChangeLook={openLook} onOpenMenu={show} onCreate={joining.offer} titles={noticeTitles} rules={game.rules} location={ownLocation} />
+        latestPatch={game.latestPatch} onChangeLook={openLook} onOpenMenu={show} onCreate={joining.offer} titles={noticeTitles} rules={game.rules} location={ownLocation}
+        hideVisitorJoin={promo.visible} visitorJoinRef={visitorJoin} onOpenGameInfo={game.session.status === 'signed-in' ? undefined : promo.dismiss} />
+      {promo.visible && <PromoWelcome onDismiss={dismissWelcome} />}
       {fixture && <p className={styles.pill} role="status">Fixture mode — progress is not saved online</p>}
       {fixtureRefused && <p className={styles.pill} role="status">Fixture preview is unavailable in this build.</p>}
       <div className={styles.notices} data-notices="" data-stacked={place.stacked ? 'true' : undefined}>

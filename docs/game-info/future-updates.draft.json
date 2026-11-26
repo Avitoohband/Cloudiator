@@ -1,6 +1,12 @@
 {
   "entries": [
     {
+      "id": "promotion-front-door",
+      "title": "Promotion front door and visit counts",
+      "body": "Open a campaign link to see the live camp, with a welcome designed for phones. Choose Play free in your browser to sign in with Google, or Explore the camp to keep watching. Already signed in? Go straight to camp.",
+      "patch": "1.9.4"
+    },
+    {
       "id": "parties",
       "title": "Choose your dungeon party",
       "body": "Invite the teammates you want for a specific dungeon run. Eligible players who accept can enter together. Automatic grouping will still be available."
